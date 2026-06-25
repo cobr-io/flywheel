@@ -1,0 +1,20 @@
+FROM debian:stable-slim
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        git nginx fcgiwrap spawn-fcgi bash && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY scripts/git-server/entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
+
+# Bare repos persist on a PVC mounted here. The entrypoint syncs / creates
+# bare repos at startup for every worktree under WORKSPACES_DIR, but it never
+# overwrites an existing bare repo.
+VOLUME ["/srv/git"]
+
+ENV WORKSPACES_DIR=/workspaces \
+    GIT_HTTP_RECEIVE_PACK=1
+
+CMD ["/usr/local/bin/entrypoint.sh"]

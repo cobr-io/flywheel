@@ -1,0 +1,26 @@
+# Without this policy, Flux's `allow-scraping` NetworkPolicy in flux-system
+# is the only ingress rule selecting source-controller, and it only opens
+# port 8080 (metrics). Build Jobs in flywheel-system fetch the artifact
+# tarball from source-controller on container port 9090 (service port 80)
+# — that traffic gets denied by the implicit deny-all that any selecting
+# policy imposes. This policy opens 9090 specifically to the
+# flywheel-system namespace.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: allow-flywheel-source-fetch
+  namespace: flux-system
+spec:
+  podSelector:
+    matchLabels:
+      app: source-controller
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: flywheel-system
+      ports:
+        - port: 9090
+          protocol: TCP

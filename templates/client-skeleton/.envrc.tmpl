@@ -1,0 +1,10 @@
+# Point sops/age at the host-only private key flywheel generated for this
+# client so `sops -d` Just Works in this repo. The path is deterministic
+# (~/.config/flywheel/<client>/age.key, 0600, never committed) — a path, not
+# a secret, so this file is safe to commit. Requires direnv
+# (https://direnv.net); run `direnv allow` once.
+export SOPS_AGE_KEY_FILE="$HOME/.config/flywheel/{{ .ClientName }}/age.key"
+
+# Per-developer overrides (gitignored). Create .envrc.local to point at a
+# different key or add local env without touching this committed file.
+[ -f .envrc.local ] && source_env .envrc.local

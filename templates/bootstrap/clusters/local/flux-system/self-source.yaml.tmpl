@@ -1,0 +1,12 @@
+# The client's own GitOps repo, served by the in-cluster git-server.
+# git-auto-sync patches spec.ref.branch on branch switches; Flux follows.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: {{ .FluxIntervalLocal }}
+  url: http://git-server.flywheel-system.svc.cluster.local:8080/{{ .RepoBaseName }}.git
+  ref:
+    branch: {{ .Branch }}

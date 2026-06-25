@@ -1,0 +1,21 @@
+# Wires k3d's bundled Traefik to the `local-cert` TLS Secret that
+# `flywheel up` step 13 materialises from `mkcert -install` + a `*.<domain>`
+# wildcard cert. The Secret lives in kube-system because that's where
+# k3d's Traefik runs.
+apiVersion: traefik.io/v1alpha1
+kind: TLSStore
+metadata:
+  name: default
+  namespace: kube-system
+spec:
+  defaultCertificate:
+    secretName: local-cert
+---
+apiVersion: traefik.io/v1alpha1
+kind: TLSOption
+metadata:
+  name: default
+  namespace: kube-system
+spec:
+  minVersion: VersionTLS12
+  sniStrict: false

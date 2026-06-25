@@ -1,0 +1,35 @@
+# Reconciles the client's own per-app builder folders. Sources from
+# the client repo, not the Flywheel mirror.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: client-builders
+  namespace: flux-system
+spec:
+  interval: {{ .FluxIntervalLocal }}
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./builders/overlays/local
+  dependsOn:
+    - name: flywheel-dev-loop
+  # Decrypt SOPS-encrypted secrets (*.enc.yaml) with the in-cluster sops-age
+  # key, so client repos can ship encrypted secrets — mirrors flywheel-infra.
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  # Rewrite each per-app git-auto-sync sidecar's canonical ghcr.io ref to the
+  # ref `flywheel up` mirrored into the local registry — a dogfood
+  # `:dogfood-<sha>` build or the released `:<version>` default. The committed
+  # builders/base/<app>/git-auto-sync.yaml pins only the stable ghcr.io name
+  # (add app writes imagepin.DefaultRef), so this rewrite — rendered fresh on
+  # every `up` — keeps the sidecar pointing at the current image without the
+  # committed manifest ever pinning a digest that goes stale on the next
+  # dogfood rebuild. Mirrors flywheel-dev-loop's spec.images for git-server /
+  # image-builder-controller.
+  images:
+    - name: ghcr.io/cobr-io/git-auto-sync
+      newName: {{ .GitAutoSyncImageName }}
+      newTag: {{ .GitAutoSyncImageTag }}

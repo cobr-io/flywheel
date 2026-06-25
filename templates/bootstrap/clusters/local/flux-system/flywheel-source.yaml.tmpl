@@ -1,0 +1,17 @@
+# Flywheel mirror — `flywheel up` step 11c pushes the cached Flywheel
+# clone into the in-cluster git-server as `flywheel.git` at the pinned
+# commit SHA. Flux reconciles from there, not from github.com — so the
+# dev loop is offline after first bootstrap.
+#
+# The commit field is rewritten by `flywheel up` on every version bump;
+# the tag in flywheel.yaml is the human-readable label.
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: flywheel
+  namespace: flux-system
+spec:
+  interval: {{ .FluxIntervalLocal }}
+  url: http://git-server.flywheel-system.svc.cluster.local:8080/flywheel.git
+  ref:
+    commit: {{ .FlywheelSHA }}

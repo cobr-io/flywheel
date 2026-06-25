@@ -1,0 +1,18 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Flux entrypoint for the local cluster. Applied by `flywheel up` step
+# 11d after the bootstrap dance brings up git-server. Order in the list
+# below is informational; Flux reconciles based on dependsOn relations.
+resources:
+  - ./namespaces.yaml
+  - ./flywheel-source.yaml
+  - ./self-source.yaml
+  - ./flywheel-config.yaml
+  - ./builders-kustomization.yaml
+  - ./client-builders-kustomization.yaml
+  - ./infra-kustomization.yaml
+  - ./apps-kustomization.yaml
+  - ./self-git-auto-sync.yaml
+# traefik-tls.yaml lives in Flywheel's manifests/infra (reconciled by the
+# flywheel-infra Kustomization), not in this directory — keeps client repos
+# free of TLSStore/TLSOption boilerplate.

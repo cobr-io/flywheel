@@ -1,0 +1,38 @@
+---
+# Single ImageUpdateAutomation for the client repo. Each per-app builder
+# folder adds its own ImageRepository + ImagePolicy; the IUA scans the
+# policy set and commits bumps to the bare repo over HTTP (the in-cluster
+# git-server accepts anonymous pushes for cluster-internal clients).
+#
+# git-auto-sync then pulls those bumps back into the developer's worktree
+# on its next fetch+rebase cycle.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageUpdateAutomation
+metadata:
+  name: flywheel-self
+  namespace: flux-system
+spec:
+  interval: 5s
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+    namespace: flux-system
+  git:
+    # No checkout.ref / push.branch: defaults to the GitRepository's current
+    # branch. git-auto-sync patches GitRepository.spec.ref.branch to follow
+    # the developer's worktree, so IAC commits bumps to whichever branch
+    # is currently checked out — including feature branches. Otherwise
+    # bumps would always land on main and feature-branch deploys would
+    # never roll.
+    commit:
+      author:
+        name: image-automation
+        email: image-automation@dev.local
+      messageTemplate: |
+        chore: bump images
+        {{ range .Changed.Changes -}}
+        - {{ .OldValue }} -> {{ .NewValue }}
+        {{ end -}}
+  update:
+    strategy: Setters
+    path: ./

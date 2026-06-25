@@ -1,0 +1,46 @@
+---
+# Local commit hooks for this Flywheel-managed GitOps repo: yamllint +
+# gitleaks + a SOPS-shape guard. Scaffolded by `flywheel init`.
+#
+# Activate once per clone:   pre-commit install
+# Requires `pre-commit` and (for the SOPS guard) mikefarah `yq` on PATH —
+# `flywheel doctor` checks for both.
+
+repos:
+  - repo: https://github.com/adrienverge/yamllint
+    rev: v1.38.0
+    hooks:
+      - id: yamllint
+        args: ["-c", ".yamllint"]
+
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.1
+    hooks:
+      - id: gitleaks
+
+  - repo: local
+    hooks:
+      - id: sops-shape
+        name: SOPS shape guard
+        description: |
+          Enforces that every *.enc.yaml file is SOPS-encrypted, and that no
+          plaintext kind:Secret exists outside *.enc.* files.
+        # `language: system` (not `script`) so pre-commit PATH-resolves
+        # `bash` rather than looking for a repo-relative executable — the
+        # rendered script isn't marked executable (the scaffolder writes
+        # 0644), so invoking it via `bash` avoids depending on the +x bit.
+        entry: bash scripts/ci/check-sops-shape.sh
+        language: system
+        types: [yaml]
+        pass_filenames: true
+
+      - id: local-only-guard
+        name: local-only app guard
+        description: |
+          Blocks committing on the integration branch when any app builds from
+          a worktree the workspace block flags local_only — its source exists
+          only on this machine. Warns on feature branches.
+        entry: bash scripts/ci/check-local-only.sh
+        language: system
+        pass_filenames: false
+        always_run: true

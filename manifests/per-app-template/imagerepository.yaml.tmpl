@@ -1,0 +1,11 @@
+# One ImageRepository per image (i.e. per `builds[]` entry in
+# build-config). For multi-image monorepos, duplicate this block.
+apiVersion: image.toolkit.fluxcd.io/v1
+kind: ImageRepository
+metadata:
+  name: {{ .AppName }}
+  namespace: flux-system
+spec:
+  image: {{ .RegistryURL }}/{{ .ClientName }}/{{ .Image }}
+  interval: {{ .FluxIntervalLocal }}
+  insecure: true

@@ -1,0 +1,10 @@
+dist/
+/flywheel
+*.test
+*.out
+coverage.txt
+.idea/
+.vscode/
+.DS_Store
+.claude/*.local.json
+.claude/scheduled_tasks.lock

@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Run the k3d-e2e suite locally — the same flow as the `k3d-e2e` job in
+# .github/workflows/test.yml: build the three runtime images, `flywheel init` +
+# `up` into a throwaway cluster, run scenarios 1 + 5 + update, then `down`.
+#
+# Requires a `flywheel` binary on PATH (run `make build`, or use `make e2e`),
+# plus k3d, docker, and mkcert. The client repo lives under a host path the
+# Docker VM bind-mounts (default ~/.flywheel-e2e; override with E2E_ROOT). Uses a
+# distinct client name (default `acme`) so it never collides with your dogfood
+# cluster.
+set -euo pipefail
+
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+E2E_ROOT="${E2E_ROOT:-$HOME/.flywheel-e2e}"
+CLIENT_NAME="${CLIENT_NAME:-acme}"
+TAG="${E2E_IMAGE_TAG:-ci}"
+CLIENT_REPO="$E2E_ROOT/$CLIENT_NAME"
+
+command -v flywheel >/dev/null || { echo "flywheel not on PATH — run 'make build' first." >&2; exit 1; }
+
+echo "==> [1/4] building runtime images (flywheel-dev/*:$TAG)"
+for img in git-server git-auto-sync image-builder-controller; do
+	docker build -q -t "flywheel-dev/$img:$TAG" -f "$REPO_ROOT/Dockerfile.$img" "$REPO_ROOT" >/dev/null
+done
+
+echo "==> [2/4] fresh client repo at $CLIENT_REPO (cluster ${CLIENT_NAME}-local)"
+k3d cluster delete "${CLIENT_NAME}-local" >/dev/null 2>&1 || true # clean any leftover
+rm -rf "$CLIENT_REPO"
+mkdir -p "$CLIENT_REPO"
+cleanup() {
+	echo "==> teardown: flywheel down"
+	(cd "$CLIENT_REPO" 2>/dev/null && flywheel down --yes) >/dev/null 2>&1 || true
+}
+trap cleanup EXIT
+
+(
+	cd "$CLIENT_REPO"
+	flywheel init --org=cobr-io
+	cat >>flywheel.yaml.local <<EOF
+flywheel:
+  images:
+    git-server: flywheel-dev/git-server:$TAG
+    git-auto-sync: flywheel-dev/git-auto-sync:$TAG
+    image-builder-controller: flywheel-dev/image-builder-controller:$TAG
+EOF
+	echo "==> [3/4] flywheel up"
+	flywheel up
+)
+
+echo "==> [4/4] scenarios 1 + 5"
+export KCTX="k3d-${CLIENT_NAME}-local"
+export CLIENT_REPO
+export WORKSPACES_ROOT="$E2E_ROOT"
+export REGISTRY="${CLIENT_NAME}-local-registry"
+export REGISTRY_PORT=0 # only a presence-guard in lib.sh; the registry is used by name
+export CLIENT_NAME
+bash "$REPO_ROOT/testdata/scenarios/scenario-1-baseline.sh"
+bash "$REPO_ROOT/testdata/scenarios/scenario-5-orphan-job-reaper.sh"
+bash "$REPO_ROOT/testdata/scenarios/scenario-update-converge.sh"
+
+echo "==> k3d-e2e PASSED"

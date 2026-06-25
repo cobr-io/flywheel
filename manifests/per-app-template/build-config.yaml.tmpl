@@ -1,0 +1,30 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .AppName }}-build-config
+  # Co-located with its GitRepository in flywheel-system (builder infra);
+  # image-builder-controller reads it from BUILDER_NAMESPACE.
+  namespace: flywheel-system
+data:
+  # image-builder-controller reads this on every observed GitRepository
+  # revision and creates one build Job per `builds[]` entry. For
+  # monorepos, add multiple entries. For single-image repos, one is enough.
+  builds.yaml: |
+    builds:
+      - image: {{ .Image }}
+        context: "{{ .Context }}"
+        dockerfile: "{{ .Dockerfile }}"
+        {{- if .Target }}
+        # Multi-stage build target. Without it, buildkit builds the
+        # Dockerfile's LAST stage; set it to pick a specific stage.
+        target: "{{ .Target }}"
+        {{- end }}
+        # Build secrets expose a key from a Kubernetes Secret in flywheel-system
+        # to the build as a BuildKit `--secret` — history-safe, never baked into
+        # a layer. `id` is what the Dockerfile reads
+        # (`RUN --mount=type=secret,id=GITHUB_TOKEN ...`); `src` is
+        # `<secretName>/<key>`. See docs/guides/build-secrets.md.
+        # NOTE: secrets here REPLACE (not merge with) any top-level `secrets:`.
+        # secrets:
+        #   - id: GITHUB_TOKEN
+        #     src: ci-creds/token

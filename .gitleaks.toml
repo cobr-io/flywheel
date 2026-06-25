@@ -1,0 +1,26 @@
+# gitleaks configuration for the Flywheel repository itself.
+#
+# (Separate from the config Flywheel *scaffolds into client repos*, which lives
+# at templates/client-skeleton/.gitleaks.toml.tmpl.)
+#
+# Run locally with:  gitleaks detect --no-banner
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Obviously-fake age private keys used in Go tests and golden fixtures. A real key (AGE-SECRET-KEY-1 + bech32 body) anywhere else still trips the default rule."
+regexes = [
+  # Named placeholders: AGE-SECRET-KEY-TEST / -FIXED-FOR-TESTS / -BOGUS /
+  # -FIRST / -SECOND / -ROUND-TRIP-TEST / -HOSTCOPY (a real key's body starts
+  # with "1", never an uppercase letter, so this can't match a real key).
+  '''AGE-SECRET-KEY-[A-Z][A-Z-]*''',
+  # The repeating dummy in internal/cli/up/helpers_test.go.
+  '''AGE-SECRET-KEY-1(?:QYQSZQGP)+[A-Z0-9]*''',
+]
+
+[[allowlists]]
+description = "Golden test fixture: the committed local-dev age.key placeholder"
+paths = [
+  '''^internal/cli/initcmd/testdata/golden/.*/clusters/local/age\.key$''',
+]

@@ -1,0 +1,119 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .JobName }}
+  namespace: {{ .Namespace }}
+  labels:
+    app: image-builder
+    repo: {{ .Repo }}
+    image: {{ .Image }}
+    commit: "{{ .ShortSHA }}"
+spec:
+  # Retry on failure so builds recover from TRANSIENT errors (e.g. buildkitd
+  # not yet reachable during cluster startup — "dial tcp ...:1234: connection
+  # refused"). Kubernetes re-runs the Job with exponential backoff (~10s, 20s,
+  # 40s); retries are cheap because the build is a thin buildctl client and the
+  # warm buildkitd layer cache is reused. Deterministic failures (bad Dockerfile)
+  # still give up after these few attempts.
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 86400
+  template:
+    metadata:
+      labels:
+        app: image-builder
+        repo: {{ .Repo }}
+        image: {{ .Image }}
+        commit: "{{ .ShortSHA }}"
+    spec:
+      restartPolicy: Never
+      # Run as UID/GID 1000 (the rootless buildkit user). No shared volume or
+      # fsGroup is needed anymore: the build context is no longer pre-fetched
+      # into the Pod — buildkitd clones it server-side from the git ref (see
+      # GitContextURL below), so this is a pure thin gRPC client.
+      securityContext:
+        runAsUser: 1000
+        runAsGroup: 1000
+      containers:
+        # The image-scan controller pokes the registry scan off THIS
+        # container's exit-0 (see buildjob_imagescan_controller.go), so its
+        # name must match buildContainerName there. It's a thin buildctl
+        # client — the actual build runs in the warm buildkitd daemon, where
+        # the layer cache lives.
+        - name: build
+          image: moby/buildkit:v0.16.0-rootless
+          # buildctl is the entrypoint; no daemon in this pod.
+          command: [buildctl]
+          args:
+            - --addr
+            - {{ .BuildKitAddr }}
+            - build
+            - --frontend
+            - dockerfile.v0
+            # Remote git context: buildkitd clones the ref itself (warm,
+            # server-side), so no fetch-source initContainer or local volume.
+            - --opt
+            - context={{ .GitContextURL }}
+            - --opt
+            - filename={{ .Dockerfile }}
+            {{- if .Target }}
+            # Multi-stage build target. Without it, buildkit builds the
+            # Dockerfile's last stage.
+            - --opt
+            - target={{ .Target }}
+            {{- end }}
+            # Inject the short commit SHA so Dockerfiles can stamp it into the
+            # build (e.g. ldflags / REACT_APP_COMMIT / APP_COMMIT). Dockerfiles
+            # without a matching `ARG COMMIT` simply ignore it.
+            - --opt
+            - build-arg:COMMIT={{ .ShortSHA }}
+            {{- range .Secrets }}
+            # Build secret: buildctl reads the projected file in THIS client pod
+            # and streams it to the daemon over the session (the daemon never
+            # touches the client FS). Dockerfiles consume it via
+            # `RUN --mount=type=secret,id={{ .ID }}`.
+            - --secret
+            - id={{ .ID }},src={{ .Path }}
+            {{- end }}
+            - --output
+            - type=image,name={{ .Destination }},push=true,registry.insecure=true
+            # inline cache export so the pushed image carries cache metadata;
+            # the daemon's local snapshot store is the primary (warm) cache.
+            - --export-cache
+            - type=inline
+          {{- if .SecretVolumes }}
+          volumeMounts:
+            - name: build-secrets
+              mountPath: /run/build-secrets
+              readOnly: true
+          {{- end }}
+          resources:
+            # The client is a thin gRPC caller; the daemon does the heavy work
+            # (and carries the CPU ceiling). Keep this small.
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+      {{- if .SecretVolumes }}
+      volumes:
+        - name: build-secrets
+          projected:
+            # 0444 (octal) = world-readable inside the pod. Deliberate, not a
+            # default: this is an ephemeral, single-tenant build Pod, and the
+            # rootless buildctl client (UID 1000) must open() these root-written
+            # files — buildctl's open(src), not the mount, is what would
+            # otherwise EACCES. The tighter alternative (securityContext.fsGroup:
+            # 1000 + 0440) is deferred; breadth is chosen for a throwaway pod.
+            defaultMode: 0444
+            sources:
+              {{- range .SecretVolumes }}
+              - secret:
+                  name: {{ .SecretName }}
+                  items:
+                    {{- range .Items }}
+                    - key: {{ .Key }}
+                      path: {{ .Path }}
+                    {{- end }}
+              {{- end }}
+      {{- end }}

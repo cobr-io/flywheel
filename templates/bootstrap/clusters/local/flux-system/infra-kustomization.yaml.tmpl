@@ -1,0 +1,58 @@
+# Reconciles Flywheel's infra (local TLS / traefik wiring) straight from
+# the Flywheel mirror. Sourcing the flywheel GitRepository (not the client
+# repo) is the Flux-native way to "wrap" Flywheel's manifests/infra —
+# kustomize can't resolve a `flywheel://` scheme, so the wrap is expressed
+# as a Flux Kustomization pointing at the mirror, exactly like
+# flywheel-dev-loop.
+#
+# Client-specific infra patches live in ./infra/overlays/local and are
+# reconciled by the separate client-infra Kustomization below.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flywheel-infra
+  namespace: flux-system
+spec:
+  # Mirror-sourced; same reasoning as flywheel-dev-loop's interval. This was
+  # the measured trigger of the ~40s commit-to-pod outlier: flywheel-infra's
+  # routine 10s reconcile blinked Ready=Unknown for ~260ms exactly as the
+  # image-bump revision fan-out made client-infra (its dependent) evaluate,
+  # so client-infra deferred 30s and client-apps cascaded. 5m makes that
+  # coincidence rare; --requeue-dependency=2s caps the cost if it still hits.
+  interval: 5m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flywheel
+  path: ./manifests/infra
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+  dependsOn:
+    - name: flywheel-dev-loop
+---
+# Client-specific infra patches (extra Ingress hosts, middleware, etc.).
+# Empty by default; safe to leave as-is.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: client-infra
+  namespace: flux-system
+spec:
+  # flux.iac_interval — the client-infra tier's own cadence (falls back to
+  # interval_local when unset). Infra changes less often than app code.
+  interval: {{ .FluxIacInterval }}
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./infra/overlays/local
+  dependsOn:
+    - name: flywheel-infra
+  # Decrypt SOPS-encrypted secrets (*.enc.yaml) with the in-cluster sops-age
+  # key, so client repos can ship encrypted secrets — mirrors flywheel-infra.
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

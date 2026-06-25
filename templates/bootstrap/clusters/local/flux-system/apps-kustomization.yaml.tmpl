@@ -1,0 +1,20 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: client-apps
+  namespace: flux-system
+spec:
+  interval: {{ .FluxIntervalLocal }}
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./apps/overlays/local
+  dependsOn:
+    - name: client-infra
+  # Decrypt SOPS-encrypted secrets (*.enc.yaml) with the in-cluster sops-age
+  # key, so client repos can ship encrypted secrets — mirrors flywheel-infra.
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

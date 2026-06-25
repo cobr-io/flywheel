@@ -1,0 +1,81 @@
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: git-server-data
+  namespace: flywheel-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-server
+  namespace: flywheel-system
+  labels:
+    app: git-server
+spec:
+  replicas: 1
+  strategy:
+    # PVC is RWO; release the pod before scheduling a new one.
+    type: Recreate
+  selector:
+    matchLabels:
+      app: git-server
+  template:
+    metadata:
+      labels:
+        app: git-server
+    spec:
+      containers:
+        - name: git-server
+          image: ghcr.io/cobr-io/git-server:v0.1.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+              name: http
+          env:
+            - name: WORKSPACES_DIR
+              value: /workspaces
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+              readOnly: true
+            - name: data
+              mountPath: /srv/git
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+            initialDelaySeconds: 2
+            periodSeconds: 5
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        - name: workspaces
+          hostPath:
+            path: /workspaces
+            type: Directory
+        - name: data
+          persistentVolumeClaim:
+            claimName: git-server-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: git-server
+  namespace: flywheel-system
+spec:
+  selector:
+    app: git-server
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080

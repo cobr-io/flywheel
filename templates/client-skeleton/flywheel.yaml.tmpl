@@ -1,0 +1,55 @@
+schema: v1alpha1
+
+flywheel:
+  version: {{ .FlywheelVersion }}    # tag of cobr-io/flywheel; CLI
+                                     # resolves to commit SHA for Flux
+                                     # pinning (see § Architecture)
+
+client:
+  name: {{ .ClientName }}
+  org:{{ if .Org }} {{ .Org }}{{ end }}
+
+cluster:
+  name: {{ .ClusterName }}
+  registry: {{ .Registry }}
+  registry_port: {{ .RegistryPort }}
+  http_port: {{ .HttpPort }}
+  https_port: {{ .HttpsPort }}
+  servers: 1
+  agents: 2
+  k3s_image: v1.34.1-k3s1
+
+namespaces:
+  flywheel: flywheel-system
+  apps: apps
+
+flux:
+  interval_local: 10s
+  # Reconcile cadence for the client-infra tier (infra/overlays/local). Infra
+  # changes less often than app code, so you can raise this to poll slower.
+  iac_interval: 10s
+
+git:
+  # The protected integration branch. The local-only guard refuses to let
+  # apps with no external remote reach this branch — their source exists only
+  # on one machine. Defaults to main.
+  integration_branch: main
+
+# workspace:
+#   # Sibling app repos this cluster's dev loop needs, one entry per worktree
+#   # under paths.workspaces_root. `flywheel up` clones any that are missing;
+#   # the local-only guard keys on local_only. Managed by `flywheel add app`
+#   # and `flywheel publish-app` — you normally don't hand-edit this.
+#   repos:
+#     - name: my-service                         # worktree dir under workspaces_root
+#       url: git@github.com:acme/my-service.git  # remote-backed
+#       branch: develop                          # optional: branch to check out on clone (default: remote default)
+#     - name: scratch-app
+#       local_only: true                         # no remote yet (warn, never clone)
+
+local:
+  domain: {{ .Domain }}
+
+sops:
+  age_recipients_local:
+    - {{ .AgePublicKey }}

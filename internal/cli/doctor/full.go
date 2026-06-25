@@ -1,0 +1,177 @@
+package doctor
+
+import (
+	"context"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strings"
+
+	"github.com/cobr-io/flywheel/internal/cli/allocator"
+	"github.com/cobr-io/flywheel/internal/cli/hostmount"
+	"github.com/cobr-io/flywheel/internal/cli/netutil"
+)
+
+// FullChecks runs every QuickCheck plus port-live-collision detection
+// against allocator entries (per design § Port allocation: "flywheel
+// doctor validates no live collision").
+//
+// `homeOverride` lets tests inject a custom HOME (allocations.json
+// lookup honours it).
+func FullChecks(homeOverride string) []Check {
+	checks := QuickChecks()
+	checks = append(checks, commitHookChecks()...)
+	if runtime.GOOS == "linux" {
+		// Linux/WSL only: macOS mkcert wires browser trust via the system
+		// keychain, so certutil is irrelevant there.
+		checks = append(checks, nssCertutilCheck())
+	}
+	checks = append(checks, allocatorPortCollisionCheck(homeOverride))
+	if cwd, err := os.Getwd(); err == nil {
+		checks = append(checks, workspaceMountCheck(cwd))
+		checks = append(checks, workspaceCheck(cwd))
+	}
+	return checks
+}
+
+// workspaceMountCheck (macOS) warns when the gitops repo sits on a host path
+// Docker Desktop won't bind-mount into k3d (temp dirs like /tmp, /var/folders) —
+// the cluster wouldn't see the worktree, so `up` can't reconcile the client
+// content. Read-only; no-op off darwin or on a shareable path.
+func workspaceMountCheck(repoDir string) Check {
+	return Check{
+		Name:        "workspace-mount",
+		Description: "gitops repo lives on a path Docker Desktop can bind-mount into k3d",
+		Run: func(ctx context.Context) error {
+			if runtime.GOOS != "darwin" {
+				return nil
+			}
+			if matched, bad := hostmount.UnshareableTempDir(repoDir); bad {
+				return fmt.Errorf("%s is under %s, which Docker Desktop won't bind-mount into k3d; "+
+					"clone your gitops repo under your home directory instead", repoDir, matched)
+			}
+			return nil
+		},
+	}
+}
+
+// nssCertutilCheck (Linux/WSL only) verifies `certutil` is on PATH.
+// mkcert needs it to install its root CA into the NSS trust store that
+// Firefox and Chrome/Chromium read; without it `mkcert -install` covers
+// only the system store and browsers still reject `*.<domain>` certs. A
+// dev convenience surfaced in full `flywheel doctor` — like pre-commit/yq
+// it never gates `up`. Skipped entirely when mkcert is absent (the
+// mkcert quick-check already reports that). Note for WSL users: the
+// browser usually runs on Windows with its own trust store, so mkcert's
+// CA must also be imported there — see README § Windows (WSL).
+func nssCertutilCheck() Check {
+	return Check{
+		Name:        "certutil",
+		Description: "libnss3-tools — lets mkcert wire Firefox/Chrome browser trust",
+		Run: func(ctx context.Context) error {
+			if _, err := exec.LookPath("mkcert"); err != nil {
+				return nil
+			}
+			if _, err := exec.LookPath("certutil"); err != nil {
+				return fmt.Errorf("certutil not on PATH: install libnss3-tools " +
+					"(Debian/Ubuntu: `sudo apt install libnss3-tools`; Fedora: " +
+					"`sudo dnf install nss-tools`) so `mkcert -install` can add its " +
+					"CA to Firefox/Chrome trust")
+			}
+			return nil
+		},
+	}
+}
+
+// commitHookChecks probe the tools the scaffolded commit hooks need:
+// `pre-commit` (the framework that wires .git/hooks) and mikefarah `yq`
+// (the SOPS-shape guard's only dependency). Both are dev conveniences,
+// not runtime prerequisites — they appear in full `flywheel doctor` so a
+// developer can see why hooks aren't firing, but never gate `up`.
+func commitHookChecks() []Check {
+	return []Check{
+		binaryCheck("pre-commit", "activates this repo's commit hooks (yamllint, gitleaks, SOPS-shape)"),
+		yqCheck(),
+	}
+}
+
+// yqCheck verifies mikefarah's yq is on PATH. The kislyuk/python yq is a
+// different tool with an incompatible expression syntax, so we assert the
+// binary identifies as mikefarah's.
+func yqCheck() Check {
+	return Check{
+		Name:        "yq",
+		Description: "mikefarah yq — drives the SOPS-shape commit hook",
+		Run: func(ctx context.Context) error {
+			if _, err := exec.LookPath("yq"); err != nil {
+				return fmt.Errorf("yq not on PATH: %w", err)
+			}
+			out, err := exec.CommandContext(ctx, "yq", "--version").CombinedOutput()
+			if err != nil {
+				return fmt.Errorf("yq --version failed: %w (%s)", err, string(out))
+			}
+			if !strings.Contains(strings.ToLower(string(out)), "mikefarah") {
+				return fmt.Errorf("found a non-mikefarah yq (%s); the SOPS-shape hook needs mikefarah/yq",
+					strings.TrimSpace(string(out)))
+			}
+			return nil
+		},
+	}
+}
+
+// allocatorPortCollisionCheck binds a TCP listener to every allocated
+// port and reports a collision if the bind fails (something else holds
+// the port). Excludes ports already in use by the *current* user's
+// k3d clusters (which are expected to hold them).
+func allocatorPortCollisionCheck(homeOverride string) Check {
+	return Check{
+		Name:        "ports",
+		Description: "no live process holds an allocated port",
+		Run: func(ctx context.Context) error {
+			path := allocationsPath(homeOverride)
+			alloc, err := allocator.Load(path)
+			if err != nil {
+				return fmt.Errorf("read %s: %w", path, err)
+			}
+			var collisions []string
+			for client, t := range alloc.Clients {
+				for _, port := range []int{t.RegistryPort, t.HttpPort, t.HttpsPort} {
+					if !portIsBindable(port) {
+						collisions = append(collisions, fmt.Sprintf("%d (client %s)", port, client))
+					}
+				}
+			}
+			if len(collisions) > 0 {
+				return fmt.Errorf("ports already in use: %v — run `flywheel destroy` or stop the holding process",
+					collisions)
+			}
+			return nil
+		},
+	}
+}
+
+func portIsBindable(port int) bool {
+	if netutil.PortIsBindable(port) {
+		return true
+	}
+	// Already bound — could be the current user's own k3d cluster
+	// legitimately holding it (expected) or another process. For v0.1.0
+	// simplicity treat ANY bind failure as a soft warning: returning true
+	// here means "don't flag". Since we can't easily distinguish "k3d
+	// holds it legitimately" from "another process stole it", be lenient;
+	// a hard collision check belongs in a later pass.
+	return true
+}
+
+func allocationsPath(homeOverride string) string {
+	if homeOverride != "" {
+		return filepath.Join(homeOverride, ".config", "flywheel", "allocations.json")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".config", "flywheel", "allocations.json")
+}

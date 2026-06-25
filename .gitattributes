@@ -1,0 +1,16 @@
+# Normalize line endings. Flywheel ships shell scripts that run inside Linux
+# containers and is developed across macOS/Linux/WSL; a CRLF checkout (e.g.
+# cloned with Git-for-Windows' default core.autocrlf=true onto /mnt/c, then
+# run in WSL) breaks `bash` with `\r` errors. Force LF for everything
+# text-like, and pin scripts explicitly as belt-and-suspenders.
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.bash  text eol=lf
+Dockerfile* text eol=lf
+
+# Treat common binary assets as binary so they're never line-ending munged.
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary

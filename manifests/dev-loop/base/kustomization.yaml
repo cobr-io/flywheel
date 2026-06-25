@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Shared dev-loop machinery: namespace-level RBAC, git-server, controller,
+# the warm BuildKit daemon + its cache, IUA, inotify-bump DaemonSet,
+# source-controller NetworkPolicy. Applied first by `flywheel up` (step 11a)
+# via embedded kustomize + client-go, then re-adopted and reconciled by the
+# Flux builders Kustomization once Flux is up. All applies use SSA with
+# fieldManager=flux-controller so ownership transfers silently.
+#
+# app.kubernetes.io/managed-by: flywheel marks every dev-loop resource as
+# flywheel-applied machinery, so `flywheel update --prune` can scope its
+# orphan scan to exactly these resources (never touching Flux-reconciled app
+# workloads). includeSelectors: false keeps it off the immutable Deployment
+# selectors and pod-template labels.
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: flywheel
+    includeSelectors: false
+resources:
+  - ./rbac.yaml
+  - ./git-server.yaml
+  - ./buildkitd.yaml
+  - ./image-builder-controller.yaml
+  - ./image-update-automation.yaml
+  - ./source-controller-np.yaml
+  - ./inotify-bump.yaml

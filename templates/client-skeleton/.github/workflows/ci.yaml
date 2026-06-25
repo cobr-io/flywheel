@@ -1,0 +1,107 @@
+# Server-side validation for this Flywheel-managed GitOps repo.
+#
+# Local pre-commit hooks are bypassable (`git commit --no-verify`, or never
+# running `pre-commit install`) and don't run on a server-side merge. This
+# workflow re-runs the same checks on every PR (and on pushes to the
+# integration branch) so they can't be skipped, and adds render + schema
+# validation that pre-commit doesn't cover:
+#
+#   lint            — `pre-commit run --all-files`: yamllint, gitleaks, the
+#                     SOPS-shape guard, and the local-only app guard. This
+#                     supersedes the standalone local-only-guard workflow.
+#   kustomize-build — `kustomize build` on every `*/overlays/<env>` entrypoint;
+#                     catches broken refs, missing files, and bad patches.
+#   kubeconform     — strict schema validation of the rendered manifests.
+#
+# To make these non-bypassable, mark the three jobs as required status checks
+# on your integration branch (Settings → Branches → branch protection).
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+      # The SOPS-shape and local-only guards are `language: system` hooks that
+      # shell out to mikefarah `yq`; install it before pre-commit runs.
+      - name: Install yq
+        run: |
+          sudo curl -fsSL -o /usr/local/bin/yq \
+            https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
+          sudo chmod +x /usr/local/bin/yq
+      # GITHUB_BASE_REF (a PR's target branch) is set automatically on
+      # pull_request events; the local-only guard keys off it to know when to
+      # block. No extra wiring needed here.
+      - uses: pre-commit/action@v3.0.1
+
+  kustomize-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kustomize
+        run: |
+          curl -fsSL -o kustomize.tar.gz \
+            https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          tar -xzf kustomize.tar.gz
+          sudo install -m 0755 kustomize /usr/local/bin/kustomize
+      # Discover every overlay entrypoint so coverage grows as you add
+      # environments (e.g. a future apps/overlays/prod) — nothing to update here.
+      - name: Build all overlays
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          found=0
+          for k in */overlays/*/kustomization.yaml; do
+            dir="$(dirname "$k")"
+            echo "== kustomize build $dir =="
+            kustomize build "$dir"
+            found=1
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "no overlays found under */overlays/* — nothing to build"
+          fi
+
+  kubeconform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install kustomize + kubeconform
+        run: |
+          curl -fsSL -o kustomize.tar.gz \
+            https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.4.3/kustomize_v5.4.3_linux_amd64.tar.gz
+          tar -xzf kustomize.tar.gz
+          sudo install -m 0755 kustomize /usr/local/bin/kustomize
+          curl -fsSL -o kubeconform.tar.gz \
+            https://github.com/yannh/kubeconform/releases/download/v0.6.7/kubeconform-linux-amd64.tar.gz
+          tar -xzf kubeconform.tar.gz
+          sudo install -m 0755 kubeconform /usr/local/bin/kubeconform
+      # -skip Secret: SOPS-encrypted `kind: Secret` carries a `sops:` block that
+      #   -strict rejects as an additional property; the SOPS-shape guard
+      #   already enforces that plaintext Secrets never land in git.
+      # -ignore-missing-schemas: tolerate CRDs (Flux HelmRelease, etc.) whose
+      #   schemas aren't in the default catalog.
+      - name: Validate rendered manifests
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          for k in */overlays/*/kustomization.yaml; do
+            dir="$(dirname "$k")"
+            echo "== kubeconform $dir =="
+            kustomize build "$dir" \
+              | kubeconform -strict -ignore-missing-schemas -skip Secret -summary
+          done

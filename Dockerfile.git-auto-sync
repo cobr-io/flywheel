@@ -1,0 +1,16 @@
+FROM debian:stable-slim
+
+# Keep kubectl loosely in sync with the K3S_IMAGE in the Makefile.
+ARG KUBECTL_VERSION=v1.34.1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git curl ca-certificates && \
+    curl -fsSLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(dpkg --print-architecture)/kubectl" && \
+    install -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl && \
+    apt-get clean && rm -rf /var/lib/apt/lists/*
+
+COPY scripts/git-auto-sync/sync.sh /usr/local/bin/git-auto-sync.sh
+RUN chmod +x /usr/local/bin/git-auto-sync.sh
+
+CMD ["/usr/local/bin/git-auto-sync.sh"]

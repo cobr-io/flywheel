@@ -1,0 +1,106 @@
+---
+# Warm BuildKit daemon for the local build loop. Replaces per-build Kaniko:
+# the build cache lives in this daemon's snapshot store (the PVC below), so a
+# code-only change reuses the dependency layer instantly instead of paying
+# Kaniko's ~13s cached-layer-extract + ~5s layer-push tax on every build.
+# See docs/designs/2026-06-01-buildkit-builder.md (measured: warm build 38s
+# Kaniko -> 8s BuildKit on a heavy multi-stage Go image).
+#
+# Fully client-agnostic: the insecure k3d registry is handled per-build by
+# `registry.insecure=true` on the buildctl output, so this needs no
+# per-client config (no buildkitd.toml).
+#
+# Rootless: no privileged container. The seccomp=Unconfined +
+# --oci-worker-no-process-sandbox combo is the standard rootless-on-k8s recipe
+# for setting up user namespaces without full privilege.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: buildkit-cache
+  namespace: flywheel-system
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 10Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buildkitd
+  namespace: flywheel-system
+  labels:
+    app: buildkitd
+spec:
+  replicas: 1
+  # The cache PVC is RWO; never run two daemons against it at once.
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: buildkitd
+  template:
+    metadata:
+      labels:
+        app: buildkitd
+      annotations:
+        container.apparmor.security.beta.kubernetes.io/buildkitd: unconfined
+    spec:
+      containers:
+        - name: buildkitd
+          image: moby/buildkit:v0.16.0-rootless
+          args:
+            - --addr
+            - tcp://0.0.0.0:1234
+            - --oci-worker-no-process-sandbox
+            # Cap the snapshot store so the PVC can't fill; keep ~8Gi of 10Gi.
+            - --oci-worker-gc
+            - --oci-worker-gc-keepstorage
+            - "8000"
+          ports:
+            - containerPort: 1234
+              name: grpc
+          readinessProbe:
+            exec:
+              # buildctl defaults to a unix socket that this TCP-only daemon
+              # doesn't create; point the probe at the TCP listener.
+              command: ["buildctl", "--addr", "tcp://127.0.0.1:1234", "debug", "workers"]
+            initialDelaySeconds: 2
+            periodSeconds: 3
+          securityContext:
+            seccompProfile:
+              type: Unconfined
+            runAsUser: 1000
+            runAsGroup: 1000
+          resources:
+            requests:
+              cpu: 200m
+              memory: 512Mi
+            limits:
+              # The daemon does the build work, so the build CPU ceiling lives
+              # here (was the per-Kaniko-Job limit). Hardcoded for now; 4 is a
+              # sane default for a dev cluster. Surfacing it as a configurable
+              # flywheel.yaml `build.cpu_limit` is a documented follow-up (no
+              # such knob exists yet — this value is the only ceiling).
+              cpu: "4"
+              memory: 4Gi
+          volumeMounts:
+            - name: cache
+              mountPath: /home/user/.local/share/buildkit
+      volumes:
+        - name: cache
+          persistentVolumeClaim:
+            claimName: buildkit-cache
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: buildkitd
+  namespace: flywheel-system
+spec:
+  selector:
+    app: buildkitd
+  ports:
+    - port: 1234
+      targetPort: 1234
+      name: grpc

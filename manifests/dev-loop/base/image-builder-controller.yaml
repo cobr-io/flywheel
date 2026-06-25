@@ -1,0 +1,85 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: image-builder-controller
+  namespace: flywheel-system
+  labels:
+    app: image-builder-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: image-builder-controller
+  template:
+    metadata:
+      labels:
+        app: image-builder-controller
+    spec:
+      serviceAccountName: image-builder-controller
+      containers:
+        - name: controller
+          image: ghcr.io/cobr-io/image-builder-controller:v0.1.0
+          imagePullPolicy: IfNotPresent
+          # Configuration is injected from the flywheel-config ConfigMap
+          # (per design § The `flywheel-config` ConfigMap). Each value is
+          # wired via valueFrom because envFrom rejects keys with dots
+          # and the ConfigMap keys carry dots verbatim from flywheel.yaml.
+          env:
+            - name: FLYWHEEL_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: namespaces.flywheel
+            # Namespace the controller watches for per-app GitRepository +
+            # build-config ConfigMaps. These are flywheel builder infra, so
+            # they live in the flywheel namespace (not apps) — the apps
+            # namespace holds only the user's application workloads.
+            - name: BUILDER_NAMESPACE
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: namespaces.flywheel
+            - name: CLUSTER_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: cluster.name
+            - name: CLUSTER_REGISTRY
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: cluster.registry
+            - name: CLUSTER_REGISTRY_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: cluster.registry_port
+            - name: CLIENT_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: client.name
+          ports:
+            - containerPort: 8080
+              name: metrics
+            - containerPort: 8081
+              name: health
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi

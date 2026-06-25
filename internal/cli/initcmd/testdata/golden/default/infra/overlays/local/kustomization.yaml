@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Client infra for the local cluster. Promotable components shared across
+# environments live in infra/base/ (pulled in via ../../base); add local-only
+# resources or patches here — e.g. extra Ingress hosts, Traefik middleware.
+# This layer is reconciled by the client-infra Flux Kustomization, on top of
+# Flywheel's own infra (reconciled separately by the flywheel-infra
+# Kustomization).
+resources:
+  - ../../base

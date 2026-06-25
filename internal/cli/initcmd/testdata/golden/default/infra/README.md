@@ -1,0 +1,42 @@
+# infra/
+
+Cluster-wide infrastructure for the **acme** cluster —
+operators, controllers, and platform services (as opposed to your own
+application workloads, which live in `../apps/`).
+
+## Layout
+
+* `infra/base/` — **promotable** platform components shared across
+  environments (operators, CRDs, off-the-shelf charts). This is where things
+  you run *everywhere* go.
+* `infra/overlays/local/` — the local cluster's overlay: pulls in `../../base`
+  and adds local-only patches/resources. Reconciled by the `client-infra` Flux
+  Kustomization, layered on top of Flywheel's own infra (traefik/TLS), which is
+  reconciled separately by `flywheel-infra` straight from the Flywheel mirror.
+
+Note Flywheel's *own* infra (traefik, mkcert TLS) is not in this
+directory — it comes from the mirror and is local-only. What you put here is
+*your* infra.
+
+When you promote to another environment, that environment gets an
+`infra/overlays/<env>/` that also references `../../base` — so anything in
+`infra/base/` deploys everywhere, while
+environment-only infra (e.g. a cloud ingress surface) stays in that env's
+overlay.
+
+## Adding infra
+
+### Off the shelf (a public operator)
+
+Most operators — CNPG, cert-manager, and the like — install from a public
+Helm chart. Add a `HelmRepository` + `HelmRelease` (or an `OCIRepository` +
+`HelmRelease`). Put it in `infra/base/` if you want it in every environment,
+or in `infra/overlays/local/` if it's local-only. No builder is involved.
+
+### An operator you build yourself
+
+Create a build pipeline under `../builders/base/<name>/` (see
+[../builders/README.md](../builders/README.md)) and place the operator's
+workload here, putting an `{"$imagepolicy": ...}` setter on its image line.
+Flux image automation scans the whole repo, so it rolls new builds into
+infra workloads just as it does for apps.

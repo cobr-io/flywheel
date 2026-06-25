@@ -1,0 +1,52 @@
+# Raises fs.inotify.max_user_instances and max_user_watches on every k3d
+# node so the cluster can run more file-watching workloads than the kernel
+# defaults allow. k3d nodes are containers; sysctl inside them needs
+# privileged exec, which is why this lives as a DaemonSet rather than a
+# host-side step in `flywheel up`.
+#
+# The pod runs once via an init container, then sleeps to keep the
+# DaemonSet "Ready" without restart churn. Resources are minimal because
+# the sleeping container does nothing useful — it exists only to satisfy
+# the DaemonSet liveness model.
+#
+# Per design § up step 8 / § up step 11a / § Phase 0 (inotify-bump).
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: inotify-bump
+  namespace: flywheel-system
+  labels:
+    app: inotify-bump
+spec:
+  selector:
+    matchLabels:
+      app: inotify-bump
+  template:
+    metadata:
+      labels:
+        app: inotify-bump
+    spec:
+      hostPID: true
+      tolerations:
+        - operator: Exists
+      initContainers:
+        - name: bump
+          image: busybox:1.37
+          securityContext:
+            privileged: true
+          command: [sh, -c]
+          args:
+            - |
+              set -eu
+              sysctl -w fs.inotify.max_user_instances=8192
+              sysctl -w fs.inotify.max_user_watches=524288
+      containers:
+        - name: pause
+          image: registry.k8s.io/pause:3.10
+          resources:
+            requests:
+              cpu: 1m
+              memory: 4Mi
+            limits:
+              cpu: 10m
+              memory: 16Mi

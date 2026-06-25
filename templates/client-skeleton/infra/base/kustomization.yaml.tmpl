@@ -1,0 +1,8 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Promotable infrastructure shared across environments. Put platform
+# components you run everywhere (operators, CRDs, off-the-shelf charts) here;
+# each environment's overlay (infra/overlays/<env>/) references this base via
+# ../../base. Environment-only infra (e.g. a cloud ingress surface) goes in
+# that environment's overlay, not here. Empty by default.
+resources: []

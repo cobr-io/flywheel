@@ -1,0 +1,38 @@
+# App workload for the dev-loop validation scenarios. The image tag is a
+# Flux setter target: image-update-automation rewrites the {"$imagepolicy"}
+# marker to the newest tag image-builder-controller produced. Scenario 3
+# (client-gitops branch switch) edits spec.replicas here.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sample-app
+  namespace: apps
+  labels:
+    app: sample-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sample-app
+  template:
+    metadata:
+      labels:
+        app: sample-app
+    spec:
+      containers:
+        - name: sample-app
+          image: k3d-acme-local-registry:5000/acme/sample-app:latest # {"$imagepolicy": "flux-system:sample-app"}
+          ports:
+            - containerPort: 8080
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sample-app
+  namespace: apps
+spec:
+  selector:
+    app: sample-app
+  ports:
+    - port: 80
+      targetPort: 8080

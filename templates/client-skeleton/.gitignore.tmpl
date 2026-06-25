@@ -1,0 +1,13 @@
+flywheel.yaml.local
+.envrc.local
+cert/
+.DS_Store
+
+# Age keys. The local-dev key is committed on purpose — it only decrypts
+# clusters/local/* dev secrets on a localhost cluster, so shipping it removes
+# the onboarding key handoff. Every OTHER environment's private key (prod,
+# staging, …) must stay out of git: keep it in your homedir or a secrets
+# manager. The allowlist below is exact, so a key dropped at the conventional
+# clusters/<env>/age.key path can never be committed by accident.
+clusters/*/age.key
+!clusters/local/age.key

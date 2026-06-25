@@ -1,0 +1,42 @@
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: flywheel-dev-loop
+  namespace: flux-system
+spec:
+  # Mirror-sourced Flywheel content changes only on `flywheel up` (which
+  # applies it directly via client-go in the bootstrap dance), so this poll
+  # is a slow fallback, not the delivery path. Kept long deliberately: a
+  # routine 10s reconcile flips Ready=Unknown for ~260ms each cycle, and any
+  # dependent (client-builders) that evaluates dependsOn during that blink
+  # eats a --requeue-dependency penalty. At 5m the blink is ~0.09% of the
+  # time instead of ~2.6%, which is what removes the commit-to-pod outlier.
+  interval: 5m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flywheel
+  path: ./manifests/dev-loop/overlays/local
+  # SSA via Flux's default fieldManager so the bootstrap dance's
+  # client-go apply (with fieldManager=flux-controller) hands over
+  # cleanly.
+  force: true
+  # Rewrite the mirror's generic ghcr.io image refs to the resolved
+  # refs `flywheel up` step 9 loaded into containerd (cfg.flywheel.images
+  # overrides if set, else the published ghcr.io defaults at the pinned
+  # version). These values are rendered fresh by `flywheel up` on every
+  # invocation — this file is bootstrap-only, never committed to the
+  # gitops repo, so .local edits flow through on the next `up`.
+  # Only git-server and image-builder-controller have Deployments under this
+  # dev-loop overlay. git-auto-sync is NOT rewritten here — its Deployments are
+  # the per-app builders (rewritten by the client-builders Kustomization's
+  # spec.images) and the self sync below (rendered with .GitAutoSyncImageRef),
+  # so a flywheel.images override reaches git-auto-sync through those paths, not
+  # this one.
+  images:
+    - name: ghcr.io/cobr-io/git-server
+      newName: {{ .GitServerImageName }}
+      newTag: {{ .GitServerImageTag }}
+    - name: ghcr.io/cobr-io/image-builder-controller
+      newName: {{ .ImageBuilderControllerImageName }}
+      newTag: {{ .ImageBuilderControllerImageTag }}
