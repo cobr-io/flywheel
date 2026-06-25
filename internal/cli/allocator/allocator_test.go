@@ -186,6 +186,53 @@ func TestPickFree_SkipsHostBoundPort(t *testing.T) {
 	}
 }
 
+// Issue #1 — PickFreePort is the runtime (up-time) counterpart used by
+// host-port healing. It takes an explicit taken-set and bind probe.
+
+func TestPickFreePort_LowestFreeBindable(t *testing.T) {
+	got, err := PickFreePort(Pools.Http, map[int]struct{}{}, func(int) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != Pools.Http.Min {
+		t.Errorf("PickFreePort = %d, want %d", got, Pools.Http.Min)
+	}
+}
+
+func TestPickFreePort_SkipsTakenAndUnbindable(t *testing.T) {
+	taken := map[int]struct{}{Pools.Http.Min: {}} // reserved by another client
+	unbindable := Pools.Http.Min + 1              // held on the host
+	bindable := func(p int) bool { return p != unbindable }
+	got, err := PickFreePort(Pools.Http, taken, bindable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != Pools.Http.Min+2 {
+		t.Errorf("PickFreePort = %d, want %d (skipped taken %d and unbindable %d)",
+			got, Pools.Http.Min+2, Pools.Http.Min, unbindable)
+	}
+}
+
+func TestPickFreePort_HonoursSkipSet(t *testing.T) {
+	// The registry pool skips 5000 and 50000; neither is in range (min 50001),
+	// so build a synthetic pool whose first value is in its Skip set.
+	p := Pool{Min: 7000, Max: 7002, Skip: map[int]struct{}{7000: {}}}
+	got, err := PickFreePort(p, map[int]struct{}{}, func(int) bool { return true })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 7001 {
+		t.Errorf("PickFreePort = %d, want 7001 (7000 is skipped)", got)
+	}
+}
+
+func TestPickFreePort_ExhaustedPool(t *testing.T) {
+	p := Pool{Min: 9000, Max: 9001}
+	if _, err := PickFreePort(p, map[int]struct{}{}, func(int) bool { return false }); err == nil {
+		t.Fatal("expected an exhausted-pool error when nothing is bindable")
+	}
+}
+
 // Issue #22 — end-to-end via Allocate using a REAL net.Listen on the
 // pool minimum (the probe path exercised in production). Allocate must
 // not hand out the port we're holding.

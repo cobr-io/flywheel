@@ -159,6 +159,22 @@ func ClusterExists(ctx context.Context, name string) (bool, error) {
 	return clusterExists(ctx, name)
 }
 
+// ClusterRunning reports whether the named cluster exists and has at least
+// one server node up. Exported for `flywheel up`'s host-port healing, which
+// must leave a running cluster's loadbalancer ports untouched (re-running up
+// stays idempotent) and only heal ports a foreign process holds.
+func ClusterRunning(ctx context.Context, name string) (bool, error) {
+	return clusterRunning(ctx, name)
+}
+
+// RegistryExists reports whether a k3d-managed registry of this name exists.
+// Exported for `flywheel up`'s host-port healing: an existing registry already
+// holds registry_port legitimately (CreateRegistry is a no-op for it), so that
+// port must not be reallocated out from under it.
+func RegistryExists(ctx context.Context, name string) (bool, error) {
+	return registryExists(ctx, name)
+}
+
 func clusterExists(ctx context.Context, name string) (bool, error) {
 	cmd := exec.CommandContext(ctx, "k3d", "cluster", "list", "--no-headers")
 	out, err := cmd.CombinedOutput()

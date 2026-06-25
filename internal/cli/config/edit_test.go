@@ -150,3 +150,59 @@ func TestSetWorkspaceRepoURL_MissingEntry(t *testing.T) {
 		t.Fatal("expected an error for a worktree with no entry")
 	}
 }
+
+const clusterYAML = `schema: v1alpha1
+
+client:
+  name: acme
+
+cluster:
+  name: acme-local
+  registry: acme-local-registry
+  registry_port: 50001
+  http_port: 8080      # host → loadbalancer:80
+  https_port: 8540
+`
+
+func TestSetClusterPort_ChangesValuePreservingCommentAndSiblings(t *testing.T) {
+	p := write(t, clusterYAML)
+	if err := SetClusterPort(p, "http_port", 8081); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, p)
+	// The inline comment on the edited line survives.
+	if !strings.Contains(got, "# host → loadbalancer:80") {
+		t.Errorf("lost the http_port comment:\n%s", got)
+	}
+	f := reparse(t, p)
+	if f.Cluster.HttpPort != 8081 {
+		t.Errorf("http_port = %d, want 8081", f.Cluster.HttpPort)
+	}
+	// Sibling ports and unrelated fields are untouched.
+	if f.Cluster.RegistryPort != 50001 || f.Cluster.HttpsPort != 8540 {
+		t.Errorf("siblings changed: registry=%d https=%d", f.Cluster.RegistryPort, f.Cluster.HttpsPort)
+	}
+	if f.Cluster.Name != "acme-local" || f.Client.Name != "acme" {
+		t.Errorf("unrelated fields changed: cluster=%q client=%q", f.Cluster.Name, f.Client.Name)
+	}
+}
+
+func TestSetClusterPort_AppendsWhenKeyAbsent(t *testing.T) {
+	// A cluster block missing https_port — SetClusterPort must add it.
+	const noHTTPS = `schema: v1alpha1
+client:
+  name: acme
+cluster:
+  name: acme-local
+  registry: acme-local-registry
+  registry_port: 50001
+  http_port: 8080
+`
+	p := write(t, noHTTPS)
+	if err := SetClusterPort(p, "https_port", 8540); err != nil {
+		t.Fatal(err)
+	}
+	if f := reparse(t, p); f.Cluster.HttpsPort != 8540 {
+		t.Errorf("https_port = %d, want 8540 (should have been appended)", f.Cluster.HttpsPort)
+	}
+}

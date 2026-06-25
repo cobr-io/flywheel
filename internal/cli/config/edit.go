@@ -42,11 +42,34 @@ func SetWorkspaceRepoURL(path, worktree, url string) error {
 	})
 }
 
-// editWorkspaceRepos loads path as a yaml.Node, hands fn the workspace.repos
-// sequence node (created if absent), and writes the document back with 2-space
-// indentation (matching the skeleton's flywheel.yaml). Comments survive the
-// round-trip; blank lines between top-level sections may be normalised.
+// SetClusterPort sets cluster.<key> to port in the YAML file at path,
+// preserving comments and unrelated content. key is one of "registry_port",
+// "http_port", "https_port". The cluster: node is created if somehow absent.
+// Used by `flywheel up`'s host-port healing to persist a reallocated port
+// back to flywheel.yaml so it stays stable on the next up.
+func SetClusterPort(path, key string, port int) error {
+	return editRoot(path, func(root *yaml.Node) error {
+		cluster := mapEnsure(root, "cluster", yaml.MappingNode, "!!map")
+		mapSetScalar(cluster, key, "!!int", fmt.Sprintf("%d", port))
+		return nil
+	})
+}
+
+// editWorkspaceRepos hands fn the workspace.repos sequence node (created if
+// absent) within the YAML document at path.
 func editWorkspaceRepos(path string, fn func(repos *yaml.Node) error) error {
+	return editRoot(path, func(root *yaml.Node) error {
+		ws := mapEnsure(root, "workspace", yaml.MappingNode, "!!map")
+		repos := mapEnsure(ws, "repos", yaml.SequenceNode, "!!seq")
+		return fn(repos)
+	})
+}
+
+// editRoot loads path as a yaml.Node, hands fn the root mapping node, and
+// writes the document back with 2-space indentation (matching the skeleton's
+// flywheel.yaml). Comments survive the round-trip; blank lines between
+// top-level sections may be normalised.
+func editRoot(path string, fn func(root *yaml.Node) error) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return err
@@ -62,9 +85,7 @@ func editWorkspaceRepos(path string, fn func(repos *yaml.Node) error) error {
 	if root.Kind != yaml.MappingNode {
 		return fmt.Errorf("%s: top level is not a mapping", path)
 	}
-	ws := mapEnsure(root, "workspace", yaml.MappingNode, "!!map")
-	repos := mapEnsure(ws, "repos", yaml.SequenceNode, "!!seq")
-	if err := fn(repos); err != nil {
+	if err := fn(root); err != nil {
 		return err
 	}
 
@@ -144,6 +165,21 @@ func nodeMapValue(m *yaml.Node, key string) string {
 
 func appendScalar(m *yaml.Node, key, valTag, val string) {
 	m.Content = append(m.Content, scalar("!!str", key), scalar(valTag, val))
+}
+
+// mapSetScalar sets key=val (with the given value tag) in mapping m. When key
+// already exists its value node is mutated in place — preserving any line/head
+// comment attached to it — rather than replaced. Appends a fresh pair when
+// absent.
+func mapSetScalar(m *yaml.Node, key, valTag, val string) {
+	for i := 0; i+1 < len(m.Content); i += 2 {
+		if m.Content[i].Value == key {
+			m.Content[i+1].Tag = valTag
+			m.Content[i+1].Value = val
+			return
+		}
+	}
+	appendScalar(m, key, valTag, val)
 }
 
 func scalar(tag, val string) *yaml.Node {

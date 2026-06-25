@@ -159,6 +159,16 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("step 5 (mkcert): %w", err)
 	}
 
+	// Step 5b — heal host-port collisions before k3d binds them. The ports in
+	// flywheel.yaml are allocated once at init time; by now one may be held by
+	// another process (issue #1). Reallocate any foreign-held port from its
+	// pool and persist it, so cluster creation doesn't crash with "address
+	// already in use". A port our own running cluster/registry holds is left
+	// as-is (re-running up stays idempotent).
+	if err := healHostPorts(ctx, opts, cfg, out); err != nil {
+		return fmt.Errorf("step 5b (host ports): %w", err)
+	}
+
 	// Step 6 — k3d registry create.
 	if err := style.Spin(out,
 		fmt.Sprintf("k3d registry %s:%d", cfg.Cluster.Registry, cfg.Cluster.RegistryPort),

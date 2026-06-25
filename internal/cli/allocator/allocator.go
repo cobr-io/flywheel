@@ -180,14 +180,26 @@ func (f *File) pickFree(p Pool, get func(Triple) int) (int, error) {
 	for _, t := range f.Clients {
 		used[get(t)] = struct{}{}
 	}
+	return PickFreePort(p, used, portIsBindable)
+}
+
+// PickFreePort returns the lowest port in pool p that is neither in the
+// `taken` set nor a Skip value nor currently held on the host per the
+// `bindable` probe. It is the runtime counterpart to Allocate's per-pool
+// pick (which is init-time): callers supply the taken-set and bind probe
+// explicitly, so `flywheel up`'s host-port healing can reuse the canonical
+// pool ranges while controlling both the ledger view and the bind
+// semantics (e.g. a 0.0.0.0 probe that matches docker). Returns an error
+// when the pool is exhausted.
+func PickFreePort(p Pool, taken map[int]struct{}, bindable func(int) bool) (int, error) {
 	for port := p.Min; port <= p.Max; port++ {
 		if _, skip := p.Skip[port]; skip {
 			continue
 		}
-		if _, taken := used[port]; taken {
+		if _, t := taken[port]; t {
 			continue
 		}
-		if !portIsBindable(port) {
+		if !bindable(port) {
 			continue
 		}
 		return port, nil
