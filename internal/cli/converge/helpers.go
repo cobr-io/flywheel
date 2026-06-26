@@ -21,8 +21,12 @@ import (
 // rewritten for THIS client using the resolved (override-aware) refs
 // from imagepin.Resolve. Each `ghcr.io/cobr-io/<name>` slot in the base
 // is rewritten to the resolved ref — same as what's already imported
-// into the cluster's containerd in step 9.
-func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, refs map[string]string, out io.Writer) error {
+// into the cluster's containerd in step 9. gitServerMemLimit patches the
+// git-server container memory limit (see § git-server OOM, issue #4); it
+// MUST match the limit the flywheel-dev-loop Flux Kustomization applies
+// (builders-kustomization.yaml.tmpl), or the two reconcile paths would
+// fight — both are rendered from the same cfg.GitServerMemoryLimit().
+func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, refs map[string]string, gitServerMemLimit string, out io.Writer) error {
 	// Create the transient overlay as a sibling of `base` inside the
 	// cache tree, so the resource reference is simply `../base` — no
 	// absolute paths (kustomize forbids them) and no `/var`→`/private/var`
@@ -35,6 +39,17 @@ func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, re
 	}
 	defer os.RemoveAll(tmp)
 
+	kustomization := renderDevLoopKustomization(refs, gitServerMemLimit)
+	if err := os.WriteFile(filepath.Join(tmp, "kustomization.yaml"), []byte(kustomization), 0o644); err != nil {
+		return err
+	}
+	return a.ApplyKustomize(ctx, tmp, out)
+}
+
+// renderDevLoopKustomization builds the transient overlay's kustomization.yaml:
+// it rewrites each base ghcr.io image ref to the resolved ref, and patches the
+// git-server container's memory limit. Pure (no I/O) so it can be unit-tested.
+func renderDevLoopKustomization(refs map[string]string, gitServerMemLimit string) string {
 	var images strings.Builder
 	for _, name := range flywheelSchema.ImageNames {
 		ref := refs[name]
@@ -44,17 +59,35 @@ func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, re
 			fmt.Fprintf(&images, "    newTag: %s\n", newTag)
 		}
 	}
-	kustomization := fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
+	return fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
   - ../base
 images:
-%s`, images.String())
+%s%s`, images.String(), gitServerMemoryPatch(gitServerMemLimit))
+}
 
-	if err := os.WriteFile(filepath.Join(tmp, "kustomization.yaml"), []byte(kustomization), 0o644); err != nil {
-		return err
-	}
-	return a.ApplyKustomize(ctx, tmp, out)
+// gitServerMemoryPatch returns a kustomize strategic-merge patch block that
+// sets the git-server container's memory limit. Shared shape with the
+// flywheel-dev-loop Flux Kustomization (builders-kustomization.yaml.tmpl) so
+// the direct-apply path and the Flux reconcile path converge on one value.
+func gitServerMemoryPatch(limit string) string {
+	return fmt.Sprintf(`patches:
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: git-server
+        namespace: flywheel-system
+      spec:
+        template:
+          spec:
+            containers:
+              - name: git-server
+                resources:
+                  limits:
+                    memory: %s
+`, limit)
 }
 
 // splitImageRef splits an image reference into newName + newTag. If the

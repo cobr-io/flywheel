@@ -35,6 +35,15 @@ git:
   # on one machine. Defaults to main.
   integration_branch: main
 
+git_server:
+  # Memory limit for the in-cluster git-server that serves your app worktrees
+  # to the build jobs. The 128Mi default suits small repos; git's pack
+  # compression on `git-upload-pack` of a large monorepo can spike past it and
+  # get the pod OOMKilled mid-build (the build then fails and app pods stay
+  # Pending). Raise this (e.g. 512Mi or 1Gi) if you build from sizeable repos.
+  # Applied to the running cluster on the next `flywheel up`.
+  memory_limit: 128Mi
+
 # workspace:
 #   # Sibling app repos this cluster's dev loop needs, one entry per worktree
 #   # under paths.workspaces_root. `flywheel up` clones any that are missing;
