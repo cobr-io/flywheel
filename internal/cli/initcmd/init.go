@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"time"
 
@@ -476,7 +475,3 @@ func gitCmd(cwd string, args ...string) error {
 	}
 	return nil
 }
-
-// Used by callers building deterministic test environments. Returns the
-// canonical sigil for the running platform (purely informational).
-func Platform() string { return fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH) }

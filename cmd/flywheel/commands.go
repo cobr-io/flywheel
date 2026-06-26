@@ -129,7 +129,7 @@ func newInitCmd() *cobra.Command {
 }
 
 func newUpCmd() *cobra.Command {
-	var yes, yesAdd, wait, clone, noClone bool
+	var wait, clone, noClone bool
 	cmd := &cobra.Command{
 		Use:   "up",
 		Short: "Reconcile cluster to flywheel.yaml",
@@ -150,19 +150,14 @@ func newUpCmd() *cobra.Command {
 				clonePtr = &v
 			}
 			return up.Run(context.Background(), up.Options{
-				RepoDir:         wd,
-				Yes:             yes,
-				YesAdd:          yesAdd,
-				Wait:            wait,
-				Clone:           clonePtr,
-				Stdout:          os.Stdout,
-				Stdin:           os.Stdin,
-				FlywheelRepoURL: os.Getenv("FLYWHEEL_REPO_URL"),
+				RepoDir: wd,
+				Wait:    wait,
+				Clone:   clonePtr,
+				Stdout:  os.Stdout,
+				Stdin:   os.Stdin,
 			})
 		},
 	}
-	cmd.Flags().BoolVar(&yes, "yes", false, "approve destructive operations")
-	cmd.Flags().BoolVar(&yesAdd, "yes-additive", false, "approve +additive operations only")
 	cmd.Flags().BoolVar(&wait, "wait", true, "wait for Flux Kustomizations Ready before returning")
 	cmd.Flags().BoolVar(&clone, "clone", false, "clone missing app worktrees from their recorded source")
 	cmd.Flags().BoolVar(&noClone, "no-clone", false, "skip cloning missing app worktrees")

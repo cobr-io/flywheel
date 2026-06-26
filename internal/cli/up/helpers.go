@@ -11,36 +11,12 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/cobr-io/flywheel/internal/cli/applier"
-	"github.com/cobr-io/flywheel/internal/cli/reconcile"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 )
-
-// applyOrphanDeletes performs `flywheel up` step 12: delete the approved
-// deletable-destructive resources; report (don't delete) orphaned
-// CRDs/PVCs.
-func applyOrphanDeletes(ctx context.Context, a *applier.Applier, plan *reconcile.Plan, out io.Writer) error {
-	for _, c := range plan.DeletableDestructive() {
-		ref := applier.ResourceRef{Group: c.Group, Kind: c.Kind, Namespace: c.Namespace, Name: c.Name}
-		if err := a.DeleteResource(ctx, ref, out); err != nil {
-			style.Warn(out, "delete %s %s/%s: %v", c.GVKLabel(), c.Namespace, c.Name, err)
-		}
-	}
-	for _, c := range plan.Orphaned() {
-		if c.Tier == reconcile.OrphanCRD {
-			style.Detail(out, "orphaned (not deleted): %s %s/%s — CRDs are never auto-removed; delete it manually if unused",
-				c.GVKLabel(), c.Namespace, c.Name)
-			continue
-		}
-		style.Detail(out, "orphaned (not deleted): %s %s/%s — run `flywheel clean` to remove",
-			c.GVKLabel(), c.Namespace, c.Name)
-	}
-	return nil
-}
 
 // waitForFluxKustomizations polls every Flux Kustomization across the
 // cluster until each reports Ready or `timeout` elapses. Surfaces
@@ -303,6 +279,3 @@ func mkcertRootSecret(caPEM string) *unstructured.Unstructured {
 	secret.SetGroupVersionKind(schema.GroupVersionKind{Version: "v1", Kind: "Secret"})
 	return secret
 }
-
-// Silence unused-import warning if metav1 is dropped during refactor.
-var _ = metav1.ObjectMeta{}

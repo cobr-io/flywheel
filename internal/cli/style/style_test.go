@@ -127,25 +127,6 @@ func TestSummary_OffMode_NoPrefix(t *testing.T) {
 	})
 }
 
-func TestHighlight_DimWrappers_NoopWhenDisabled(t *testing.T) {
-	withEnabled(t, false, func() {
-		if got := Highlight("x"); got != "x" {
-			t.Errorf("Highlight off should be no-op, got %q", got)
-		}
-		if got := Dim("y"); got != "y" {
-			t.Errorf("Dim off should be no-op, got %q", got)
-		}
-	})
-	withEnabled(t, true, func() {
-		if got := Highlight("x"); !strings.Contains(got, "\033[1m") || !strings.Contains(got, "x") {
-			t.Errorf("Highlight on missing bold or text: %q", got)
-		}
-		if got := Dim("y"); !strings.Contains(got, "\033[2m") || !strings.Contains(got, "y") {
-			t.Errorf("Dim on missing dim or text: %q", got)
-		}
-	})
-}
-
 func TestInit_NoColorEnvForcesOff(t *testing.T) {
 	t.Setenv("NO_COLOR", "1")
 	t.Setenv("CLICOLOR_FORCE", "")

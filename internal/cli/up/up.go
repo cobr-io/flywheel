@@ -1,14 +1,11 @@
-// Package up implements `flywheel up` per design § flywheel up (15-step
-// pipeline). The Run() function orchestrates; per-step logic lives in
-// the helper packages (k3d, dockermirror, mirror, applier, flux, etc.).
+// Package up implements `flywheel up` per design § flywheel up. The Run()
+// function orchestrates; per-step logic lives in the helper packages
+// (k3d, dockermirror, mirror, applier, flux, etc.).
 //
-// v0.1.0 caveats — these step-level simplifications are documented as
-// "deviations" in the Phase 1 gate evidence and tracked for v0.1.X:
-//
-//   - Step 4 (reconcile diff): always treated as additive in v0.1.0;
-//     no destructive-set detection, no `--yes-additive` gating beyond
-//     a verbose log. T1.4/T1.14/T1.15 land in v0.1.1.
-//   - Step 12 (orphan deletes): stub. Same v0.1.1 follow-up.
+// Destructive reconciliation is intentionally NOT flywheel's job: Flux
+// owns the git-managed layers (every Flux Kustomization is prune:true)
+// and flywheel applies only recreatable machinery directly, so there is
+// no destructive-set detection or deletion gating in this pipeline.
 package up
 
 import (
@@ -34,7 +31,6 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/imagepin"
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	"github.com/cobr-io/flywheel/internal/cli/mirror"
-	"github.com/cobr-io/flywheel/internal/cli/reconcile"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	"github.com/cobr-io/flywheel/internal/cli/worktree"
@@ -43,8 +39,6 @@ import (
 // Options are the user-facing knobs for `up`.
 type Options struct {
 	RepoDir string // client repo dir; defaults to cwd
-	Yes     bool   // approve destructive ops
-	YesAdd  bool   // approve +additive only
 	Wait    bool   // wait for Flux Kustomizations Ready before returning
 	Stdout  io.Writer
 	Stdin   io.Reader // for the worktree-reconcile confirmation prompt
@@ -54,7 +48,6 @@ type Options struct {
 	Clone *bool
 
 	// Test seams.
-	FlywheelRepoURL string // informational only; embedded assets are the source of truth
 	CacheRoot       string
 	HomeOverride    string
 	FlywheelSHA     string // tests inject a deterministic SHA; production uses embedcache.Populate
@@ -128,26 +121,8 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	style.Detail(out, "flywheel cache: %s @ %s", cacheDir, sha[:12])
 
-	// Step 4 — reconcile diff. v0.1.0 has no destructive-set detection:
-	// every `up` is treated as additive. (The prior profile-switch
-	// detection was removed along with the multi-profile machinery —
-	// there is now a single local TLS setup, so nothing to switch away
-	// from.) Destructive-set detection + gating lands in v0.1.1 (plan
-	// T1.4/T1.14/T1.15); the empty plan keeps step 12 a no-op until then.
+	// kube context for the applier + mirror push below.
 	kubeContext := k3d.KubeContext(cfg.Cluster.Name)
-	plan := &reconcile.Plan{}
-	if len(plan.Changes) > 0 {
-		style.Step(out, "reconcile diff:")
-		fmt.Fprint(out, plan.Render())
-		approval := reconcile.Approval{Yes: opts.Yes, YesAdditive: opts.YesAdd}
-		if plan.NeedsConfirmation(approval) {
-			return fmt.Errorf("step 4: destructive changes require --yes (see plan above); "+
-				"%d resource(s) would be deleted. CRDs/PVCs are never auto-deleted regardless",
-				len(plan.DeletableDestructive()))
-		}
-	} else {
-		style.Step(out, "reconcile diff: no destructive changes")
-	}
 
 	// Step 5 — load age key + mkcert generate.
 	ageKeyContent, ageKeyPath, err := loadAgeKey(opts.RepoDir, cfg.Client.Name, opts.HomeOverride)
@@ -371,15 +346,6 @@ func Run(ctx context.Context, opts Options) error {
 		func() error { return a.ApplyKustomize(ctx, bootstrapDir, out) },
 	); err != nil {
 		style.Warn(out, "step 11d: %v", err)
-	}
-
-	// Step 12 — orphan deletes: apply the approved destructive set from
-	// step 4 (CRDs/PVCs are tiered out and only reported).
-	if len(plan.Changes) > 0 {
-		style.Step(out, "applying approved deletions")
-		if err := applyOrphanDeletes(ctx, a, plan, out); err != nil {
-			return fmt.Errorf("step 12: %w", err)
-		}
 	}
 
 	// Step 13 — create age-key Secret + (mkcert) local-cert + mkcert-ca Secrets.

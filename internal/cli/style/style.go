@@ -49,7 +49,6 @@ const (
 	dim        = "\033[2m"
 	red        = "\033[31m"
 	green      = "\033[32m"
-	yellow     = "\033[33m"
 	cyan       = "\033[36m"
 	boldCyan   = "\033[1;36m"
 	boldYellow = "\033[1;33m"
@@ -78,9 +77,6 @@ var verbose bool
 // parsed -v/--verbose value.
 func SetVerbose(v bool) { verbose = v }
 
-// Verbose reports whether the -v/--verbose flag was set.
-func Verbose() bool { return verbose }
-
 // Init configures the package for the rest of this process. Pass
 // forceOff=true to honor an explicit `--no-color` style flag from the
 // CLI front door; otherwise it's the env + TTY logic described in
@@ -98,23 +94,9 @@ func Init(forceOff bool) {
 	}
 }
 
-// Enabled reports whether colour + glyph output is on. Callers that
-// need to lay out tabular output should branch on this so widths
-// match the rendered glyph width.
-func Enabled() bool { return enabled }
-
 func envSet(name string) bool {
 	_, ok := os.LookupEnv(name)
 	return ok
-}
-
-// wrap applies an ANSI code (and reset) around text when colour is on.
-// When off it returns text untouched — callers don't have to branch.
-func wrap(code, text string) string {
-	if !enabled {
-		return text
-	}
-	return code + text + reset
 }
 
 // Step prints a top-level step header. Bold cyan + ▶ glyph in TTY mode,
@@ -200,13 +182,3 @@ func Summary(w io.Writer, format string, a ...any) {
 		fmt.Fprintf(w, "%s\n", line)
 	}
 }
-
-// Highlight returns `text` wrapped in bold (no colour) when enabled.
-// Useful for embedding inside a longer line without taking ownership
-// of the whole print, e.g. style.Step("cluster %s up", style.Highlight(name)).
-func Highlight(text string) string { return wrap(bold, text) }
-
-// Dim returns `text` wrapped in dim (no colour) when enabled. Same
-// embedding intent as Highlight; used for inlining paths inside a
-// summary line.
-func Dim(text string) string { return wrap(dim, text) }

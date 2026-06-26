@@ -93,7 +93,6 @@ func main() {
 
 	if err := (&controller.GitRepositoryBuildReconciler{
 		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
 		Config: cfg,
 	}).SetupWithManager(mgr); err != nil {
 		ctrl.Log.Error(err, "unable to create controller")

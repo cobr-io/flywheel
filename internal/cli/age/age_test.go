@@ -30,18 +30,14 @@ func TestFixedGenerator_DeterministicForTests(t *testing.T) {
 	}
 }
 
-func TestWritePrivateKey_Mode0600(t *testing.T) {
-	// Redirect HOME for test isolation.
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-
-	path, err := WritePrivateKey("acme", "AGE-SECRET-KEY-TEST")
+func TestWritePrivateKeyAt_Mode0600(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "age.key")
+	got, err := WritePrivateKeyAt(path, "AGE-SECRET-KEY-TEST")
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := filepath.Join(tmp, ".config", "flywheel", "acme", "age.key")
-	if path != want {
-		t.Errorf("path = %q, want %q", path, want)
+	if got != path {
+		t.Errorf("path = %q, want %q", got, path)
 	}
 	info, err := os.Stat(path)
 	if err != nil {
@@ -52,15 +48,13 @@ func TestWritePrivateKey_Mode0600(t *testing.T) {
 	}
 }
 
-func TestWritePrivateKey_RefusesOverwrite(t *testing.T) {
-	tmp := t.TempDir()
-	t.Setenv("HOME", tmp)
-
-	if _, err := WritePrivateKey("acme", "AGE-SECRET-KEY-FIRST"); err != nil {
+func TestWritePrivateKeyAt_RefusesOverwrite(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "age.key")
+	if _, err := WritePrivateKeyAt(path, "AGE-SECRET-KEY-FIRST"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := WritePrivateKey("acme", "AGE-SECRET-KEY-SECOND"); err == nil {
-		t.Fatal("second WritePrivateKey should fail to avoid silent overwrite")
+	if _, err := WritePrivateKeyAt(path, "AGE-SECRET-KEY-SECOND"); err == nil {
+		t.Fatal("second WritePrivateKeyAt should fail to avoid silent overwrite")
 	}
 }
 
@@ -69,7 +63,11 @@ func TestReadPrivateKey_RoundTrip(t *testing.T) {
 	t.Setenv("HOME", tmp)
 
 	written := "AGE-SECRET-KEY-ROUND-TRIP-TEST"
-	if _, err := WritePrivateKey("acme", written); err != nil {
+	path, err := HostKeyPath("acme")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := WritePrivateKeyAt(path, written); err != nil {
 		t.Fatal(err)
 	}
 	got, _, err := ReadPrivateKey("acme")
