@@ -333,9 +333,12 @@ func Run(ctx context.Context, opts Options) error {
 	// Step 11a — apply dev-loop overlay.
 	devLoopDir := filepath.Join(cacheDir, "manifests", "dev-loop", "overlays", "local")
 	// Rewrite the overlay's image references for THIS client using the
-	// resolved (override-aware) refs from step 9.
+	// resolved (override-aware) refs from step 9, and patch git-server's
+	// memory limit (cfg.git_server.memory_limit). The same limit is rendered
+	// into the flywheel-dev-loop Flux Kustomization (step 11d) so this direct
+	// apply and Flux's reconcile agree.
 	if err := style.Spin(out, "bootstrap 11a: dev-loop overlay", func() error {
-		return converge.ApplyDevLoop(ctx, a, devLoopDir, resolvedImages, out)
+		return converge.ApplyDevLoop(ctx, a, devLoopDir, resolvedImages, cfg.GitServerMemoryLimit(), out)
 	}); err != nil {
 		return fmt.Errorf("step 11a: %w", err)
 	}

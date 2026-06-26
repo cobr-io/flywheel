@@ -31,6 +31,9 @@ type File struct {
 	// Optional.
 	Git Git `json:"git,omitempty"`
 
+	// Optional. Tunables for the in-cluster git-server (flywheel-system).
+	GitServer GitServer `json:"git_server,omitempty"`
+
 	// Optional. Declares the sibling app repos this cluster's dev loop needs,
 	// one entry per worktree under paths.workspaces_root. The single source of
 	// truth for `up`-clone and the local-only guard (see the 2026-06-17
@@ -94,6 +97,32 @@ type Git struct {
 	// to let local-only apps reach. Optional; defaults to "main" via
 	// File.IntegrationBranch().
 	IntegrationBranch string `json:"integration_branch,omitempty"`
+}
+
+// GitServer holds tunables for the in-cluster git-server Deployment that serves
+// app worktrees to the buildkit build jobs (flywheel-system).
+type GitServer struct {
+	// MemoryLimit is the container memory limit. The default (128Mi) is fine
+	// for small repos, but git's pack/compression on `git-upload-pack` of a
+	// large monorepo can spike past it and get the pod OOMKilled mid-build
+	// (issue #4) — raise it (e.g. 512Mi) when building from sizeable repos.
+	// Optional; defaults to DefaultGitServerMemoryLimit via
+	// File.GitServerMemoryLimit(). A Kubernetes memory quantity (128Mi, 1Gi…).
+	MemoryLimit string `json:"memory_limit,omitempty"`
+}
+
+// DefaultGitServerMemoryLimit is the git-server container memory limit when
+// git_server.memory_limit is unset — the historical baked-in value, kept so
+// existing repos behave identically.
+const DefaultGitServerMemoryLimit = "128Mi"
+
+// GitServerMemoryLimit returns the configured git-server memory limit, or the
+// default ("128Mi") when unset.
+func (f *File) GitServerMemoryLimit() string {
+	if l := strings.TrimSpace(f.GitServer.MemoryLimit); l != "" {
+		return l
+	}
+	return DefaultGitServerMemoryLimit
 }
 
 // Workspace declares the sibling app repos this cluster depends on, keyed by
@@ -170,6 +199,14 @@ var worktreeNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 // disable the local-only guard (e.g. an embedded space), not to reproduce
 // git-check-ref-format exactly.
 var branchNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._/-]*$`)
+
+// memoryQuantityRe is a loose plausibility check for a Kubernetes memory
+// quantity (e.g. 128Mi, 512Mi, 1Gi, 256M). The unit suffix is required: a bare
+// number is a valid quantity (bytes) but for a memory limit it's always a typo
+// for the Mi/Gi form, so we reject it. This catches the likely mistakes (no
+// unit, a stray space) before the value reaches kustomize/the API server; it
+// does not reproduce resource.Quantity parsing exactly.
+var memoryQuantityRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|E|P|T|G|M|k)$`)
 
 // Parse unmarshals YAML into a File without semantic validation. Callers
 // run Validate (or ValidateLocal) afterwards depending on whether the
@@ -285,6 +322,11 @@ func Validate(f *File) error {
 	// local-only guard (it would compare against a branch nobody uses).
 	if b := f.Git.IntegrationBranch; b != "" && !branchNameRe.MatchString(b) {
 		es = append(es, ValidateError{"git.integration_branch", fmt.Sprintf("%q is not a valid branch name", b)})
+	}
+	// git_server.memory_limit is optional; a present value must look like a
+	// Kubernetes memory quantity (a typo would fail the Deployment apply later).
+	if l := strings.TrimSpace(f.GitServer.MemoryLimit); l != "" && !memoryQuantityRe.MatchString(l) {
+		es = append(es, ValidateError{"git_server.memory_limit", fmt.Sprintf("%q is not a valid memory quantity (e.g. 128Mi, 512Mi, 1Gi)", l)})
 	}
 
 	// workspace.repos: each entry needs a dir-safe name, exactly one of

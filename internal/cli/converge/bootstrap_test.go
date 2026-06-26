@@ -56,6 +56,14 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 	if strings.Contains(bk, "ghcr.io/cobr-io/git-auto-sync") {
 		t.Errorf("builders-kustomization.yaml has a dead git-auto-sync image rewrite:\n%s", bk)
 	}
+	// The flywheel-dev-loop Kustomization patches git-server's memory limit so
+	// Flux's reconcile agrees with the step-11a direct apply. cfg leaves
+	// git_server.memory_limit unset here, so it must render the default.
+	for _, want := range []string{"patches:", "name: git-server", "memory: 128Mi"} {
+		if !strings.Contains(bk, want) {
+			t.Errorf("builders-kustomization.yaml missing git-server memory patch %q:\n%s", want, bk)
+		}
+	}
 	if strings.Contains(bk, "k3d-acme-local-registry") {
 		t.Errorf("builders-kustomization.yaml leaked legacy local-registry form:\n%s", bk)
 	}
@@ -85,6 +93,35 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 	src := mustRead(t, filepath.Join(dir, "flywheel-source.yaml"))
 	if !strings.Contains(src, "commit: abc123def456abc123def456abc123def456abcd") {
 		t.Errorf("flywheel-source.yaml missing commit SHA:\n%s", src)
+	}
+}
+
+// A configured git_server.memory_limit flows into the flywheel-dev-loop
+// Kustomization's patch, so Flux reconciles the cluster to the raised limit.
+func TestRenderBootstrap_GitServerMemoryLimit(t *testing.T) {
+	cfg := &flywheelSchema.File{}
+	cfg.Client.Name = "acme"
+	cfg.Cluster.Name = "acme-local"
+	cfg.Cluster.Registry = "acme-local-registry"
+	cfg.Cluster.RegistryPort = 50001
+	cfg.Flux.IntervalLocal = "10s"
+	cfg.Local.Domain = "localdev.me"
+	cfg.GitServer.MemoryLimit = "512Mi"
+
+	refs := map[string]string{
+		"git-server":               "ghcr.io/cobr-io/git-server:v0.1.0",
+		"git-auto-sync":            "ghcr.io/cobr-io/git-auto-sync:v0.1.0",
+		"image-builder-controller": "ghcr.io/cobr-io/image-builder-controller:v0.1.0",
+	}
+	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops", "main")
+	if err != nil {
+		t.Fatalf("RenderBootstrap: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	bk := mustRead(t, filepath.Join(dir, "builders-kustomization.yaml"))
+	if !strings.Contains(bk, "memory: 512Mi") {
+		t.Errorf("configured memory_limit not rendered into the dev-loop patch:\n%s", bk)
 	}
 }
 

@@ -40,3 +40,24 @@ spec:
     - name: ghcr.io/cobr-io/image-builder-controller
       newName: {{ .ImageBuilderControllerImageName }}
       newTag: {{ .ImageBuilderControllerImageTag }}
+  # git-server memory limit (cfg.git_server.memory_limit, default 128Mi). The
+  # base manifest bakes in 128Mi; this patch lets a client raise it for large
+  # repos whose git-upload-pack would otherwise OOMKill the pod (issue #4).
+  # Rendered fresh on every `up`, so a change reconciles onto a live cluster —
+  # and matches the limit the step-11a direct apply (ApplyDevLoop) sets, so the
+  # two paths don't fight.
+  patches:
+    - patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: git-server
+          namespace: flywheel-system
+        spec:
+          template:
+            spec:
+              containers:
+                - name: git-server
+                  resources:
+                    limits:
+                      memory: {{ .GitServerMemoryLimit }}

@@ -99,6 +99,7 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		"FlywheelSHA":                     flywheelSHA,
 		"GitServerImageName":              gsName,
 		"GitServerImageTag":               gsTag,
+		"GitServerMemoryLimit":            cfg.GitServerMemoryLimit(),
 		"GitAutoSyncImageRef":             refs["git-auto-sync"],
 		"GitAutoSyncImageName":            gasName,
 		"GitAutoSyncImageTag":             gasTag,
