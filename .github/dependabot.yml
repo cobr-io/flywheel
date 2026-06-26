@@ -1,0 +1,51 @@
+# Dependabot: automated dependency-update PRs.
+#
+# Enabling this file also turns on GitHub's Dependabot security alerts for the
+# repo (go.mod is checked against the GitHub Advisory DB). Day-to-day version
+# bumps land here as grouped PRs; deep, reachability-aware Go vuln scanning is
+# handled separately by .github/workflows/govulncheck.yml.
+version: 2
+updates:
+  # Go modules (go.mod / go.sum). Minor+patch bumps are batched into a single
+  # weekly PR to cut noise; major bumps come as individual PRs so they get the
+  # scrutiny a breaking change deserves.
+  - package-ecosystem: gomod
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      go-modules:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  # GitHub Actions pinned in .github/workflows/*. Supply-chain hygiene: keeps
+  # checkout / setup-go / goreleaser-action et al. current.
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # Base images in the three root runtime Dockerfiles
+  # (Dockerfile.git-server / .git-auto-sync / .image-builder-controller).
+  # directory: "/" is non-recursive, so the busybox testdata fixture is left
+  # alone.
+  - package-ecosystem: docker
+    directory: "/"
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: "build(deps)"
+    groups:
+      docker:
+        patterns: ["*"]
