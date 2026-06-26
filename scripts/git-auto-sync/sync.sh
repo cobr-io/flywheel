@@ -96,6 +96,43 @@ current_branch() {
     git -C "$WORKTREE" rev-parse --abbrev-ref HEAD 2>/dev/null || true
 }
 
+# heal_index_if_corrupt rebuilds a corrupt/unreadable .git/index from HEAD.
+#
+# The worktree's .git is bind-mounted and written by BOTH this container (root)
+# and the host developer (see the core.sharedRepository note above). A
+# concurrent or interrupted index write can truncate or garble .git/index; git
+# then aborts every index-reading operation with "fatal: index file corrupt".
+# Left unhealed that wedges the loop: the diff guard below misreads the error as
+# "uncommitted changes" (NOT hard-resetting) and the rebase path misreads it as
+# a conflict, so the loop stalls forever on a transient corruption (issue #4).
+#
+# Rebuilding only rewrites .git/index from the committed tree — working-tree
+# file contents are left untouched, so no uncommitted *edits* are lost (the
+# staged/unstaged split is reset, which a sync robot doesn't own). Best-effort:
+# logs and returns 0 either way so the loop continues and retries.
+heal_index_if_corrupt() {
+    local err
+    # ls-files reads the index and nothing else; capture only stderr so a clean
+    # index (exit 0) short-circuits. The `&&` keeps this safe under `set -e`.
+    err=$(git -C "$WORKTREE" ls-files 2>&1 >/dev/null) && return 0
+    case "$err" in
+        *"index file corrupt"* | *"index file smaller than expected"* | *"bad index file"* | *"unknown index"*)
+            echo "$(date '+%F %T') - .git/index is corrupt ($err); rebuilding from HEAD (working-tree files preserved)"
+            rm -f "$WORKTREE/.git/index"
+            if git -C "$WORKTREE" reset -q; then
+                echo "$(date '+%F %T') - .git/index rebuilt from HEAD"
+            else
+                echo "$(date '+%F %T') - warning: index rebuild failed (no commits yet?); will retry next loop"
+            fi
+            ;;
+        *)
+            # Some other ls-files failure (e.g. the worktree isn't mounted yet);
+            # not corruption — leave it for the existing retry paths.
+            : ;;
+    esac
+    return 0
+}
+
 # The branch the Flux GitRepository is currently pointed at. Used for
 # drift-correction: if an external actor (e.g. a `flywheel up` bootstrap
 # re-apply, or any future re-applier) clobbers spec.ref.branch without a
@@ -233,6 +270,10 @@ while true; do
         continue
     fi
 
+    # Rebuild a corrupt .git/index before any index-reading op below, so a
+    # transient corruption self-heals instead of wedging the loop (issue #4).
+    heal_index_if_corrupt
+
     # Resume IAC once a switch has settled: we suspended it on the switch,
     # the new branch is now the tracked one (patch succeeded), and we've
     # done at least one sync iteration on it. Done at the top so it still
@@ -341,7 +382,19 @@ while true; do
             # otherwise --force-with-lease would rewind the bare repo back over
             # the IUA bump. Untracked files are intentionally ignored: reset
             # --hard leaves them, so they're not at risk and shouldn't stall us.
-            if ! git -C "$WORKTREE" diff --quiet || ! git -C "$WORKTREE" diff --cached --quiet; then
+            # Classify the worktree precisely. `git diff --quiet` exits 0
+            # (clean), 1 (real changes), or >1 (git error — e.g. an index too
+            # corrupt for heal_index_if_corrupt to rebuild this round). The old
+            # `! git diff --quiet` collapsed >1 into "true", so a transient
+            # corruption was misreported as uncommitted work and stalled here
+            # forever (issue #4). Capture the codes without tripping `set -e`.
+            unstaged=0; git -C "$WORKTREE" diff --quiet 2>/dev/null || unstaged=$?
+            staged=0; git -C "$WORKTREE" diff --cached --quiet 2>/dev/null || staged=$?
+            if [ "$unstaged" -gt 1 ] || [ "$staged" -gt 1 ]; then
+                echo "$(date '+%F %T') - worktree index unreadable (git diff errored); skipping fast-forward, retrying in 10s (next loop rebuilds the index)"
+                sleep 10
+                continue
+            elif [ "$unstaged" -ne 0 ] || [ "$staged" -ne 0 ]; then
                 echo "$(date '+%F %T') - bare advanced to $bare_head but worktree has uncommitted changes; NOT hard-resetting (would lose work). Commit to integrate the bump; retrying in 10s."
                 sleep 10
                 continue
