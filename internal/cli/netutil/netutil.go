@@ -24,7 +24,21 @@ import (
 //     The common case — a registry/cluster already holding 0.0.0.0:<port>
 //     — is still caught, because 0.0.0.0 subsumes 127.0.0.1.
 func PortIsBindable(port int) bool {
-	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	return bindable(fmt.Sprintf("127.0.0.1:%d", port))
+}
+
+// PortIsBindableWildcard reports whether a TCP listener can be opened on
+// 0.0.0.0:<port> — the exact address docker/k3d publishes a host port on.
+// It is the faithful counterpart to PortIsBindable for the `flywheel up`
+// host-port collision check: a process holding the port on a specific
+// non-loopback interface fails this probe (as it would fail k3d's bind)
+// but slips past the loopback-only PortIsBindable. The TOCTOU caveat still
+// applies — the result is only valid at the instant of the probe.
+func PortIsBindableWildcard(port int) bool {
+	return bindable(fmt.Sprintf("0.0.0.0:%d", port))
+}
+
+func bindable(addr string) bool {
 	l, err := net.Listen("tcp", addr)
 	if err != nil {
 		return false

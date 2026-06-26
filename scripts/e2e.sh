@@ -43,8 +43,24 @@ flywheel:
     git-auto-sync: flywheel-dev/git-auto-sync:$TAG
     image-builder-controller: flywheel-dev/image-builder-controller:$TAG
 EOF
+	# Issue #1: squat the just-allocated http_port so `up` step 5b must heal
+	# the collision; the scenarios then prove the cluster came up on the new
+	# port. (Matches the k3d-e2e CI job.)
+	INIT_HTTP_PORT=$(awk '/^[[:space:]]*http_port:/{gsub(/[^0-9]/,"",$2); print $2; exit}' flywheel.yaml)
+	echo "==> squatting http_port $INIT_HTTP_PORT (0.0.0.0) before up"
+	python3 -m http.server "$INIT_HTTP_PORT" --bind 0.0.0.0 >/dev/null 2>&1 &
+	SQUAT_PID=$!
+	for _ in $(seq 1 20); do
+		if (exec 3<>/dev/tcp/127.0.0.1/"$INIT_HTTP_PORT") 2>/dev/null; then exec 3>&- 3<&-; break; fi
+		sleep 0.25
+	done
 	echo "==> [3/4] flywheel up"
 	flywheel up
+	kill "$SQUAT_PID" 2>/dev/null || true
+	HEALED_HTTP_PORT=$(awk '/^[[:space:]]*http_port:/{gsub(/[^0-9]/,"",$2); print $2; exit}' flywheel.yaml)
+	[ "$HEALED_HTTP_PORT" != "$INIT_HTTP_PORT" ] ||
+		{ echo "FAIL: http_port $INIT_HTTP_PORT squatted but up did not heal it" >&2; exit 1; }
+	echo "==> host-port heal OK: http_port $INIT_HTTP_PORT → $HEALED_HTTP_PORT"
 )
 
 echo "==> [4/4] scenarios 1 + 5"

@@ -130,7 +130,25 @@ jobs:
               git-auto-sync: flywheel-dev/git-auto-sync:ci
               image-builder-controller: flywheel-dev/image-builder-controller:ci
           EOF
+          # Issue #1: prove `up` heals a host-port collision instead of
+          # crashing k3d. Squat the just-allocated http_port so step 5b must
+          # reallocate it; the scenarios below then prove the cluster still
+          # came up healthy on the new port.
+          INIT_HTTP_PORT=$(awk '/^[[:space:]]*http_port:/{gsub(/[^0-9]/,"",$2); print $2; exit}' flywheel.yaml)
+          echo "squatting http_port $INIT_HTTP_PORT (0.0.0.0) before up"
+          python3 -m http.server "$INIT_HTTP_PORT" --bind 0.0.0.0 >/dev/null 2>&1 &
+          SQUAT_PID=$!
+          for i in $(seq 1 20); do
+            if (exec 3<>/dev/tcp/127.0.0.1/$INIT_HTTP_PORT) 2>/dev/null; then exec 3>&- 3<&-; break; fi
+            sleep 0.25
+          done
           flywheel up
+          kill "$SQUAT_PID" 2>/dev/null || true
+          HEALED_HTTP_PORT=$(awk '/^[[:space:]]*http_port:/{gsub(/[^0-9]/,"",$2); print $2; exit}' flywheel.yaml)
+          if [ "$HEALED_HTTP_PORT" = "$INIT_HTTP_PORT" ]; then
+            echo "::error::http_port $INIT_HTTP_PORT was squatted but up did not heal it (still $HEALED_HTTP_PORT)"; exit 1
+          fi
+          echo "host-port heal OK: http_port $INIT_HTTP_PORT (squatted) → $HEALED_HTTP_PORT"
           # Harden against the multi-node k3d image-import race: `k3d
           # image import` (up step 9) occasionally fails to land an image
           # on one of the two agents yet still returns success, so a pod
