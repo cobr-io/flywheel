@@ -231,6 +231,14 @@ func Run(ctx context.Context, opts Options) error {
 	// reference the registry path.
 	resolvedImages := imagepin.Resolve(cfg)
 	if !opts.SkipImageLoad {
+		// Pre-flight: dogfood overrides that name no registry can only come
+		// from a local `make images` build. Probe for all of them up front and
+		// stop with build guidance, rather than attempting a doomed pull
+		// mid-mirror (a cryptic Docker Hub "repository does not exist") or
+		// deferring to an in-cluster ImagePullBackOff after the cluster is up.
+		if missing := imagepin.CheckLocalOverrides(ctx, cfg); len(missing) > 0 {
+			return fmt.Errorf("step 9 (dogfood images): %w", imagepin.MissingDogfoodError(missing))
+		}
 		style.Step(out, "mirroring Flywheel images to the local registry")
 		for _, name := range schema.ImageNames {
 			ref := resolvedImages[name]
