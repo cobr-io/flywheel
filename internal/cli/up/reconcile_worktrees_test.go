@@ -213,6 +213,66 @@ func TestReconcileWorktrees_ExistingSkipped(t *testing.T) {
 	}
 }
 
+// A present worktree on a branch other than the declared one is warned about
+// (and left untouched), so the user learns their checkout doesn't match.
+func TestReconcileWorktrees_PresentWrongBranchWarns(t *testing.T) {
+	repo := t.TempDir()
+	wsRoot := t.TempDir()
+	// Materialise the worktree, then move it onto an unexpected branch.
+	wt := filepath.Join(wsRoot, "web")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wt, "init", "-q", "-b", "main")
+	git(t, wt, "config", "user.email", "t@example.com")
+	git(t, wt, "config", "user.name", "t")
+	git(t, wt, "commit", "-q", "--allow-empty", "-m", "init")
+	git(t, wt, "checkout", "-q", "-b", "feature/x")
+	cfg := cfgWith(schema.WorkspaceRepo{Name: "web", URL: srcRepo(t), Branch: "develop"})
+
+	var out bytes.Buffer
+	reconcileWorktrees(context.Background(), Options{RepoDir: repo, Clone: boolPtr(true), Stdout: &out}, cfg, wsRoot, &out)
+
+	got := out.String()
+	if !strings.Contains(got, "feature/x") || !strings.Contains(got, `declared "develop"`) {
+		t.Errorf("expected a branch-mismatch warning naming both branches, got: %s", got)
+	}
+	if strings.Contains(got, "web present  (") {
+		t.Errorf("a mismatched worktree should not get the plain OK 'present' line, got: %s", got)
+	}
+	// Still on its own branch — not switched.
+	b, _ := exec.Command("git", "-C", wt, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	if strings.TrimSpace(string(b)) != "feature/x" {
+		t.Errorf("present worktree must be left on its branch, got %q", strings.TrimSpace(string(b)))
+	}
+}
+
+// A present worktree that IS on the declared branch gets the plain OK line, no warning.
+func TestReconcileWorktrees_PresentRightBranchOK(t *testing.T) {
+	repo := t.TempDir()
+	wsRoot := t.TempDir()
+	wt := filepath.Join(wsRoot, "web")
+	if err := os.MkdirAll(wt, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	git(t, wt, "init", "-q", "-b", "develop")
+	git(t, wt, "config", "user.email", "t@example.com")
+	git(t, wt, "config", "user.name", "t")
+	git(t, wt, "commit", "-q", "--allow-empty", "-m", "init")
+	cfg := cfgWith(schema.WorkspaceRepo{Name: "web", URL: srcRepo(t), Branch: "develop"})
+
+	var out bytes.Buffer
+	reconcileWorktrees(context.Background(), Options{RepoDir: repo, Clone: boolPtr(true), Stdout: &out}, cfg, wsRoot, &out)
+
+	got := out.String()
+	if !strings.Contains(got, "web present") {
+		t.Errorf("a worktree on the declared branch should get the OK present line, got: %s", got)
+	}
+	if strings.Contains(got, "not the declared") {
+		t.Errorf("no mismatch warning expected when on the declared branch, got: %s", got)
+	}
+}
+
 // Two builders sharing one worktree have a single block entry → cloned once,
 // and neither is flagged undeclared.
 func TestReconcileWorktrees_SharedWorktreeClonedOnce(t *testing.T) {
