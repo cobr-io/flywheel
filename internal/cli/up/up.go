@@ -457,13 +457,24 @@ func loadAgeKey(repoDir, clientName, homeOverride string) (content, path string,
 func reconcileWorktrees(ctx context.Context, opts Options, cfg *schema.File, wsRoot string, out io.Writer) {
 	declared := make(map[string]bool, len(cfg.Workspace.Repos))
 	var clonable []schema.WorkspaceRepo
-	type presentRepo struct{ name, path string }
+	type presentRepo struct {
+		name, path           string
+		wantBranch, onBranch string // declared vs. actual; both "" when no branch is declared
+	}
 	var present []presentRepo
 	for _, r := range cfg.Workspace.Repos {
 		declared[r.Name] = true
 		dir := filepath.Join(wsRoot, r.Name)
 		if _, err := os.Stat(dir); err == nil {
-			present = append(present, presentRepo{r.Name, dir}) // leave it on its current branch
+			// A present worktree is left on whatever branch it's on —
+			// switching a repo out from under the user would be dangerous.
+			// We only read the actual branch to flag a mismatch against an
+			// explicit declared branch (skip the git call when none is set).
+			on := ""
+			if r.Branch != "" {
+				on = converge.CurrentBranch(dir)
+			}
+			present = append(present, presentRepo{name: r.Name, path: dir, wantBranch: r.Branch, onBranch: on})
 			continue
 		}
 		if r.LocalOnly {
@@ -483,6 +494,11 @@ func reconcileWorktrees(ctx context.Context, opts Options, cfg *schema.File, wsR
 			}
 		}
 		for _, p := range present {
+			if p.wantBranch != "" && p.onBranch != p.wantBranch {
+				style.Warn(out, "%s present but on branch %q, not the declared %q — leaving it as-is; run 'git -C %s checkout %s' if that's wrong",
+					p.name, p.onBranch, p.wantBranch, p.path, p.wantBranch)
+				continue
+			}
 			style.OK(out, "%-*s present  (%s)", w, p.name, p.path)
 		}
 	}
