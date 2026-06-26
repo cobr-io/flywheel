@@ -48,7 +48,7 @@ func TestCommandFlags(t *testing.T) {
 	cases := map[string][]string{
 		"doctor": {"quick"},
 		"init":   {"org", "version"},
-		"up":     {"yes", "yes-additive", "wait"},
+		"up":     {"wait"},
 		"down":   {"yes"},
 		"clean":  {"orphaned"},
 	}

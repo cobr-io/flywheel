@@ -96,7 +96,6 @@ func TestReapJobsForRepo(t *testing.T) {
 
 	r := &GitRepositoryBuildReconciler{
 		Client: c,
-		Scheme: scheme,
 		Config: Config{Namespace: ns},
 	}
 
@@ -134,7 +133,6 @@ func TestReapJobsForRepo_NoMatchesIsNotAnError(t *testing.T) {
 	c := fake.NewClientBuilder().WithScheme(scheme).Build()
 	r := &GitRepositoryBuildReconciler{
 		Client: c,
-		Scheme: scheme,
 		Config: Config{Namespace: "flywheel-system"},
 	}
 	if err := r.reapJobsForRepo(context.Background(), "nonexistent"); err != nil {
@@ -194,7 +192,6 @@ func TestReconcile_OrphanGRCleanup(t *testing.T) {
 
 	r := &GitRepositoryBuildReconciler{
 		Client: c,
-		Scheme: scheme,
 		Config: Config{Namespace: controllerNS, BuilderNamespace: appsNS},
 	}
 
@@ -414,7 +411,7 @@ func TestValidateBuildSecrets_Cluster(t *testing.T) {
 			Data:       map[string][]byte{"token": []byte("s3cr3t"), "empty": {}},
 		},
 	).Build()
-	r := &GitRepositoryBuildReconciler{Client: c, Scheme: scheme, Config: Config{Namespace: ns}}
+	r := &GitRepositoryBuildReconciler{Client: c, Config: Config{Namespace: ns}}
 
 	cases := []struct {
 		name    string

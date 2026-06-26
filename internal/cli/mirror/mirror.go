@@ -13,7 +13,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"net/http"
 	"time"
 
 	"github.com/go-git/go-git/v5"
@@ -107,7 +106,3 @@ func remoteHasSHA(remoteURL, sha string) (bool, error) {
 	}
 	return false, nil
 }
-
-// HTTPClient is exported so callers can plug in a custom transport for
-// tests (e.g. inject mock 404 / timeout behaviour). Unused at present.
-var HTTPClient = &http.Client{Timeout: 30 * time.Second}

@@ -152,13 +152,6 @@ func KubeContext(clusterName string) string {
 	return "k3d-" + clusterName
 }
 
-// ClusterExists reports whether a cluster of this name exists. Exported
-// for `flywheel up` step 4, which only computes a reconcile diff against
-// an already-running cluster.
-func ClusterExists(ctx context.Context, name string) (bool, error) {
-	return clusterExists(ctx, name)
-}
-
 // ClusterRunning reports whether the named cluster exists and has at least
 // one server node up. Exported for `flywheel up`'s host-port healing, which
 // must leave a running cluster's loadbalancer ports untouched (re-running up

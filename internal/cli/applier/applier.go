@@ -40,9 +40,8 @@ const FieldManager = "flux-controller"
 // Applier is reusable — build it once with a kubeconfig context, apply
 // many manifests over its lifetime.
 type Applier struct {
-	dyn     dynamic.Interface
-	mapper  *restmapper.DeferredDiscoveryRESTMapper
-	context string // kube context name (for diag)
+	dyn    dynamic.Interface
+	mapper *restmapper.DeferredDiscoveryRESTMapper
 }
 
 // ResetMapper invalidates the cached discovery data so newly-installed
@@ -73,7 +72,7 @@ func New(kubeconfigPath, contextName string) (*Applier, error) {
 	mapper := restmapper.NewDeferredDiscoveryRESTMapper(
 		memory.NewMemCacheClient(disc),
 	)
-	return &Applier{dyn: dyn, mapper: mapper, context: contextName}, nil
+	return &Applier{dyn: dyn, mapper: mapper}, nil
 }
 
 // ApplyKustomize builds the kustomization at `dir` and applies every
@@ -86,45 +85,13 @@ func (a *Applier) ApplyKustomize(ctx context.Context, dir string, out io.Writer)
 	return a.ApplyYAML(ctx, yamlBytes, out)
 }
 
-// ResourceRef identifies a single resource (no spec) — used to diff the
-// resource sets of two kustomize builds (e.g. old vs new infra profile).
+// ResourceRef identifies a single resource (no spec) — used by
+// DeleteResource and `flywheel clean` to address a resource for deletion.
 type ResourceRef struct {
 	Group     string
 	Kind      string
 	Namespace string
 	Name      string
-}
-
-// KustomizeResourceRefs builds the kustomization at `dir` and returns the
-// identity of every resource it produces (no spec). Used by `flywheel up`
-// step 4 to compute the destructive set on a profile switch.
-func KustomizeResourceRefs(dir string) ([]ResourceRef, error) {
-	raw, err := buildKustomize(dir)
-	if err != nil {
-		return nil, fmt.Errorf("kustomize build %s: %w", dir, err)
-	}
-	dec := yaml.NewYAMLOrJSONDecoder(strings.NewReader(string(raw)), 4096)
-	var refs []ResourceRef
-	for {
-		obj := &unstructured.Unstructured{}
-		if err := dec.Decode(obj); err != nil {
-			if err == io.EOF {
-				break
-			}
-			return nil, err
-		}
-		if obj.Object == nil {
-			continue
-		}
-		gvk := obj.GroupVersionKind()
-		refs = append(refs, ResourceRef{
-			Group:     gvk.Group,
-			Kind:      gvk.Kind,
-			Namespace: obj.GetNamespace(),
-			Name:      obj.GetName(),
-		})
-	}
-	return refs, nil
 }
 
 // ApplyYAML applies a (possibly multi-document) YAML blob. Each

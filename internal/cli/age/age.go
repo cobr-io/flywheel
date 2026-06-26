@@ -74,25 +74,11 @@ func HostKeyPath(clientName string) (string, error) {
 	return filepath.Join(dir, "age.key"), nil
 }
 
-// WritePrivateKey writes the private key to ~/.config/flywheel/<client>/age.key
-// with mode 0600. Creates parent dirs (0700) if missing.
-//
-// Refuses to overwrite an existing file — `init` should call LoadKeypair
-// first and only fall through to WritePrivateKey when no key exists. The
-// guard remains as a safety net so a buggy caller can't silently replace
-// a developer's key (which would orphan any committed SOPS files).
-func WritePrivateKey(clientName, privateKey string) (string, error) {
-	dir, err := HostKeyDir(clientName)
-	if err != nil {
-		return "", err
-	}
-	path := filepath.Join(dir, "age.key")
-	return WritePrivateKeyAt(path, privateKey)
-}
-
-// WritePrivateKeyAt is WritePrivateKey with an explicit on-disk path
-// (tests inject HomeOverride-derived paths). Same overwrite-refusal
-// semantics. Creates parent dirs (0700) if missing.
+// WritePrivateKeyAt writes the private key to an explicit on-disk path
+// with mode 0600 (tests inject HomeOverride-derived paths). Creates
+// parent dirs (0700) if missing. Refuses to overwrite an existing file
+// as a safety net so a buggy caller can't silently replace a developer's
+// key (which would orphan any committed SOPS files).
 func WritePrivateKeyAt(path, privateKey string) (string, error) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", fmt.Errorf("mkdir %s: %w", filepath.Dir(path), err)
@@ -106,26 +92,10 @@ func WritePrivateKeyAt(path, privateKey string) (string, error) {
 	return path, nil
 }
 
-// LoadKeypair reads ~/.config/flywheel/<client>/age.key, parses the
-// stored private key, and returns the full Keypair (private + derived
-// public) plus the path it was loaded from.
-//
-// `flywheel init` calls this first; if it returns fs.ErrNotExist the
-// caller falls through to Generator.Generate() + WritePrivateKey. This
-// preserves the per-developer identity across destroy/init cycles so
-// rendered .sops.yaml keeps matching any committed *.sops.yaml content.
-func LoadKeypair(clientName string) (Keypair, string, error) {
-	path, err := HostKeyPath(clientName)
-	if err != nil {
-		return Keypair{}, "", err
-	}
-	kp, err := LoadKeypairFromPath(path)
-	return kp, path, err
-}
-
-// LoadKeypairFromPath is LoadKeypair with an explicit on-disk path.
-// Returns fs.ErrNotExist (wrapped) when the file is missing, so
-// callers can errors.Is to fall through to keypair generation.
+// LoadKeypairFromPath reads the age key at an explicit on-disk path and
+// returns the full Keypair (private + derived public). Returns
+// fs.ErrNotExist (wrapped) when the file is missing, so callers can
+// errors.Is to fall through to keypair generation.
 func LoadKeypairFromPath(path string) (Keypair, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

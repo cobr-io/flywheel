@@ -171,20 +171,6 @@ func EnsureInCluster(ctx context.Context, ref, registryName string, registryPort
 	return mirrorToRegistry(ctx, ref, registryName, registryPort, imageName, version, stdout)
 }
 
-// EnsureInRegistry is the `flywheel add app` counterpart of EnsureInCluster.
-// add-app runs after `up`, which has already mirrored all three images into
-// the local registry, so this only computes the in-cluster pull ref the
-// per-app git-auto-sync Deployment references. A default is already in the
-// registry from `up` (ref computed, no docker work — add-app stays thin); an
-// override is (re-)pushed to be safe.
-func EnsureInRegistry(ctx context.Context, ref, registryName string, registryPort int, imageName, version string, stdout io.Writer) (string, error) {
-	if IsDefault(imageName, version, ref) {
-		_, pull := registryRefs(registryName, registryPort, imageName, version)
-		return pull, nil
-	}
-	return mirrorToRegistry(ctx, ref, registryName, registryPort, imageName, version, stdout)
-}
-
 // mirrorToRegistry ensures `ref` is in the host docker store (pull if it's a
 // remote/default ref), then tags+pushes it into the cluster's local registry
 // and returns the in-cluster pull ref. The tag is the immutable `:<version>`

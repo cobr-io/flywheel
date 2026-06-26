@@ -2,7 +2,6 @@ package imagepin
 
 import (
 	"context"
-	"io"
 	"strings"
 	"testing"
 
@@ -168,19 +167,5 @@ func TestMissingDogfoodError(t *testing.T) {
 		if !strings.Contains(msg, want) {
 			t.Errorf("message missing %q:\n%s", want, msg)
 		}
-	}
-}
-
-// A default ref in add-app resolves to the local-registry pull ref (`up` has
-// already mirrored it there) — computed with no docker work.
-func TestEnsureInRegistry_DefaultServedFromRegistry(t *testing.T) {
-	ref := DefaultRef("git-auto-sync", "v0.1.0")
-	got, err := EnsureInRegistry(context.Background(), ref, "acme-local-registry", 50001, "git-auto-sync", "v0.1.0", io.Discard)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	want := "k3d-acme-local-registry:5000/git-auto-sync:v0.1.0"
-	if got != want {
-		t.Errorf("default ref should resolve to the registry pull ref: got %q want %q", got, want)
 	}
 }

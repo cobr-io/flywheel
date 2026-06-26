@@ -16,7 +16,6 @@
 package controller
 
 import (
-	"errors"
 	"fmt"
 	"strings"
 )
@@ -122,6 +121,3 @@ const InClusterRegistryPort = "5000"
 func (c Config) RegistryURL() string {
 	return fmt.Sprintf("k3d-%s:%s", c.Registry, InClusterRegistryPort)
 }
-
-// ErrInvalidConfig is returned by Validate on missing fields.
-var ErrInvalidConfig = errors.New("invalid flywheel-config")
