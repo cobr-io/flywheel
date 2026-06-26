@@ -3,6 +3,7 @@ package imagepin
 import (
 	"context"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/cobr-io/flywheel/internal/cli/schema"
@@ -77,6 +78,95 @@ func TestDogfoodTag(t *testing.T) {
 	} {
 		if got := dogfoodTag(c.in); got != c.want {
 			t.Errorf("dogfoodTag(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+func TestHasRegistryHost(t *testing.T) {
+	for _, c := range []struct {
+		ref  string
+		want bool
+	}{
+		{"flywheel-dev/git-server:dogfood", false}, // make-images build: no registry host
+		{"local/git-server:dev", false},            // Docker Hub-style org/name
+		{"git-server:dogfood", false},              // bare library name
+		{"ghcr.io/cobr-io/git-server:v0.1.0", true},
+		{"localhost:5000/git-server:tag", true},
+		{"registry:5000/git-server", true}, // host with a port, no dot
+		{"my.registry/team/img:tag", true}, // host with a dot
+	} {
+		if got := hasRegistryHost(c.ref); got != c.want {
+			t.Errorf("hasRegistryHost(%q) = %v, want %v", c.ref, got, c.want)
+		}
+	}
+}
+
+func TestIsLocalOnlyOverride(t *testing.T) {
+	// The default ghcr ref is never local-only (it's pulled from a registry).
+	if isLocalOnlyOverride("git-server", "v0.1.0", DefaultRef("git-server", "v0.1.0")) {
+		t.Error("default ref misclassified as a local-only override")
+	}
+	// A registry-qualified override is pullable, not local-only.
+	if isLocalOnlyOverride("git-server", "v0.1.0", "ghcr.io/me/git-server:wip") {
+		t.Error("registry-qualified override misclassified as local-only")
+	}
+	// The documented dogfood pin is local-only.
+	if !isLocalOnlyOverride("git-server", "v0.1.0", "flywheel-dev/git-server:dogfood") {
+		t.Error("flywheel-dev dogfood pin should be a local-only override")
+	}
+}
+
+// CheckLocalOverrides flags only the local-only dogfood pins that are absent
+// from the docker store — skipping defaults, registry-qualified overrides, and
+// already-built images.
+func TestCheckLocalOverrides(t *testing.T) {
+	cfg := &schema.File{}
+	cfg.Flywheel.Version = "v0.1.0"
+	cfg.Flywheel.Images = map[string]string{
+		"git-server":               "flywheel-dev/git-server:dogfood",    // local-only, present below
+		"git-auto-sync":            "flywheel-dev/git-auto-sync:dogfood", // local-only, MISSING
+		"image-builder-controller": "ghcr.io/me/ibc:wip",                 // registry override, skipped
+	}
+	// Stub the docker probe: only git-server's ref is "built".
+	orig := inLocalDocker
+	t.Cleanup(func() { inLocalDocker = orig })
+	inLocalDocker = func(_ context.Context, ref string) bool {
+		return ref == "flywheel-dev/git-server:dogfood"
+	}
+
+	missing := CheckLocalOverrides(context.Background(), cfg)
+	if len(missing) != 1 {
+		t.Fatalf("want exactly 1 missing override, got %d: %+v", len(missing), missing)
+	}
+	if missing[0].Name != "git-auto-sync" || missing[0].Ref != "flywheel-dev/git-auto-sync:dogfood" {
+		t.Errorf("unexpected missing entry: %+v", missing[0])
+	}
+}
+
+// All defaults (no overrides) → nothing flagged, and the docker probe is never
+// even consulted for released refs.
+func TestCheckLocalOverrides_DefaultsClean(t *testing.T) {
+	cfg := &schema.File{}
+	cfg.Flywheel.Version = "v0.1.0"
+	orig := inLocalDocker
+	t.Cleanup(func() { inLocalDocker = orig })
+	inLocalDocker = func(context.Context, string) bool {
+		t.Fatal("inLocalDocker should not be probed for default refs")
+		return false
+	}
+	if missing := CheckLocalOverrides(context.Background(), cfg); len(missing) != 0 {
+		t.Errorf("defaults should flag nothing, got %+v", missing)
+	}
+}
+
+func TestMissingDogfoodError(t *testing.T) {
+	err := MissingDogfoodError([]MissingDogfood{
+		{Name: "git-auto-sync", Ref: "flywheel-dev/git-auto-sync:dogfood"},
+	})
+	msg := err.Error()
+	for _, want := range []string{"git-auto-sync", "flywheel-dev/git-auto-sync:dogfood", "make images", "docs/dev/dogfood.md"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("message missing %q:\n%s", want, msg)
 		}
 	}
 }

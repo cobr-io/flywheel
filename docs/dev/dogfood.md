@@ -43,6 +43,12 @@ published `ghcr.io/cobr-io/*` ones. You build them locally and pin the refs via
 If an override is unset and the corresponding ghcr.io ref hasn't been published,
 `flywheel up` fails fast with the exact override stanza you need to add.
 
+If an override *is* pinned to a `flywheel-dev/<name>:<tag>` ref but you haven't
+built it yet (you forgot step 1), `up` detects that up front — the ref names no
+registry, so it can't be pulled — and stops with a "run `make images`" message
+listing every missing image, instead of failing later with a cryptic in-cluster
+`ImagePullBackOff`.
+
 On colima/lima, your client repo must live under a host path the VM bind-mounts
 (typically `~/`, not `/tmp`) so the host worktree is visible inside the cluster.
 
