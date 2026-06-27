@@ -57,17 +57,24 @@ enable_push() {
 scan_workspaces() {
     for repo_dir in "${WORKSPACES_DIR}"/*; do
         [ -d "$repo_dir/.git" ] || continue
-        git config --global --add safe.directory "$repo_dir" 2>/dev/null || true
         local name bare
         name=$(basename "$repo_dir")
         bare="/srv/git/${name}.git"
-        if [ ! -d "$bare" ]; then
-            echo "Creating bare repo $bare from $repo_dir"
-            if ! git clone --bare "$repo_dir" "$bare" 2>&1; then
-                echo "WARN: failed to clone $repo_dir → $bare (will retry next scan)"
-                rm -rf "$bare"
-                continue
-            fi
+        # Steady-state fast path (issue #6): a bare repo, once created, keeps its
+        # config, export marker, and permissions on the PVC — so the periodic
+        # rescan only needs to NOTICE new worktrees, not re-touch existing ones.
+        # Skipping already-created repos collapses the rescan to a near-free stat
+        # loop; previously every pass re-ran enable_push (a recursive chmod over
+        # every loose object + two git config spawns) on every repo, plus a
+        # `git config --add safe.directory` that appended a duplicate line to the
+        # gitconfig unboundedly. (Ownership is already covered by the blanket
+        # `safe.directory '*'` set at startup, so the per-repo add was redundant.)
+        [ -d "$bare" ] && continue
+        echo "Creating bare repo $bare from $repo_dir"
+        if ! git clone --bare "$repo_dir" "$bare" 2>&1; then
+            echo "WARN: failed to clone $repo_dir → $bare (will retry next scan)"
+            rm -rf "$bare"
+            continue
         fi
         enable_push "$bare"
     done
