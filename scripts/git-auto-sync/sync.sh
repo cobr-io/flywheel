@@ -419,24 +419,29 @@ while true; do
         fi
     fi
 
-    # Push worktree to bare. Use --force-with-lease so a concurrent IAC commit
-    # we *didn't* see (very unlikely in 2s) doesn't get clobbered.
-    if ! git -C "$WORKTREE" -c core.hooksPath=/dev/null push \
-        --force-with-lease="$branch:$bare_head" \
-        "$BARE_REPO_URL" "$branch:$branch" 2>/dev/null; then
-        # First push to a brand-new branch in the bare repo: no remote ref
-        # yet, force-with-lease has nothing to compare to. Fall back to a
-        # plain push (which creates the branch).
-        git -C "$WORKTREE" -c core.hooksPath=/dev/null push "$BARE_REPO_URL" "$branch:$branch" 2>/dev/null || \
-            echo "$(date '+%F %T') - warning: push failed"
-    fi
-
-    # If our push advanced the bare repo (current HEAD differs from the bare
-    # head fetched at the top of this iteration), Flux has new source state to
-    # pull — poke it. The fast-forward branch above sets the flag for the
-    # IUA-commit case.
-    new_head=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || echo "")
-    if [ -n "$new_head" ] && [ "$new_head" != "$bare_head" ]; then
+    # Push the worktree to bare ONLY when our current HEAD differs from the bare
+    # head we fetched this iteration. An idle loop (already in sync) or one that
+    # just fast-forwarded onto the bare head (the IUA-bump case handled above,
+    # where HEAD == bare_head here) has nothing to push — and a force-with-lease
+    # push is a full smart-HTTP negotiation we'd otherwise pay every
+    # POLL_INTERVAL for nothing (issue #6). re-read HEAD here because the
+    # rebase/fast-forward above may have moved it.
+    cur_head=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || echo "")
+    if [ -n "$cur_head" ] && [ "$cur_head" != "$bare_head" ]; then
+        # --force-with-lease so a concurrent IAC commit we *didn't* see (very
+        # unlikely in 2s) doesn't get clobbered.
+        if ! git -C "$WORKTREE" -c core.hooksPath=/dev/null push \
+            --force-with-lease="$branch:$bare_head" \
+            "$BARE_REPO_URL" "$branch:$branch" 2>/dev/null; then
+            # First push to a brand-new branch in the bare repo: no remote ref
+            # yet, force-with-lease has nothing to compare to. Fall back to a
+            # plain push (which creates the branch).
+            git -C "$WORKTREE" -c core.hooksPath=/dev/null push "$BARE_REPO_URL" "$branch:$branch" 2>/dev/null || \
+                echo "$(date '+%F %T') - warning: push failed"
+        fi
+        # Our push advanced the bare repo → Flux has new source state to pull,
+        # so poke it. (The fast-forward branch above sets the flag for the
+        # IUA-commit case, where we skip the push but still need the trigger.)
         should_trigger=1
     fi
     # HEAD now equals the commit we want Flux to converge on — the pushed
