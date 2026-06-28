@@ -170,6 +170,10 @@ func TestTick_SeedsAndPokes(t *testing.T) {
 	if !res.Rebuilt || !res.Deploy.Seeded {
 		t.Fatalf("expected seed rebuild, got %+v", res)
 	}
+	// With no configured branch, AUTHORED falls back to DefaultBranch ("main").
+	if res.Authored != "main" {
+		t.Errorf("AUTHORED fallback = %q, want the default %q", res.Authored, "main")
+	}
 	if gitOut(t, ".", "--git-dir="+bare, "rev-parse", "--verify", "--quiet", "refs/heads/"+deployBranch) == "" {
 		t.Fatal("deploy branch not created")
 	}
@@ -268,5 +272,50 @@ func TestTick_CarriesIUABumpForward(t *testing.T) {
 	// The worktree's authored branch never received the bump.
 	if wtManifest := gitOut(t, ".", "--git-dir="+filepath.Join(wt, ".git"), "show", "refs/heads/main:deployment.yaml"); strings.Contains(wtManifest, "app:1-aaa") {
 		t.Errorf("authored branch was polluted with a bump:\n%s", wtManifest)
+	}
+}
+
+// `flywheel use feat-y` re-points DEPLOY even when feat-y is already in sync with
+// the bare repo (no push this tick) — the regression the review caught: the
+// rebuild must trigger on a configured-branch *switch*, not only on a push. The
+// switch resets DEPLOY to the new branch, discarding the old branch's bump.
+func TestTick_BranchSwitchResetsDeploy(t *testing.T) {
+	bare := bareRepo(t)
+	wt := cloneWorktree(t, bare)
+	flux := &fakeFlux{}
+	l := newLoop(t, bare, wt, flux)
+	if _, err := l.Tick(context.Background()); err != nil { // seed DEPLOY = main
+		t.Fatal(err)
+	}
+	simulateIUABump(t, bare, deployBranch, "1-aaa") // DEPLOY = main + bump
+
+	// Developer creates feat-y and pushes it, so it is ALREADY in sync with bare.
+	git(t, wt, "switch", "-q", "-c", "feat-y")
+	commitWorktree(t, wt, "replicas: 1", "replicas: 9", "feat-y change")
+	git(t, wt, "push", "-q", bare, "feat-y:feat-y")
+
+	// flywheel use feat-y.
+	flux.configured = "feat-y"
+	pokesBefore := flux.pokeGR
+
+	res, err := l.Tick(context.Background())
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if res.Pushed {
+		t.Errorf("feat-y already synced; expected no push, got Pushed=true")
+	}
+	if !res.Rebuilt || !res.Deploy.Reset {
+		t.Fatalf("expected a reset rebuild on the switch, got %+v", res)
+	}
+	got := showDeploy(t, bare, deployBranch)
+	if !strings.Contains(got, "replicas: 9") {
+		t.Errorf("DEPLOY should be feat-y now:\n%s", got)
+	}
+	if strings.Contains(got, "app:1-aaa") {
+		t.Errorf("DEPLOY kept the old branch's bump after the switch:\n%s", got)
+	}
+	if flux.pokeGR <= pokesBefore {
+		t.Errorf("expected a Flux poke after the switch (GR pokes %d → %d)", pokesBefore, flux.pokeGR)
 	}
 }

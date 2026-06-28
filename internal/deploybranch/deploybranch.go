@@ -37,6 +37,7 @@ type Result struct {
 	Seeded         bool   // Deploy created for the first time (= Authored tip)
 	RebasedForward bool   // the bump layer was carried onto an advanced Authored
 	ResetFallback  bool   // rebase conflicted → Deploy reset to Authored (IUA re-bumps)
+	Reset          bool   // Deploy was force-reset to Authored (branch switch; bumps discarded)
 	Changed        bool   // the Deploy tip moved as a result
 	DeploySHA      string // the resulting Deploy tip
 }
@@ -100,6 +101,36 @@ func (m *Maintainer) Reconcile(ctx context.Context) (Result, error) {
 
 	// Authored advanced: carry the bump layer (base..Deploy) onto Authored.
 	return m.rebaseForward(ctx, authoredSHA, base, deploySHA)
+}
+
+// ResetToAuthored force-resets Deploy to the current Authored tip, discarding any
+// existing bump layer. It is for a *branch switch* (Authored is now a different,
+// possibly divergent branch than DEPLOY was last built from): the old bumps were
+// image tags built from the other branch's code and are irrelevant, and a
+// rebase-forward would wrongly replay the old branch's authored commits onto the
+// new one. After the reset DEPLOY = the new Authored, and the IUA re-bumps for it.
+func (m *Maintainer) ResetToAuthored(ctx context.Context) (Result, error) {
+	if err := m.ensureClone(ctx); err != nil {
+		return Result{}, err
+	}
+	if err := m.git(ctx, "fetch", "--force", "origin"); err != nil {
+		return Result{}, fmt.Errorf("fetch origin: %w", err)
+	}
+	authoredSHA, ok, err := m.resolve(ctx, m.originRef(m.Authored))
+	if err != nil {
+		return Result{}, err
+	}
+	if !ok {
+		return Result{}, fmt.Errorf("authored branch %q does not exist in %s", m.Authored, m.RemoteURL)
+	}
+	prev, _, err := m.resolve(ctx, m.originRef(m.Deploy))
+	if err != nil {
+		return Result{}, err
+	}
+	if err := m.pushDeploy(ctx, authoredSHA); err != nil {
+		return Result{}, err
+	}
+	return Result{Reset: true, Changed: prev != authoredSHA, DeploySHA: authoredSHA}, nil
 }
 
 // rebaseForward replays the commits in base..deploySHA (the bump layer) onto

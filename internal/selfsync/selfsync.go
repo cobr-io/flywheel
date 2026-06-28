@@ -59,11 +59,12 @@ type Loop struct {
 	Worktree      *Worktree
 	Deploy        *deploybranch.Maintainer
 	Flux          Flux
-	DefaultBranch string // AUTHORED fallback when no branch is configured (= the branch at `up` time)
+	DefaultBranch string // AUTHORED fallback when no branch is configured (the integration branch, from flywheel-config)
 	PollInterval  time.Duration
 	Logf          func(string, ...any) // optional
 
-	seeded bool // DEPLOY has been established at least once this process lifetime
+	seeded         bool   // DEPLOY has been established at least once this process lifetime
+	deployedBranch string // the AUTHORED branch DEPLOY was last built from (to detect `flywheel use` switches)
 }
 
 // TickResult reports what a single Tick did.
@@ -105,26 +106,38 @@ func (l *Loop) Tick(ctx context.Context) (TickResult, error) {
 
 	res := TickResult{Authored: authored, Pushed: pushed}
 
-	// Rebuild DEPLOY only when there's something to rebuild from: the first tick
-	// (seed) or after the worktree advanced. The IUA's own bumps need no rebuild
-	// — they already satisfy DEPLOY = AUTHORED + bumps and roll via Flux's
-	// interval; the next AUTHORED advance carries them forward.
-	if !l.seeded || pushed {
+	// Rebuild DEPLOY when there's something to rebuild from: the first tick
+	// (seed), after the worktree advanced (rebase-forward), or after a `flywheel
+	// use` switched the selected branch (reset — the old bumps belong to a
+	// different branch). An idle tick with the IUA's own bumps needs no rebuild —
+	// they already satisfy DEPLOY = AUTHORED + bumps; the next advance carries
+	// them forward.
+	switched := l.seeded && authored != l.deployedBranch
+	if !l.seeded || pushed || switched {
 		l.Deploy.Authored = authored
 
 		// Suspend the IUA so a concurrent bump can't be clobbered by the rebuild.
 		if err := l.Flux.SuspendIUA(ctx, true); err != nil {
 			l.logf("suspend IUA: %v", err)
 		}
-		dres, rerr := l.Deploy.Reconcile(ctx)
+		// A branch switch resets DEPLOY to the new AUTHORED (discarding the old
+		// branch's bumps); a seed/advance rebases the bump layer forward.
+		var dres deploybranch.Result
+		var rerr error
+		if switched {
+			dres, rerr = l.Deploy.ResetToAuthored(ctx)
+		} else {
+			dres, rerr = l.Deploy.Reconcile(ctx)
+		}
 		// Always attempt to resume, even if the rebuild failed.
 		if err := l.Flux.SuspendIUA(ctx, false); err != nil {
 			l.logf("resume IUA: %v", err)
 		}
 		if rerr != nil {
-			return res, fmt.Errorf("reconcile deploy branch: %w", rerr)
+			return res, fmt.Errorf("rebuild deploy branch: %w", rerr)
 		}
 		l.seeded = true
+		l.deployedBranch = authored
 		res.Rebuilt = true
 		res.Deploy = dres
 
@@ -132,6 +145,8 @@ func (l *Loop) Tick(ctx context.Context) (TickResult, error) {
 			switch {
 			case dres.Seeded:
 				l.logf("seeded DEPLOY %q = %s @ %s", l.Deploy.Deploy, authored, short(dres.DeploySHA))
+			case dres.Reset:
+				l.logf("switched DEPLOY %q to %s @ %s (IUA will re-bump)", l.Deploy.Deploy, authored, short(dres.DeploySHA))
 			case dres.ResetFallback:
 				l.logf("reset DEPLOY %q onto %s @ %s (rebase conflict; IUA will re-bump)", l.Deploy.Deploy, authored, short(dres.DeploySHA))
 			default:

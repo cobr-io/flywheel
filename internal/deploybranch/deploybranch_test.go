@@ -157,6 +157,66 @@ func newMaintainer(t *testing.T, bare string) *Maintainer {
 	}
 }
 
+// pushBranch creates <branch> off origin/main in the bare repo with a distinct
+// marker commit, so two such branches diverge in content.
+func pushBranch(t *testing.T, bare, branch, marker string) {
+	t.Helper()
+	c := cloneTemp(t, bare)
+	git(t, c, "checkout", "-q", "-B", branch, "origin/main")
+	p := filepath.Join(c, "deployment.yaml")
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(p, append(b, []byte("\n# "+marker+"\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	git(t, c, "commit", "-q", "-am", "on "+branch)
+	git(t, c, "push", "-q", "origin", branch+":refs/heads/"+branch)
+}
+
+// A `flywheel use` branch switch must reset DEPLOY to the new branch, discarding
+// the previous (divergent) branch's commits AND its bumps — a rebase-forward
+// would wrongly replay the old branch's commits onto the new one.
+func TestResetToAuthored_DiscardsOtherBranchCommitsAndBumps(t *testing.T) {
+	bare := bareRepo(t)
+	pushBranch(t, bare, "feat-x", "marker-x")
+	pushBranch(t, bare, "feat-y", "marker-y")
+
+	m := newMaintainer(t, bare)
+	m.Authored = "feat-x"
+	if _, err := m.Reconcile(context.Background()); err != nil { // seed DEPLOY = feat-x
+		t.Fatal(err)
+	}
+	simulateIUABump(t, bare, "flywheel/local-deploy", "1-aaa") // DEPLOY = feat-x + bump
+
+	// Switch to the divergent feat-y.
+	m.Authored = "feat-y"
+	res, err := m.ResetToAuthored(context.Background())
+	if err != nil {
+		t.Fatalf("ResetToAuthored: %v", err)
+	}
+	if !res.Reset || !res.Changed {
+		t.Fatalf("expected Reset+Changed, got %+v", res)
+	}
+	got := showDeploy(t, bare, "flywheel/local-deploy")
+	if !strings.Contains(got, "marker-y") {
+		t.Errorf("DEPLOY should be feat-y, missing marker-y:\n%s", got)
+	}
+	if strings.Contains(got, "marker-x") {
+		t.Errorf("DEPLOY leaked feat-x's commit (marker-x):\n%s", got)
+	}
+	if strings.Contains(got, "1-aaa") {
+		t.Errorf("DEPLOY kept the old branch's bump (1-aaa):\n%s", got)
+	}
+	// DEPLOY tip == feat-y tip, with no bump layer.
+	deployTip := gitOut(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/flywheel/local-deploy")
+	featY := gitOut(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/feat-y")
+	if deployTip != featY {
+		t.Errorf("DEPLOY tip %s != feat-y tip %s", deployTip, featY)
+	}
+}
+
 func TestReconcile_SeedsDeployFromAuthored(t *testing.T) {
 	bare := bareRepo(t)
 	m := newMaintainer(t, bare)
