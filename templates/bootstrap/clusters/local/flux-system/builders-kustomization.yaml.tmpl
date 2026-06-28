@@ -27,12 +27,13 @@ spec:
   # version). These values are rendered fresh by `flywheel up` on every
   # invocation — this file is bootstrap-only, never committed to the
   # gitops repo, so .local edits flow through on the next `up`.
-  # Only git-server and image-builder-controller have Deployments under this
-  # dev-loop overlay. git-auto-sync is NOT rewritten here — its Deployments are
-  # the per-app builders (rewritten by the client-builders Kustomization's
-  # spec.images) and the self sync below (rendered with .GitAutoSyncImageRef),
-  # so a flywheel.images override reaches git-auto-sync through those paths, not
-  # this one.
+  # git-server, image-builder-controller, and git-deploy-controller have
+  # Deployments under this dev-loop overlay, so their refs are rewritten here to
+  # match the step-11a direct apply (renderDevLoopKustomization) — otherwise Flux
+  # would re-apply the base ghcr.io ref and the pod would ErrImagePull.
+  # git-auto-sync is NOT rewritten here — its Deployments are the per-app builders
+  # (rewritten by the client-builders Kustomization's spec.images), so a
+  # flywheel.images override reaches git-auto-sync through that path, not this one.
   images:
     - name: ghcr.io/cobr-io/git-server
       newName: {{ .GitServerImageName }}
@@ -40,6 +41,9 @@ spec:
     - name: ghcr.io/cobr-io/image-builder-controller
       newName: {{ .ImageBuilderControllerImageName }}
       newTag: {{ .ImageBuilderControllerImageTag }}
+    - name: ghcr.io/cobr-io/git-deploy-controller
+      newName: {{ .GitDeployControllerImageName }}
+      newTag: {{ .GitDeployControllerImageTag }}
   # git-server memory limit (cfg.git_server.memory_limit, default 128Mi). The
   # base manifest bakes in 128Mi; this patch lets a client raise it for large
   # repos whose git-upload-pack would otherwise OOMKill the pod (issue #4).

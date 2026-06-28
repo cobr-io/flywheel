@@ -129,6 +129,14 @@ func (l *Loop) Tick(ctx context.Context) (TickResult, error) {
 		res.Deploy = dres
 
 		if dres.Changed {
+			switch {
+			case dres.Seeded:
+				l.logf("seeded DEPLOY %q = %s @ %s", l.Deploy.Deploy, authored, short(dres.DeploySHA))
+			case dres.ResetFallback:
+				l.logf("reset DEPLOY %q onto %s @ %s (rebase conflict; IUA will re-bump)", l.Deploy.Deploy, authored, short(dres.DeploySHA))
+			default:
+				l.logf("rebuilt DEPLOY %q = %s + bumps @ %s", l.Deploy.Deploy, authored, short(dres.DeploySHA))
+			}
 			if err := l.Flux.PokeGitRepository(ctx); err != nil {
 				return res, fmt.Errorf("poke gitrepository: %w", err)
 			}

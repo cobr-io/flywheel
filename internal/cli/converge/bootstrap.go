@@ -64,6 +64,7 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 	// canonical ghcr.io ref to whatever `up` mirrored into the local registry.
 	gasName, gasTag := splitImageRef(refs["git-auto-sync"])
 	ibcName, ibcTag := splitImageRef(refs["image-builder-controller"])
+	gdcName, gdcTag := splitImageRef(refs["git-deploy-controller"])
 
 	// The client-infra tier reconciles at flux.iac_interval; infra changes
 	// less often than app code, so it can poll slower than interval_local.
@@ -80,6 +81,7 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		"git-server:               (newTag)": gsTag,
 		"git-auto-sync:            (newTag)": gasTag,
 		"image-builder-controller: (newTag)": ibcTag,
+		"git-deploy-controller:    (newTag)": gdcTag,
 	} {
 		if val == "" {
 			return nil, fmt.Errorf("bootstrap: %s missing — flywheel.images overrides must include an explicit `:tag`", strings.TrimSuffix(name, " (newTag)"))
@@ -106,6 +108,8 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		"GitAutoSyncImageTag":             gasTag,
 		"ImageBuilderControllerImageName": ibcName,
 		"ImageBuilderControllerImageTag":  ibcTag,
+		"GitDeployControllerImageName":    gdcName,
+		"GitDeployControllerImageTag":     gdcTag,
 	}, nil
 }
 

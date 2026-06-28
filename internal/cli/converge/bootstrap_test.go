@@ -28,6 +28,7 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 		"git-server":               "flywheel-dev/git-server:dogfood",
 		"git-auto-sync":            "flywheel-dev/git-auto-sync:dogfood",
 		"image-builder-controller": "flywheel-dev/image-builder-controller:dogfood",
+		"git-deploy-controller":    "flywheel-dev/git-deploy-controller:dogfood",
 	}
 
 	dir, err := RenderBootstrap(cfg, refs, "abc123def456abc123def456abc123def456abcd", "acme-gitops", "feat/x")
@@ -44,6 +45,9 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 		"newName: flywheel-dev/git-server",
 		"newTag: dogfood",
 		"newName: flywheel-dev/image-builder-controller",
+		// Must be rewritten on the Flux path too, or its pod ErrImagePulls the
+		// base ghcr ref while step 11a applies the local one (two-apply-paths).
+		"newName: flywheel-dev/git-deploy-controller",
 	} {
 		if !strings.Contains(bk, want) {
 			t.Errorf("builders-kustomization.yaml missing %q:\n%s", want, bk)
@@ -113,6 +117,7 @@ func TestRenderBootstrap_GitServerMemoryLimit(t *testing.T) {
 		"git-server":               "ghcr.io/cobr-io/git-server:v0.1.0",
 		"git-auto-sync":            "ghcr.io/cobr-io/git-auto-sync:v0.1.0",
 		"image-builder-controller": "ghcr.io/cobr-io/image-builder-controller:v0.1.0",
+		"git-deploy-controller":    "ghcr.io/cobr-io/git-deploy-controller:v0.1.0",
 	}
 	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops", "main")
 	if err != nil {
@@ -142,6 +147,7 @@ func TestRenderBootstrap_RejectsUntaggedOverride(t *testing.T) {
 		"git-server":               "flywheel-dev/git-server", // no tag!
 		"git-auto-sync":            "flywheel-dev/git-auto-sync:dogfood",
 		"image-builder-controller": "flywheel-dev/image-builder-controller:dogfood",
+		"git-deploy-controller":    "flywheel-dev/git-deploy-controller:dogfood",
 	}
 
 	_, err := RenderBootstrap(cfg, refs, "abc", "acme", "main")
