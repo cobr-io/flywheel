@@ -9,6 +9,30 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+### Added (2026-06-28, flywheel-free bring-up — committed vanilla Flux entrypoint)
+
+- **`flywheel init` now scaffolds a committed `clusters/local/flux-system/`
+  entrypoint** so the same local cluster can be brought up with stock Flux and
+  **zero `flywheel` binary** (you forgo the fast dev loop). Previously the repo
+  had no committed Flux entrypoint at all — `apps/` and `infra/` were plain
+  Kustomize but inert — so the gitops repo only worked through flywheel. This
+  removes that implicit lock-in.
+  - Five plain-Flux files: a `GitRepository/flux-system` → your GitHub remote on
+    `main`, `client-infra`/`client-apps` `Kustomization`s over
+    `infra/overlays/local` + `apps/overlays/local`, the `apps` namespace, and a
+    `kubectl apply -k`-able aggregator. No mirror, no `flywheel/local-deploy`
+    branch, no builders.
+  - **Non-interfering:** `flywheel up` renders its own entrypoint at runtime and
+    never reconciles `./clusters/`, so the committed tree is inert during normal
+    operation and only activates on an explicit `kubectl apply -k`. Applying it
+    toggles the cluster's source from the in-cluster mirror to GitHub; the two
+    workflows are mutually exclusive.
+  - New guide `docs/flywheel-free-bringup.md` documents the four-step bring-up
+    and the one caveat — app manifests ship a dev-loop `:0-placeholder` image
+    that only flywheel's image automation rewrites, so vanilla pods need real,
+    pullable image refs committed.
+  - Design: `docs/designs/2026-06-28-flywheel-free-bringup-design.md`.
+
 ### Changed (2026-06-18, `add-app` → `add app`)
 
 - **BREAKING: `flywheel add-app` is now `flywheel add app`.** The flat `add-app`
