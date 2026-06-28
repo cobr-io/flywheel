@@ -16,7 +16,7 @@ LDFLAGS := -X github.com/cobr-io/flywheel.BuildVersion=$(VERSION)
 # pins in a per-developer flywheel.yaml.local. `flywheel update` content-
 # addresses the imported image by its build digest at deploy time, so the
 # Deployment rolls when content changes without per-build tag bookkeeping here.
-IMAGES := git-server git-auto-sync image-builder-controller
+IMAGES := git-server git-auto-sync image-builder-controller git-deploy-controller
 IMAGE_TAG ?= dogfood
 
 # Resolve the install dir the same way `go install` does: $GOBIN, else

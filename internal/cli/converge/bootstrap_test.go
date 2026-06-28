@@ -68,25 +68,26 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 		t.Errorf("builders-kustomization.yaml leaked legacy local-registry form:\n%s", bk)
 	}
 
-	// self-git-auto-sync.yaml: image ref pinned + worktree/URL use the
-	// repo basename, not the client name.
-	sgas := mustRead(t, filepath.Join(dir, "self-git-auto-sync.yaml"))
-	for _, want := range []string{
-		"image: flywheel-dev/git-auto-sync:dogfood",
-		"/workspaces/acme-gitops",
-		"/acme-gitops.git",
-	} {
-		if !strings.Contains(sgas, want) {
-			t.Errorf("self-git-auto-sync.yaml missing %q:\n%s", want, sgas)
-		}
+	// The self sync moved to the git-deploy-controller in manifests/dev-loop/base,
+	// so the bootstrap render no longer emits a self-git-auto-sync Deployment.
+	if _, err := os.Stat(filepath.Join(dir, "self-git-auto-sync.yaml")); err == nil {
+		t.Error("bootstrap render still emits self-git-auto-sync.yaml; it moved to dev-loop/base")
 	}
 
-	// self-source.yaml: spec.ref.branch tracks the worktree's current branch,
-	// not a hardcoded `main` — so `flywheel up` mid-feature doesn't clobber the
-	// branch git-auto-sync-self set (issue #6).
+	// self-source.yaml: Flux tracks the constant DEPLOY branch
+	// (flywheel/local-deploy), not the worktree's branch — git-deploy-controller
+	// keeps that branch = AUTHORED + image bumps.
 	selfSrc := mustRead(t, filepath.Join(dir, "self-source.yaml"))
-	if !strings.Contains(selfSrc, "branch: feat/x") {
-		t.Errorf("self-source.yaml should track the current branch, got:\n%s", selfSrc)
+	if !strings.Contains(selfSrc, "branch: flywheel/local-deploy") {
+		t.Errorf("self-source.yaml should track flywheel/local-deploy, got:\n%s", selfSrc)
+	}
+
+	// flywheel-config.yaml: the keys git-deploy-controller reads.
+	cm := mustRead(t, filepath.Join(dir, "flywheel-config.yaml"))
+	for _, want := range []string{`repo.base_name: "acme-gitops"`, `git.integration_branch: "main"`} {
+		if !strings.Contains(cm, want) {
+			t.Errorf("flywheel-config.yaml missing %q:\n%s", want, cm)
+		}
 	}
 
 	// flywheel-source.yaml: spec.ref.commit = the supplied SHA.

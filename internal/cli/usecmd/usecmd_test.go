@@ -12,7 +12,7 @@ import (
 )
 
 func TestBranchPatch(t *testing.T) {
-	obj := BranchPatch("flux-system", "flux-system", "feat/x", "2026-06-11T14:00:00Z")
+	obj := BranchPatch("flux-system", "flux-system", "feat/x")
 
 	if got := obj.GetName(); got != "flux-system" {
 		t.Errorf("name = %q", got)
@@ -23,18 +23,13 @@ func TestBranchPatch(t *testing.T) {
 	if gvk := obj.GroupVersionKind(); gvk.Group != "source.toolkit.fluxcd.io" || gvk.Version != "v1" || gvk.Kind != "GitRepository" {
 		t.Errorf("gvk = %v", gvk)
 	}
-	if got, _, _ := unstructured.NestedString(obj.Object, "spec", "ref", "branch"); got != "feat/x" {
-		t.Errorf("spec.ref.branch = %q, want feat/x", got)
-	}
-	ann := obj.GetAnnotations()
-	if ann[DeployBranchAnnotation] != "feat/x" {
+	// The deploy branch is now AUTHORED-selection only: it sets the annotation
+	// and must NOT touch spec.ref (Flux tracks the constant DEPLOY branch).
+	if ann := obj.GetAnnotations(); ann[DeployBranchAnnotation] != "feat/x" {
 		t.Errorf("deploy-branch annotation = %q, want feat/x", ann[DeployBranchAnnotation])
 	}
-	if ann["kustomize.toolkit.fluxcd.io/reconcile"] != "disabled" {
-		t.Errorf("reconcile annotation = %q, want disabled", ann["kustomize.toolkit.fluxcd.io/reconcile"])
-	}
-	if ann["reconcile.fluxcd.io/requestedAt"] != "2026-06-11T14:00:00Z" {
-		t.Errorf("requestedAt annotation = %q", ann["reconcile.fluxcd.io/requestedAt"])
+	if _, found, _ := unstructured.NestedMap(obj.Object, "spec"); found {
+		t.Error("BranchPatch must not set spec (Flux ref is constant now)")
 	}
 }
 
@@ -100,8 +95,8 @@ func TestRun_AppliesBranchPatch(t *testing.T) {
 	if captured == nil {
 		t.Fatal("applyObject was not called")
 	}
-	if got, _, _ := unstructured.NestedString(captured.Object, "spec", "ref", "branch"); got != "feat/x" {
-		t.Errorf("applied branch = %q, want feat/x", got)
+	if got := captured.GetAnnotations()[DeployBranchAnnotation]; got != "feat/x" {
+		t.Errorf("applied deploy-branch annotation = %q, want feat/x", got)
 	}
 }
 

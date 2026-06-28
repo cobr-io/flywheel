@@ -94,6 +94,7 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		"Registry":                        cfg.Cluster.Registry,
 		"RegistryPort":                    cfg.Cluster.RegistryPort,
 		"Branch":                          branch,
+		"IntegrationBranch":               cfg.IntegrationBranch(),
 		"FluxIntervalLocal":               cfg.Flux.IntervalLocal,
 		"FluxIacInterval":                 iacInterval,
 		"FlywheelSHA":                     flywheelSHA,

@@ -47,16 +47,17 @@ type File struct {
 type Flywheel struct {
 	Version string `json:"version"`
 	// Images is an optional per-image override map. Keys MUST be a subset
-	// of {git-server, git-auto-sync, image-builder-controller}. An unset
-	// or omitted key falls back to `ghcr.io/cobr-io/<name>:<version>` at
-	// `flywheel up` time. The natural home for per-developer dogfood
-	// overrides is flywheel.yaml.local (gitignored + deep-merged).
+	// of {git-server, git-auto-sync, image-builder-controller,
+	// git-deploy-controller}. An unset or omitted key falls back to
+	// `ghcr.io/cobr-io/<name>:<version>` at `flywheel up` time. The natural
+	// home for per-developer dogfood overrides is flywheel.yaml.local
+	// (gitignored + deep-merged).
 	Images map[string]string `json:"images,omitempty"`
 }
 
-// ImageNames are the three known image keys for flywheel.images. Any
-// other key in the map is a schema violation.
-var ImageNames = []string{"git-server", "git-auto-sync", "image-builder-controller"}
+// ImageNames are the known image keys for flywheel.images. Any other key in
+// the map is a schema violation.
+var ImageNames = []string{"git-server", "git-auto-sync", "image-builder-controller", "git-deploy-controller"}
 
 type Client struct {
 	Name string `json:"name"`

@@ -300,7 +300,7 @@ func Run(ctx context.Context, opts Options) error {
 	// directly here so the dev-loop pods in 11a can read it immediately;
 	// Flux re-applies the committed copy in 11d (SSA no-op).
 	if err := style.Spin(out, "bootstrap: applying flywheel-config ConfigMap", func() error {
-		return converge.ApplyFlywheelConfig(ctx, a, cfg, out)
+		return converge.ApplyFlywheelConfig(ctx, a, cfg, repoBaseName, out)
 	}); err != nil {
 		return fmt.Errorf("flywheel-config: %w", err)
 	}

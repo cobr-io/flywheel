@@ -4,10 +4,14 @@
 // repo and maintains a DEPLOY branch (= AUTHORED + the IUA's image bumps) that
 // Flux deploys, keeping ephemeral image bumps off the developer's branch.
 //
-// Configuration is entirely via environment (set by the Deployment):
+// Configuration is entirely via environment (set by the Deployment, mostly from
+// the flywheel-config ConfigMap):
 //
-//	WORKTREE                 host worktree path in the container (required)
-//	BARE_REPO_URL            in-cluster bare repo URL (required)
+//	REPO_BASE_NAME           gitops repo basename, e.g. "acme-gitops" (required)
+//	WORKSPACES_MOUNT         hostPath worktrees mount (default "/workspaces")
+//	GIT_SERVER_URL           in-cluster git-server base URL (default the svc DNS)
+//	WORKTREE                 explicit override; else <WORKSPACES_MOUNT>/<REPO_BASE_NAME>
+//	BARE_REPO_URL            explicit override; else <GIT_SERVER_URL>/<REPO_BASE_NAME>.git
 //	DEFAULT_BRANCH           AUTHORED fallback branch (default "main")
 //	DEPLOY_BRANCH            the deploy branch (default "flywheel/local-deploy")
 //	DEPLOY_WORKDIR           maintainer working clone dir (default "/tmp/deploy-clone")
@@ -22,6 +26,8 @@ import (
 	"errors"
 	"log"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -39,8 +45,12 @@ func main() {
 		log.Fatalf("kube client: %v", err)
 	}
 
-	worktree := mustEnv("WORKTREE")
-	bareURL := mustEnv("BARE_REPO_URL")
+	// The dev-loop/base manifest is static (no per-client templating), so the
+	// per-repo paths are derived from REPO_BASE_NAME (sourced from flywheel-config).
+	repoBase := mustEnv("REPO_BASE_NAME")
+	gitServerURL := strings.TrimSuffix(envOr("GIT_SERVER_URL", "http://git-server.flywheel-system.svc.cluster.local:8080"), "/")
+	worktree := envOr("WORKTREE", filepath.Join(envOr("WORKSPACES_MOUNT", "/workspaces"), repoBase))
+	bareURL := envOr("BARE_REPO_URL", gitServerURL+"/"+repoBase+".git")
 	defaultBranch := envOr("DEFAULT_BRANCH", "main")
 	deployBranch := envOr("DEPLOY_BRANCH", "flywheel/local-deploy")
 	workDir := envOr("DEPLOY_WORKDIR", "/tmp/deploy-clone")
