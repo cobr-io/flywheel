@@ -30,7 +30,10 @@ During the v0.x phase no compat promise is made between minor versions
   - New guide `docs/flywheel-free-bringup.md` documents the four-step bring-up
     and the one caveat — app manifests ship a dev-loop `:0-placeholder` image
     that only flywheel's image automation rewrites, so vanilla pods need real,
-    pullable image refs committed.
+    pullable image refs committed. Linked from the Flywheel README's guide index
+    and the scaffolded client README, whose "Flux entrypoint" section now
+    describes both the committed vanilla entrypoint and flywheel's runtime one
+    (it previously stated `clusters/local/flux-system/` was never committed).
   - Design: `docs/designs/2026-06-28-flywheel-free-bringup-design.md`.
 
 ### Changed (2026-06-18, `add-app` → `add app`)
