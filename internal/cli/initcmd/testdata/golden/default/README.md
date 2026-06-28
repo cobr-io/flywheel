@@ -113,20 +113,31 @@ Each directory's `README.md` has the details.
 
 ## Flux entrypoint (`clusters/`)
 
-The only thing committed under `clusters/` for local is `clusters/local/age.key`
-— the SOPS age key for the **local dev cluster**. It's checked in on purpose: it
-only ever decrypts `clusters/local/*` dev secrets on your localhost cluster, so
-shipping it means a teammate can `git clone` and `flywheel up` with no key
-handoff. Every **other** environment's key (prod, staging, …) stays out of git —
-`.gitignore` ignores `clusters/*/age.key` except the local one, so those keys
-live in your homedir, never the repo.
+Two things are committed under `clusters/local/`:
 
-The Flux entrypoint itself (`clusters/local/flux-system/`) is **not** committed:
-it's rendered and applied directly by `flywheel up` on every run — it carries
-per-developer, per-run values (resolved image refs, the pinned Flywheel commit)
-that must not be committed. It wires up two `GitRepository` sources — this repo
-(served by the in-cluster git-server) and the Flywheel mirror at the pinned SHA —
-plus the Flux Kustomizations that reconcile `apps/`, `builders/`, and `infra/`.
+* **`clusters/local/age.key`** — the SOPS age key for the **local dev cluster**.
+  It's checked in on purpose: it only ever decrypts `clusters/local/*` dev
+  secrets on your localhost cluster, so shipping it means a teammate can
+  `git clone` and `flywheel up` with no key handoff. Every **other**
+  environment's key (prod, staging, …) stays out of git — `.gitignore` ignores
+  `clusters/*/age.key` except the local one, so those keys live in your homedir,
+  never the repo.
+* **`clusters/local/flux-system/`** — a vanilla, stock-Flux entrypoint
+  (`GitRepository` → your remote, plus `apps`/`infra` Kustomizations). It lets
+  you bring this cluster up with plain `flux` + `kubectl` and **no `flywheel`
+  binary** — you forgo the fast loop, but the repo isn't captive to flywheel.
+  See [docs/flywheel-free-bringup.md](docs/flywheel-free-bringup.md). `flywheel
+  up` never touches it (it renders its own entrypoint — see below), so it just
+  sits there inertly until you `kubectl apply -k` it.
+
+The entrypoint **`flywheel up` actually uses is not committed**: it's rendered to
+a tmpdir and applied directly on every run, because it carries per-developer,
+per-run values (resolved image refs, the pinned Flywheel commit) that must not be
+committed. It wires up two `GitRepository` sources — this repo (served by the
+in-cluster git-server) and the Flywheel mirror at the pinned SHA — plus the Flux
+Kustomizations that reconcile `apps/`, `builders/`, and `infra/`. That's the
+machinery behind the fast loop; the committed vanilla entrypoint above is the
+stripped-down, flywheel-free alternative.
 
 ## Bumping Flywheel
 

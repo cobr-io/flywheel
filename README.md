@@ -187,6 +187,7 @@ local clusters don't collide.
 * [Local DNS](docs/guides/local-dns.md) — resolve `*.<domain>` to your apps in the browser.
 * [Branch following & `flywheel use`](docs/guides/branch-following.md) — opt-in branch deploys.
 * [Build secrets](docs/guides/build-secrets.md) — supplying secrets to builds.
+* [Bring-up without flywheel](docs/guides/flywheel-free-bringup.md) — run the cluster with stock Flux and no `flywheel` binary (no fast loop, no lock-in).
 * [Dogfood mode](docs/dev/dogfood.md) — hacking on the runtime images.
 * [Promoting to production](docs/designs/2026-06-04-prod-promotion-feasibility.md) — the prod-overlay boundary.
 * [Design doc](docs/designs/2026-05-15-harness-template-design.md) — the approved architecture.
