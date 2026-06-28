@@ -113,22 +113,27 @@ Each directory's `README.md` has the details.
 
 ## Flux entrypoint (`clusters/`)
 
-Two things are committed under `clusters/local/`:
+Two cluster configs are committed under `clusters/`, one per way of running the
+local cluster:
 
-* **`clusters/local/age.key`** — the SOPS age key for the **local dev cluster**.
-  It's checked in on purpose: it only ever decrypts `clusters/local/*` dev
-  secrets on your localhost cluster, so shipping it means a teammate can
+* **`clusters/local/`** — the **flywheel-managed** local cluster. The only thing
+  committed here is `clusters/local/age.key`, the SOPS age key for the local dev
+  cluster. It's checked in on purpose: it only ever decrypts `clusters/local/*`
+  dev secrets on your localhost cluster, so shipping it means a teammate can
   `git clone` and `flywheel up` with no key handoff. Every **other**
   environment's key (prod, staging, …) stays out of git — `.gitignore` ignores
   `clusters/*/age.key` except the local one, so those keys live in your homedir,
-  never the repo.
-* **`clusters/local/flux-system/`** — a vanilla, stock-Flux entrypoint
-  (`GitRepository` → your remote, plus `apps`/`infra` Kustomizations). It lets
-  you bring this cluster up with plain `flux` + `kubectl` and **no `flywheel`
-  binary** — you forgo the fast loop, but the repo isn't captive to flywheel.
-  See [docs/flywheel-free-bringup.md](docs/flywheel-free-bringup.md). `flywheel
-  up` never touches it (it renders its own entrypoint — see below), so it just
-  sits there inertly until you `kubectl apply -k` it.
+  never the repo. (The Flux entrypoint `flywheel up` uses isn't committed — see
+  below.)
+* **`clusters/vanilla/flux-system/`** — the **flywheel-free** entrypoint: a
+  vanilla, stock-Flux setup (`GitRepository` → your remote, plus `apps`/`infra`
+  Kustomizations) that brings the **same cluster** up with plain `flux` +
+  `kubectl` and **no `flywheel` binary** — you forgo the fast loop, but the repo
+  isn't captive to flywheel. It's named `vanilla` to stay clearly distinct from
+  the flywheel-managed `local` config above; it reuses `clusters/local/age.key`
+  to decrypt the same secrets. See
+  [docs/flywheel-free-bringup.md](docs/flywheel-free-bringup.md). `flywheel up`
+  never touches it, so it sits there inertly until you `kubectl apply -k` it.
 
 The entrypoint **`flywheel up` actually uses is not committed**: it's rendered to
 a tmpdir and applied directly on every run, because it carries per-developer,

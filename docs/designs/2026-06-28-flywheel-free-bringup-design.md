@@ -1,8 +1,15 @@
 # Flywheel-free bring-up — a committed vanilla Flux entrypoint
 
-**Status:** proposed
+**Status:** implemented
 **Date:** 2026-06-28
 **Author:** matthijs (with collaboration from Claude)
+
+> **Update (2026-06-28, post-merge):** the committed entrypoint was renamed from
+> `clusters/local/flux-system/` to **`clusters/vanilla/flux-system/`** to keep it
+> clearly distinct from flywheel's own (managed, runtime-rendered) `clusters/local/`
+> entrypoint. Paths below reflect the new name; the in-cluster object names
+> (`flux-system` GitRepository, `client-apps`/`client-infra`) and the shared
+> `clusters/local/age.key` reference are unchanged.
 
 ## Problem
 
@@ -71,7 +78,7 @@ can stand the system up with stock Flux and zero flywheel binary.
 
 ## Approach
 
-Add a new skeleton subtree `templates/client-skeleton/clusters/local/flux-system/`.
+Add a new skeleton subtree `templates/client-skeleton/clusters/vanilla/flux-system/`.
 Because `init` already walks the whole skeleton with `render.Tree(SkeletonFS,
 ".", repoDir, values)`, new template files are rendered, written, and committed
 automatically — **no new Go logic**, just templates plus a golden-tree update.
@@ -85,7 +92,7 @@ at **GitHub on the integration branch**, not the in-cluster mirror.
 
 ### Committed files
 
-`clusters/local/flux-system/`:
+`clusters/vanilla/flux-system/`:
 
 - **`source.yaml`** — `GitRepository/flux-system` (namespace `flux-system`):
   - `url: https://github.com/<org>/<name>.git` — best-effort from `client.org` /
@@ -102,7 +109,7 @@ at **GitHub on the integration branch**, not the in-cluster mirror.
 - **`namespaces.yaml`** — the `apps` namespace only. (`flywheel-system` is
   dev-loop-only and not needed in vanilla mode.)
 - **`kustomization.yaml`** — aggregator listing the four, so
-  `kubectl apply -k clusters/local/flux-system` works and CI can
+  `kubectl apply -k clusters/vanilla/flux-system` works and CI can
   `kustomize build` it.
 
 ### Bring-up flow (documented, binary-free)
@@ -115,7 +122,7 @@ clients via the embed + copy path that all `docs/guides/*` follow):
 2. kubectl create secret generic sops-age \       # decrypt key, from committed
      -n flux-system --from-file=age.agekey=clusters/local/age.key
 3. # (private repo only) create the `flux-system` git-auth secret (PAT / deploy key)
-4. kubectl apply -k clusters/local/flux-system    # source + apps + infra
+4. kubectl apply -k clusters/vanilla/flux-system    # source + apps + infra
 ```
 
 No flywheel binary anywhere. The cluster can be any k8s — including the same k3d,
@@ -139,7 +146,7 @@ is the client's responsibility outside the dev loop.
 
 Key safety property: flywheel's Flux `Kustomization`s use explicit `path:`
 values (`./apps/overlays/local`, `./infra/overlays/local`, mirror paths) and
-**never reconcile `./clusters/`**. The committed `clusters/local/flux-system/`
+**never reconcile `./clusters/`**. The committed `clusters/vanilla/flux-system/`
 therefore rides along in git (and onto the DEPLOY branch) but is inert during
 normal flywheel operation — it is activated only by an explicit
 `kubectl apply -k`.
@@ -154,7 +161,7 @@ mirror to GitHub. The two workflows are mutually exclusive ("with flywheel" vs
 - **Golden tree.** Add the five rendered files to
   `internal/cli/initcmd/testdata/golden/default/`; the existing `init` golden
   test then asserts they are written and committed.
-- **Kustomize build.** A test that `kustomize build clusters/local/flux-system`
+- **Kustomize build.** A test that `kustomize build clusters/vanilla/flux-system`
   succeeds (the entrypoint is well-formed). Confirm the client CI's `kubeconform`
   already tolerates Flux CRs — precedent exists because `builders/base/<app>/`
   already commits Flux CRs.
@@ -177,5 +184,5 @@ mirror to GitHub. The two workflows are mutually exclusive ("with flywheel" vs
   is their YAML. Plumbing these as real template values is a possible later
   refinement, deferred under YAGNI.
 - **CI scope** — confirm the client repo's `kustomize-build` / `kubeconform` CI
-  steps pick up (and pass on) `clusters/local/flux-system/` without extra
+  steps pick up (and pass on) `clusters/vanilla/flux-system/` without extra
   schema wiring.

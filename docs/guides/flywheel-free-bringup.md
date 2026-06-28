@@ -13,7 +13,10 @@ flywheel ever went away, this path still brings your apps up.
 ## What's committed
 
 `flywheel init` writes a vanilla Flux entrypoint at
-[`clusters/local/flux-system/`](../clusters/local/flux-system/):
+[`clusters/vanilla/flux-system/`](../clusters/vanilla/flux-system/) — a sibling
+of `clusters/local/`, which is flywheel's own (managed) cluster config. The
+`vanilla` name keeps the flywheel-free entrypoint clearly distinct from the
+flywheel-managed `local` one:
 
 | File | What it is |
 | --- | --- |
@@ -35,6 +38,8 @@ uncommitted local edits — that's the trade).
 - The [`flux` CLI](https://fluxcd.io/flux/installation/) and `kubectl`, both
   pointed at that cluster.
 - The committed local SOPS key at `clusters/local/age.key` (shipped in the repo).
+  It lives under `clusters/local/` — it's the same key flywheel's managed cluster
+  uses, shared because both decrypt the same `clusters/local/*` dev secrets.
 
 ## Bring-up
 
@@ -55,7 +60,7 @@ flux create secret git flux-system \
   --username=<user> --password=<personal-access-token>
 
 # 4. Apply the entrypoint. Flux takes over and reconciles apps/ + infra/.
-kubectl apply -k clusters/local/flux-system
+kubectl apply -k clusters/vanilla/flux-system
 ```
 
 Watch it converge:
@@ -104,7 +109,7 @@ cluster's `flux-system` `GitRepository`. They don't run at once; switching is
 just applying the other one:
 
 - **To flywheel:** `flywheel up` (re-points the source at the in-cluster mirror).
-- **To vanilla:** `kubectl apply -k clusters/local/flux-system` (re-points it at
+- **To vanilla:** `kubectl apply -k clusters/vanilla/flux-system` (re-points it at
   GitHub).
 
 `flywheel up` never touches `clusters/` — it renders its own entrypoint at

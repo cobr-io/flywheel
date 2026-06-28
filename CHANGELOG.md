@@ -11,12 +11,14 @@ During the v0.x phase no compat promise is made between minor versions
 
 ### Added (2026-06-28, flywheel-free bring-up — committed vanilla Flux entrypoint)
 
-- **`flywheel init` now scaffolds a committed `clusters/local/flux-system/`
+- **`flywheel init` now scaffolds a committed `clusters/vanilla/flux-system/`
   entrypoint** so the same local cluster can be brought up with stock Flux and
   **zero `flywheel` binary** (you forgo the fast dev loop). Previously the repo
   had no committed Flux entrypoint at all — `apps/` and `infra/` were plain
   Kustomize but inert — so the gitops repo only worked through flywheel. This
-  removes that implicit lock-in.
+  removes that implicit lock-in. The entrypoint lives under `clusters/vanilla/`
+  (not `clusters/local/`) to stay clearly distinct from flywheel's own managed
+  `local` cluster config.
   - Five plain-Flux files: a `GitRepository/flux-system` → your GitHub remote on
     `main`, `client-infra`/`client-apps` `Kustomization`s over
     `infra/overlays/local` + `apps/overlays/local`, the `apps` namespace, and a
@@ -31,9 +33,9 @@ During the v0.x phase no compat promise is made between minor versions
     and the one caveat — app manifests ship a dev-loop `:0-placeholder` image
     that only flywheel's image automation rewrites, so vanilla pods need real,
     pullable image refs committed. Linked from the Flywheel README's guide index
-    and the scaffolded client README, whose "Flux entrypoint" section now
-    describes both the committed vanilla entrypoint and flywheel's runtime one
-    (it previously stated `clusters/local/flux-system/` was never committed).
+    and the scaffolded client README, whose "Flux entrypoint" section
+    distinguishes the committed `clusters/vanilla/` entrypoint from flywheel's
+    runtime-rendered `clusters/local/` one.
   - Design: `docs/designs/2026-06-28-flywheel-free-bringup-design.md`.
 
 ### Changed (2026-06-18, `add-app` → `add app`)
