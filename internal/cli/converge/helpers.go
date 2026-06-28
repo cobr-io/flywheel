@@ -116,7 +116,7 @@ func splitImageRef(ref string) (string, string) {
 // merged flywheel.yaml and applies it to flywheel-system. The keys here
 // are the contract from design § The flywheel-config ConfigMap; nothing
 // under paths.* or sops.* is included. (Closed material gap O3 / T1.13.)
-func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelSchema.File, out io.Writer) error {
+func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelSchema.File, repoBaseName string, out io.Writer) error {
 	data := map[string]interface{}{
 		"client.name":           cfg.Client.Name,
 		"cluster.name":          cfg.Cluster.Name,
@@ -126,6 +126,11 @@ func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelS
 		"namespaces.apps":       cfg.Namespaces.Apps,
 		"flux.interval_local":   cfg.Flux.IntervalLocal,
 		"local.domain":          cfg.Local.Domain,
+		// Read by git-deploy-controller (dev-loop/base is static, so per-repo
+		// values arrive via this ConfigMap): the gitops repo basename it derives
+		// WORKTREE + BARE_REPO_URL from, and the AUTHORED fallback branch.
+		"repo.base_name":         repoBaseName,
+		"git.integration_branch": cfg.IntegrationBranch(),
 	}
 	cm := &unstructured.Unstructured{
 		Object: map[string]interface{}{

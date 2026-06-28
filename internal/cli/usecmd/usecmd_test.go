@@ -1,18 +1,20 @@
 package usecmd
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
 
 func TestBranchPatch(t *testing.T) {
-	obj := BranchPatch("flux-system", "flux-system", "feat/x", "2026-06-11T14:00:00Z")
+	obj := BranchPatch("flux-system", "flux-system", "feat/x")
 
 	if got := obj.GetName(); got != "flux-system" {
 		t.Errorf("name = %q", got)
@@ -23,18 +25,13 @@ func TestBranchPatch(t *testing.T) {
 	if gvk := obj.GroupVersionKind(); gvk.Group != "source.toolkit.fluxcd.io" || gvk.Version != "v1" || gvk.Kind != "GitRepository" {
 		t.Errorf("gvk = %v", gvk)
 	}
-	if got, _, _ := unstructured.NestedString(obj.Object, "spec", "ref", "branch"); got != "feat/x" {
-		t.Errorf("spec.ref.branch = %q, want feat/x", got)
-	}
-	ann := obj.GetAnnotations()
-	if ann[DeployBranchAnnotation] != "feat/x" {
+	// The deploy branch is now AUTHORED-selection only: it sets the annotation
+	// and must NOT touch spec.ref (Flux tracks the constant DEPLOY branch).
+	if ann := obj.GetAnnotations(); ann[DeployBranchAnnotation] != "feat/x" {
 		t.Errorf("deploy-branch annotation = %q, want feat/x", ann[DeployBranchAnnotation])
 	}
-	if ann["kustomize.toolkit.fluxcd.io/reconcile"] != "disabled" {
-		t.Errorf("reconcile annotation = %q, want disabled", ann["kustomize.toolkit.fluxcd.io/reconcile"])
-	}
-	if ann["reconcile.fluxcd.io/requestedAt"] != "2026-06-11T14:00:00Z" {
-		t.Errorf("requestedAt annotation = %q", ann["reconcile.fluxcd.io/requestedAt"])
+	if _, found, _ := unstructured.NestedMap(obj.Object, "spec"); found {
+		t.Error("BranchPatch must not set spec (Flux ref is constant now)")
 	}
 }
 
@@ -100,14 +97,52 @@ func TestRun_AppliesBranchPatch(t *testing.T) {
 	if captured == nil {
 		t.Fatal("applyObject was not called")
 	}
-	if got, _, _ := unstructured.NestedString(captured.Object, "spec", "ref", "branch"); got != "feat/x" {
-		t.Errorf("applied branch = %q, want feat/x", got)
+	if got := captured.GetAnnotations()[DeployBranchAnnotation]; got != "feat/x" {
+		t.Errorf("applied deploy-branch annotation = %q, want feat/x", got)
 	}
 }
 
 func TestRun_RequiresBranch(t *testing.T) {
 	if err := Run(context.Background(), Options{RepoDir: t.TempDir(), Stdout: io.Discard}); err == nil {
 		t.Error("empty branch should be rejected")
+	}
+}
+
+// TestRun_WarnsOnWorktreeMismatch covers design open question #3: selecting a
+// branch the worktree isn't on warns that commits won't deploy until you switch.
+func TestRun_WarnsOnWorktreeMismatch(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q", "-b", "main")
+	runGit(t, repo, "config", "user.email", "t@t")
+	runGit(t, repo, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-q", "-m", "c")
+	runGit(t, repo, "branch", "feat/x")
+	if err := os.WriteFile(filepath.Join(repo, "flywheel.yaml"),
+		[]byte("schema: v1alpha1\ncluster:\n  name: acme-local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noop := func(ctx context.Context, obj *unstructured.Unstructured) error { return nil }
+
+	// On main, selecting feat/x → mismatch warning naming the switch command.
+	var mismatch bytes.Buffer
+	if err := Run(context.Background(), Options{RepoDir: repo, Branch: "feat/x", Stdout: &mismatch, applyObject: noop}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(mismatch.String(), "git switch feat/x") {
+		t.Errorf("expected a worktree-mismatch warning, got:\n%s", mismatch.String())
+	}
+
+	// On main, selecting main → no mismatch warning.
+	var match bytes.Buffer
+	if err := Run(context.Background(), Options{RepoDir: repo, Branch: "main", Stdout: &match, applyObject: noop}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(match.String(), "won't deploy until you") {
+		t.Errorf("unexpected mismatch warning when on the selected branch:\n%s", match.String())
 	}
 }
 

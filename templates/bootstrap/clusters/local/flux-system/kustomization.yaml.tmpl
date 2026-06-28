@@ -12,7 +12,9 @@ resources:
   - ./client-builders-kustomization.yaml
   - ./infra-kustomization.yaml
   - ./apps-kustomization.yaml
-  - ./self-git-auto-sync.yaml
+# The gitops/self sync moved from this bootstrap Deployment to the
+# git-deploy-controller in manifests/dev-loop/base (applied step 11a), which
+# maintains the flywheel/local-deploy DEPLOY branch. No self-git-auto-sync here.
 # traefik-tls.yaml lives in Flywheel's manifests/infra (reconciled by the
 # flywheel-infra Kustomization), not in this directory — keeps client repos
 # free of TLSStore/TLSOption boilerplate.

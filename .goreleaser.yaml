@@ -1,8 +1,8 @@
 # goreleaser config for Flywheel.
 #
 # - One static Go binary (flywheel) for darwin/linux × amd64/arm64.
-# - Three multi-arch container images (git-server, git-auto-sync,
-#   image-builder-controller) published to ghcr.io/cobr-io.
+# - Four multi-arch container images (git-server, git-auto-sync,
+#   image-builder-controller, git-deploy-controller) published to ghcr.io/cobr-io.
 # - No :latest tag (per design § Versioning) — every published artefact
 #   carries the immutable :vX.Y.Z tag only.
 #
@@ -130,6 +130,37 @@ dockers:
       - internal
       - go.mod
       - go.sum
+  - id: git-deploy-controller-amd64
+    image_templates:
+      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}-amd64"
+    dockerfile: Dockerfile.git-deploy-controller
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/amd64"
+      - "--label=org.opencontainers.image.source=https://github.com/cobr-io/flywheel"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+    extra_files:
+      - cmd
+      - internal
+      - go.mod
+      - go.sum
+  - id: git-deploy-controller-arm64
+    image_templates:
+      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}-arm64"
+    dockerfile: Dockerfile.git-deploy-controller
+    use: buildx
+    build_flag_templates:
+      - "--platform=linux/arm64"
+      - "--label=org.opencontainers.image.source=https://github.com/cobr-io/flywheel"
+      - "--label=org.opencontainers.image.version={{ .Version }}"
+      - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
+    goarch: arm64
+    extra_files:
+      - cmd
+      - internal
+      - go.mod
+      - go.sum
 
 docker_manifests:
   - name_template: "ghcr.io/cobr-io/git-server:{{ .Version }}"
@@ -144,6 +175,10 @@ docker_manifests:
     image_templates:
       - "ghcr.io/cobr-io/image-builder-controller:{{ .Version }}-amd64"
       - "ghcr.io/cobr-io/image-builder-controller:{{ .Version }}-arm64"
+  - name_template: "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}"
+    image_templates:
+      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}-amd64"
+      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}-arm64"
 
 # No :latest — design § Versioning makes flywheel.yaml the source of truth.
 release:

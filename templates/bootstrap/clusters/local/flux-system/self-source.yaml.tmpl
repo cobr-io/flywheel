@@ -1,5 +1,10 @@
 # The client's own GitOps repo, served by the in-cluster git-server.
-# git-auto-sync patches spec.ref.branch on branch switches; Flux follows.
+# Flux always tracks the constant DEPLOY branch (flywheel/local-deploy), which
+# git-deploy-controller maintains as AUTHORED + the IUA's image-bump commits.
+# The branch is NOT repointed per developer-branch: `flywheel use` selects the
+# AUTHORED branch via the flywheel.cobr.io/deploy-branch annotation, which the
+# controller feeds into DEPLOY. (A custom non-refs/heads ref fails to fetch on
+# the pinned Flux — see docs/designs/2026-06-28-isolate-dev-loop-image-bumps-design.md.)
 apiVersion: source.toolkit.fluxcd.io/v1
 kind: GitRepository
 metadata:
@@ -9,4 +14,4 @@ spec:
   interval: {{ .FluxIntervalLocal }}
   url: http://git-server.flywheel-system.svc.cluster.local:8080/{{ .RepoBaseName }}.git
   ref:
-    branch: {{ .Branch }}
+    branch: flywheel/local-deploy

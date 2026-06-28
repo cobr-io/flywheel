@@ -1,0 +1,19 @@
+FROM golang:1.26-bookworm AS build
+WORKDIR /src
+COPY go.mod go.sum* ./
+RUN go mod download || true
+COPY . ./
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
+        -o /out/controller ./cmd/git-deploy-controller
+
+# Unlike the other controllers this one shells out to `git` (deploybranch +
+# worktree push), so it can't use distroless/static — base on debian with git.
+# No kubectl: it talks to the API via the in-cluster Go client. Runs as root so
+# it can read the developer's hostPath worktree and write its working clone.
+FROM debian:stable-slim
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    git config --system --add safe.directory '*'
+COPY --from=build /out/controller /usr/local/bin/git-deploy-controller
+ENTRYPOINT ["/usr/local/bin/git-deploy-controller"]

@@ -35,8 +35,8 @@ updates:
       github-actions:
         patterns: ["*"]
 
-  # Base images in the three root runtime Dockerfiles
-  # (Dockerfile.git-server / .git-auto-sync / .image-builder-controller).
+  # Base images in the four root runtime Dockerfiles (Dockerfile.git-server /
+  # .git-auto-sync / .image-builder-controller / .git-deploy-controller).
   # directory: "/" is non-recursive, so the busybox testdata fixture is left
   # alone.
   - package-ecosystem: docker

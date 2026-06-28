@@ -1,0 +1,64 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-deploy-controller
+  namespace: flywheel-system
+  labels:
+    app: git-deploy-controller
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: git-deploy-controller
+  template:
+    metadata:
+      labels:
+        app: git-deploy-controller
+    spec:
+      # Reuses the git-auto-sync SA, whose flux-system Role already grants
+      # get/patch on gitrepositories, imageupdateautomations, and kustomizations
+      # — exactly what this controller needs (ConfigMap reads are kubelet-
+      # resolved via valueFrom, so no extra RBAC).
+      serviceAccountName: git-auto-sync
+      containers:
+        - name: controller
+          # Rewritten to the per-client local-registry ref by `flywheel up`
+          # (renderDevLoopKustomization, keyed on schema.ImageNames).
+          image: ghcr.io/cobr-io/git-deploy-controller:v0.1.0
+          imagePullPolicy: IfNotPresent
+          env:
+            # dev-loop/base is static, so per-repo values arrive via flywheel-config.
+            - name: REPO_BASE_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: repo.base_name
+            # AUTHORED fallback when `flywheel use` hasn't selected a branch.
+            - name: DEFAULT_BRANCH
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: git.integration_branch
+            - name: DEPLOY_WORKDIR
+              value: /var/lib/git-deploy/clone
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+            - name: workdir
+              mountPath: /var/lib/git-deploy
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        # The developer's gitops worktree, bind-mounted into k3d at /workspaces.
+        - name: workspaces
+          hostPath:
+            path: /workspaces
+            type: Directory
+        # Disposable working clone for the DEPLOY-branch maintainer.
+        - name: workdir
+          emptyDir: {}

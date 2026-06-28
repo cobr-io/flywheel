@@ -19,3 +19,7 @@ data:
   namespaces.apps: "apps"
   flux.interval_local: "{{ .FluxIntervalLocal }}"
   local.domain: "{{ .Domain }}"
+  # Read by git-deploy-controller: the gitops repo basename (it derives WORKTREE
+  # + BARE_REPO_URL from this) and the AUTHORED fallback branch.
+  repo.base_name: "{{ .RepoBaseName }}"
+  git.integration_branch: "{{ .IntegrationBranch }}"

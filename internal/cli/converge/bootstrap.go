@@ -29,7 +29,7 @@ import (
 // extra "refresh" step.
 //
 // Caller owns the returned path and must os.RemoveAll it.
-func RenderBootstrap(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName, branch string) (string, error) {
+func RenderBootstrap(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName string) (string, error) {
 	tmp, err := os.MkdirTemp("", "flywheel-bootstrap-")
 	if err != nil {
 		return "", fmt.Errorf("mkdir tmp bootstrap dir: %w", err)
@@ -39,7 +39,7 @@ func RenderBootstrap(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		os.RemoveAll(tmp)
 		return "", fmt.Errorf("embed bootstrap missing: %w", err)
 	}
-	values, err := bootstrapValues(cfg, refs, flywheelSHA, repoBaseName, branch)
+	values, err := bootstrapValues(cfg, refs, flywheelSHA, repoBaseName)
 	if err != nil {
 		os.RemoveAll(tmp)
 		return "", err
@@ -56,14 +56,14 @@ func RenderBootstrap(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 // (name, tag) pairs for builders-kustomization.yaml's `spec.images`
 // block, and surfaced verbatim for self-git-auto-sync.yaml's
 // container `image:` field.
-func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName, branch string) (map[string]any, error) {
+func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName string) (map[string]any, error) {
 	gsName, gsTag := splitImageRef(refs["git-server"])
-	// git-auto-sync is surfaced both verbatim (GitAutoSyncImageRef, for the
-	// self sidecar's container image: field) AND split into name/tag, which the
-	// client-builders Kustomization uses to rewrite the per-app sidecars'
-	// canonical ghcr.io ref to whatever `up` mirrored into the local registry.
+	// git-auto-sync is split into name/tag, which the client-builders
+	// Kustomization uses to rewrite the per-app sidecars' canonical ghcr.io ref
+	// to whatever `up` mirrored into the local registry.
 	gasName, gasTag := splitImageRef(refs["git-auto-sync"])
 	ibcName, ibcTag := splitImageRef(refs["image-builder-controller"])
+	gdcName, gdcTag := splitImageRef(refs["git-deploy-controller"])
 
 	// The client-infra tier reconciles at flux.iac_interval; infra changes
 	// less often than app code, so it can poll slower than interval_local.
@@ -80,6 +80,7 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		"git-server:               (newTag)": gsTag,
 		"git-auto-sync:            (newTag)": gasTag,
 		"image-builder-controller: (newTag)": ibcTag,
+		"git-deploy-controller:    (newTag)": gdcTag,
 	} {
 		if val == "" {
 			return nil, fmt.Errorf("bootstrap: %s missing — flywheel.images overrides must include an explicit `:tag`", strings.TrimSuffix(name, " (newTag)"))
@@ -93,18 +94,19 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		"ClusterName":                     cfg.Cluster.Name,
 		"Registry":                        cfg.Cluster.Registry,
 		"RegistryPort":                    cfg.Cluster.RegistryPort,
-		"Branch":                          branch,
+		"IntegrationBranch":               cfg.IntegrationBranch(),
 		"FluxIntervalLocal":               cfg.Flux.IntervalLocal,
 		"FluxIacInterval":                 iacInterval,
 		"FlywheelSHA":                     flywheelSHA,
 		"GitServerImageName":              gsName,
 		"GitServerImageTag":               gsTag,
 		"GitServerMemoryLimit":            cfg.GitServerMemoryLimit(),
-		"GitAutoSyncImageRef":             refs["git-auto-sync"],
 		"GitAutoSyncImageName":            gasName,
 		"GitAutoSyncImageTag":             gasTag,
 		"ImageBuilderControllerImageName": ibcName,
 		"ImageBuilderControllerImageTag":  ibcTag,
+		"GitDeployControllerImageName":    gdcName,
+		"GitDeployControllerImageTag":     gdcTag,
 	}, nil
 }
 
@@ -115,11 +117,11 @@ func ResolveRepoBaseName(repoDir string) string {
 	return filepath.Base(repoDir)
 }
 
-// CurrentBranch returns the branch the client worktree is on, so the
-// bootstrap flux-system GitRepository tracks the branch the developer is
-// actually working on rather than a hardcoded `main`. Every `flywheel up`
-// thus asserts the current branch — agreeing with git-auto-sync-self
-// (which patches spec.ref.branch on switches) instead of clobbering it.
+// CurrentBranch returns the branch the client worktree is on. Used by the
+// add-app local-only guard (refuse a local-only app on the integration branch)
+// and by `up`'s worktree-reconcile reporting. (The bootstrap no longer derives
+// Flux's deployed branch from it — Flux tracks the constant flywheel/local-deploy
+// DEPLOY branch; see the deploy-ref design.)
 //
 // Falls back to "main" on a detached HEAD or any git error (fresh repo
 // with no commits, git absent): the safe default that matches the

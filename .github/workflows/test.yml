@@ -29,7 +29,7 @@ jobs:
               --exclude='*_test.go' --exclude-dir=testdata \
               cmd/ internal/ manifests/ templates/ \
               Dockerfile.git-server Dockerfile.git-auto-sync \
-              Dockerfile.image-builder-controller 2>/dev/null; then
+              Dockerfile.image-builder-controller Dockerfile.git-deploy-controller 2>/dev/null; then
             echo "ERROR: :latest tag detected — every published artefact must use :vX.Y.Z"
             exit 1
           fi
@@ -105,6 +105,7 @@ jobs:
           docker build -t flywheel-dev/git-server:ci -f Dockerfile.git-server .
           docker build -t flywheel-dev/git-auto-sync:ci -f Dockerfile.git-auto-sync .
           docker build -t flywheel-dev/image-builder-controller:ci -f Dockerfile.image-builder-controller .
+          docker build -t flywheel-dev/git-deploy-controller:ci -f Dockerfile.git-deploy-controller .
       - name: Wait for docker daemon to settle
         # The three builds above leave dockerd briefly busy; `flywheel up`'s
         # step-2 prereq check then pings `docker info` and was occasionally
@@ -129,6 +130,7 @@ jobs:
               git-server: flywheel-dev/git-server:ci
               git-auto-sync: flywheel-dev/git-auto-sync:ci
               image-builder-controller: flywheel-dev/image-builder-controller:ci
+              git-deploy-controller: flywheel-dev/git-deploy-controller:ci
           EOF
           # Issue #1: prove `up` heals a host-port collision instead of
           # crashing k3d. Squat the just-allocated http_port so step 5b must
@@ -163,7 +165,8 @@ jobs:
           nodes=$(k3d node list --no-headers | awk '$2=="server"||$2=="agent"{print $1}')
           for img in flywheel-dev/git-server:ci \
                      flywheel-dev/git-auto-sync:ci \
-                     flywheel-dev/image-builder-controller:ci; do
+                     flywheel-dev/image-builder-controller:ci \
+                     flywheel-dev/git-deploy-controller:ci; do
             for node in $nodes; do
               if ! docker exec "$node" crictl images 2>/dev/null | grep -q "${img%:*}"; then
                 echo "::warning::$img missing on $node — re-importing into all nodes"
