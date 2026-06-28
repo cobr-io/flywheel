@@ -349,6 +349,22 @@ never tracking it, not from a non-standard namespace.
   bumps DEPLOY → rollout, with AUTHORED verified clean and a `git push` of
   AUTHORED carrying no bump commits.
 
+### Live validation (done 2026-06-28)
+
+A full `flywheel up` on a throwaway k3d cluster, then a local-only app added on a
+`feat/app` branch and edited:
+- `up` came up clean (5/5 Flux Kustomizations Ready); Flux's self GitRepository
+  tracked `flywheel/local-deploy` (Ready).
+- `git-deploy-controller` seeded DEPLOY and, on an authored commit, pushed it and
+  rebuilt DEPLOY to follow — while `main` stayed bump-free.
+- Adding + editing the `hello` app drove two real IUA bumps:
+  `flywheel/local-deploy` accumulated `…0-placeholder → …<ts1> → …<ts2>` on top of
+  the `add app hello` commit, the pod rolled to the latest tag, and **`feat/app`
+  kept 0 bump commits** (its `deployment.yaml` still read `:0-placeholder`). The
+  authored branch is never polluted; the bumps live only on DEPLOY.
+- Found + fixed the two-apply-paths image gotcha (the Flux dev-loop reconcile path
+  must rewrite the controller image too) — now covered by a render test.
+
 ## Open questions
 
 1. ~~Confirm Flux `spec.ref.name` support; else fall back to a branch.~~ **Resolved
