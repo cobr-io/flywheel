@@ -4,8 +4,9 @@
 # policy set and commits bumps to the bare repo over HTTP (the in-cluster
 # git-server accepts anonymous pushes for cluster-internal clients).
 #
-# git-auto-sync then pulls those bumps back into the developer's worktree
-# on its next fetch+rebase cycle.
+# The bumps land on the DEPLOY branch (flywheel/local-deploy) and stay there:
+# git-deploy-controller keeps DEPLOY = AUTHORED + these bumps, but never pulls
+# them into the developer's worktree, so the authored branch is never polluted.
 apiVersion: image.toolkit.fluxcd.io/v1
 kind: ImageUpdateAutomation
 metadata:
@@ -18,12 +19,11 @@ spec:
     name: flux-system
     namespace: flux-system
   git:
-    # No checkout.ref / push.branch: defaults to the GitRepository's current
-    # branch. git-auto-sync patches GitRepository.spec.ref.branch to follow
-    # the developer's worktree, so IAC commits bumps to whichever branch
-    # is currently checked out — including feature branches. Otherwise
-    # bumps would always land on main and feature-branch deploys would
-    # never roll.
+    # No checkout.ref / push.branch: the IUA commits to the GitRepository's
+    # tracked branch, which is the constant DEPLOY branch (flywheel/local-deploy).
+    # So image bumps always land on DEPLOY, never on the developer's AUTHORED
+    # branch. (Must stay a refs/heads/ branch — a non-head ref fails to fetch on
+    # the pinned Flux; see the deploy-ref design.)
     commit:
       author:
         name: image-automation

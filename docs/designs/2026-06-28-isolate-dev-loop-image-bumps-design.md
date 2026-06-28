@@ -165,17 +165,31 @@ it structural, but source-controller can't fetch one — see
   `AUTO_FOLLOW_BRANCH=false` safety model (issue #17 — don't follow transient
   worktree checkouts during a rebase) carries over: the sync tracks the
   *configured* branch, not the live `HEAD`.
+- **Default AUTHORED branch = the integration branch** (`git.integration_branch`,
+  default `main`), read from the `flywheel-config` ConfigMap — *not* the branch
+  `up` was run on. So a deliberate `flywheel use <feature-branch>` is required to
+  deploy a feature branch; with none set, DEPLOY tracks the integration branch.
+  (This is a behaviour change from the old sync, which deployed whatever branch
+  the worktree was on at `up` time — consistent with the deliberate-selection,
+  don't-auto-follow model.)
 
 **5. The interim dev-branch guard** — deleted (see [Migration](#migration-plan)).
 
 ### DEPLOY maintenance algorithm
 
-DEPLOY must equal `AUTHORED + bumps` at all times. Two events change it:
+DEPLOY must equal `AUTHORED + bumps` at all times. Three events change it:
 
 - **The IUA adds a bump** (image changed): it commits directly onto DEPLOY.
   Nothing for the sync to do.
-- **AUTHORED advances** (developer commits, or `flywheel use` switches the tracked
-  branch): DEPLOY must move from `A + bumps` to `A' + bumps`.
+- **AUTHORED advances on the same branch** (developer commits): DEPLOY must move
+  from `A + bumps` to `A' + bumps` — rebase the bump layer forward (below).
+- **`flywheel use` switches to a different branch**: DEPLOY is **reset** to the
+  new branch's tip, discarding the old branch's bumps (they were built from a
+  different branch's code) — the IUA then re-bumps for the new branch. A
+  rebase-forward would *wrongly* replay the old branch's authored commits onto the
+  new one, so a switch is a reset, not a rebase. (`deploybranch.Maintainer.ResetToAuthored`;
+  the loop detects the switch by comparing the resolved AUTHORED branch to the one
+  DEPLOY was last built from.)
 
 To move it, **suspend the IUA, rebase the bump layer forward, resume** — reusing
 the suspend/resume pattern the sync already has for branch switches (`IUA_NAME` in
@@ -309,9 +323,16 @@ never tracking it, not from a non-standard namespace.
 - **Transient placeholder deploy** — only on the fallback path; near-instant
   re-bump via the ImagePolicy poke controller
   (`internal/controller/imagepolicy_iua_controller.go`).
-- **`flywheel use` / branch switch** — DEPLOY rebuilt from the new AUTHORED; Flux
-  ref constant, so no repoint. Same `AUTO_FOLLOW_BRANCH=false` protection against
-  transient checkouts.
+- **`flywheel use` / branch switch** — the loop detects the configured-branch
+  change and **resets** DEPLOY to the new branch (discarding the old branch's
+  bumps); Flux ref is constant, so no repoint. Same `AUTO_FOLLOW_BRANCH=false`
+  protection against transient checkouts.
+- **Force-pushing the *same* AUTHORED branch mid-loop** (amend / interactive
+  rebase): treated as an advance → rebase-forward. If the rewrite touches the same
+  hunks as the bumps it conflicts → reset-and-rebump (correct); a non-conflicting
+  rewrite can leave a few stale replayed commits on DEPLOY until the next clean
+  advance (the deployed image is still correct). Known minor edge; precise
+  handling would need DEPLOY-base tracking and is deferred.
 - **Detached HEAD / fresh repo (no commits)** — no AUTHORED to track; DEPLOY not
   built; the loop is inert until a branch with a commit exists (matches today's
   `CurrentBranch` fallback intent).

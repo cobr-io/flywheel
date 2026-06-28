@@ -277,8 +277,7 @@ func Run(ctx context.Context, opts Options) error {
 	// refresh-overlay race and makes .local edits flow through on the
 	// next `up` without any explicit refresh.
 	repoBaseName := converge.ResolveRepoBaseName(opts.RepoDir)
-	branch := converge.CurrentBranch(opts.RepoDir)
-	bootstrapDir, err := converge.RenderBootstrap(cfg, resolvedImages, sha, repoBaseName, branch)
+	bootstrapDir, err := converge.RenderBootstrap(cfg, resolvedImages, sha, repoBaseName)
 	if err != nil {
 		return fmt.Errorf("step 11 (render bootstrap): %w", err)
 	}

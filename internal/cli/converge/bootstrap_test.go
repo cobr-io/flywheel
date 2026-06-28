@@ -31,7 +31,7 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 		"git-deploy-controller":    "flywheel-dev/git-deploy-controller:dogfood",
 	}
 
-	dir, err := RenderBootstrap(cfg, refs, "abc123def456abc123def456abc123def456abcd", "acme-gitops", "feat/x")
+	dir, err := RenderBootstrap(cfg, refs, "abc123def456abc123def456abc123def456abcd", "acme-gitops")
 	if err != nil {
 		t.Fatalf("renderBootstrap: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestRenderBootstrap_GitServerMemoryLimit(t *testing.T) {
 		"image-builder-controller": "ghcr.io/cobr-io/image-builder-controller:v0.1.0",
 		"git-deploy-controller":    "ghcr.io/cobr-io/git-deploy-controller:v0.1.0",
 	}
-	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops", "main")
+	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops")
 	if err != nil {
 		t.Fatalf("RenderBootstrap: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestRenderBootstrap_RejectsUntaggedOverride(t *testing.T) {
 		"git-deploy-controller":    "flywheel-dev/git-deploy-controller:dogfood",
 	}
 
-	_, err := RenderBootstrap(cfg, refs, "abc", "acme", "main")
+	_, err := RenderBootstrap(cfg, refs, "abc", "acme")
 	if err == nil {
 		t.Fatal("expected renderBootstrap to reject untagged override")
 	}
