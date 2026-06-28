@@ -1,0 +1,9 @@
+# The application namespace (matches namespaces.apps in flywheel.yaml). Flux's
+# own flux-system namespace is created by `flux install`; flywheel-system is
+# dev-loop-only and intentionally absent from the vanilla entrypoint.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps
+  labels:
+    kubernetes.io/metadata.name: apps

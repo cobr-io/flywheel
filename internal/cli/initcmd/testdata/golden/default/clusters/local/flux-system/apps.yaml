@@ -1,0 +1,26 @@
+# Client apps tier (apps/overlays/local), reconciled after client-infra.
+#
+# NOTE — images: app manifests scaffolded by `flywheel add app` carry a dev-loop
+# image placeholder — image: ...:0-placeholder # {"$imagepolicy": ...} — that is
+# rewritten only by flywheel's in-cluster image automation, which does NOT run
+# in vanilla mode. Flux reconciles this tier green, but pods can't pull the
+# placeholder tag until you commit real, pullable image refs. See
+# docs/flywheel-free-bringup.md § Images.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: client-apps
+  namespace: flux-system
+spec:
+  interval: 1m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./apps/overlays/local
+  dependsOn:
+    - name: client-infra
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age

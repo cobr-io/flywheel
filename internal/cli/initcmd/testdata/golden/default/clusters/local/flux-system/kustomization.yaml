@@ -1,0 +1,10 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+# Aggregator so `kubectl apply -k clusters/local/flux-system` applies the whole
+# vanilla entrypoint in one shot. Order is informational; Flux reconciles by the
+# dependsOn relations (client-apps → client-infra).
+resources:
+  - ./namespaces.yaml
+  - ./source.yaml
+  - ./infra.yaml
+  - ./apps.yaml

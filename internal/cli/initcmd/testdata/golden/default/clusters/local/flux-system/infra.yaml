@@ -1,0 +1,25 @@
+# Client infra tier (infra/overlays/local) — extra Ingress hosts, middleware,
+# etc. — reconciled straight from the GitRepository in source.yaml.
+#
+# Unlike flywheel's dev-loop entrypoint there is no `flywheel-infra` layer here:
+# that one ships flywheel's own local TLS / traefik wiring from the in-cluster
+# mirror. A vanilla cluster uses whatever ingress its distribution provides.
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: client-infra
+  namespace: flux-system
+spec:
+  interval: 1m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./infra/overlays/local
+  # Decrypt SOPS-encrypted secrets (*.enc.yaml) with the sops-age key you create
+  # during bring-up (step 2). The secret must exist before this reconciles, even
+  # when the tier currently ships no encrypted files.
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
