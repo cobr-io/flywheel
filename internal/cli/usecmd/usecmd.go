@@ -107,6 +107,14 @@ func Run(ctx context.Context, opts Options) error {
 		style.Warn(opts.Stdout, "branch %q is not a local branch in %s; Flux can only deploy it once it exists in the cluster's bare repo (git-auto-sync pushes branches you check out)", opts.Branch, opts.RepoDir)
 	}
 
+	// Warn (don't fail) on the deliberate AUTHORED/worktree split: git-deploy-
+	// controller feeds the *selected* branch into DEPLOY by pushing the worktree's
+	// copy of it, so commits you make on a different checkout won't deploy until
+	// you switch. Easy to get wrong, hence the nudge (design open question #3).
+	if cur := currentBranch(opts.RepoDir); cur != "" && cur != opts.Branch {
+		style.Warn(opts.Stdout, "your worktree is on %q, not %q — commits you make now won't deploy until you `git switch %s`", cur, opts.Branch, opts.Branch)
+	}
+
 	apply := opts.applyObject
 	if apply == nil {
 		a, aerr := applier.New("", k3d.KubeContext(cfg.Cluster.Name))
@@ -172,6 +180,17 @@ func LocalBranches(repoDir string) ([]string, error) {
 		}
 	}
 	return branches, nil
+}
+
+// currentBranch returns the worktree's checked-out branch, or "" when it can't
+// be determined (detached HEAD, unborn branch, git error) — in which case the
+// AUTHORED/worktree-mismatch warning is skipped.
+func currentBranch(repoDir string) string {
+	out, err := exec.Command("git", "-C", repoDir, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(out))
 }
 
 // readConfig parses flywheel.yaml merged with flywheel.yaml.local (for a

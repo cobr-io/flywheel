@@ -358,5 +358,6 @@ never tracking it, not from a non-standard namespace.
    Decision 1.
 2. ~~Go controller vs `sync.sh` for the reconciler.~~ **Resolved** — Go controller
    owning the self path; per-app `sync.sh` untouched (Decision 3).
-3. Should `flywheel use` warn when the configured AUTHORED branch ≠ the worktree's
-   current checkout (the split that is intentional today but easy to get wrong)?
+3. ~~Should `flywheel use` warn when the configured AUTHORED branch ≠ the worktree's
+   current checkout?~~ **Implemented** — `use` now warns ("your worktree is on X,
+   not Y — commits you make now won't deploy until you `git switch Y`").

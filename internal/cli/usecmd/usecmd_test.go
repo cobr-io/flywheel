@@ -1,11 +1,13 @@
 package usecmd
 
 import (
+	"bytes"
 	"context"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -103,6 +105,44 @@ func TestRun_AppliesBranchPatch(t *testing.T) {
 func TestRun_RequiresBranch(t *testing.T) {
 	if err := Run(context.Background(), Options{RepoDir: t.TempDir(), Stdout: io.Discard}); err == nil {
 		t.Error("empty branch should be rejected")
+	}
+}
+
+// TestRun_WarnsOnWorktreeMismatch covers design open question #3: selecting a
+// branch the worktree isn't on warns that commits won't deploy until you switch.
+func TestRun_WarnsOnWorktreeMismatch(t *testing.T) {
+	repo := t.TempDir()
+	runGit(t, repo, "init", "-q", "-b", "main")
+	runGit(t, repo, "config", "user.email", "t@t")
+	runGit(t, repo, "config", "user.name", "t")
+	if err := os.WriteFile(filepath.Join(repo, "x"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	runGit(t, repo, "add", ".")
+	runGit(t, repo, "commit", "-q", "-m", "c")
+	runGit(t, repo, "branch", "feat/x")
+	if err := os.WriteFile(filepath.Join(repo, "flywheel.yaml"),
+		[]byte("schema: v1alpha1\ncluster:\n  name: acme-local\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	noop := func(ctx context.Context, obj *unstructured.Unstructured) error { return nil }
+
+	// On main, selecting feat/x → mismatch warning naming the switch command.
+	var mismatch bytes.Buffer
+	if err := Run(context.Background(), Options{RepoDir: repo, Branch: "feat/x", Stdout: &mismatch, applyObject: noop}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(mismatch.String(), "git switch feat/x") {
+		t.Errorf("expected a worktree-mismatch warning, got:\n%s", mismatch.String())
+	}
+
+	// On main, selecting main → no mismatch warning.
+	var match bytes.Buffer
+	if err := Run(context.Background(), Options{RepoDir: repo, Branch: "main", Stdout: &match, applyObject: noop}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(match.String(), "won't deploy until you") {
+		t.Errorf("unexpected mismatch warning when on the selected branch:\n%s", match.String())
 	}
 }
 
