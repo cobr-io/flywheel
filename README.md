@@ -175,7 +175,24 @@ local:
 sops:
   age_recipients_local:
     - age1...               # age recipients for SOPS-encrypted local secrets
+
+# Optional blocks — omit to take the defaults shown.
+git:
+  integration_branch: main  # branch the local-only guard refuses to let
+                            # remote-less apps reach (default: main)
+
+git_server:
+  memory_limit: 128Mi       # memory limit for the in-cluster git-server
+                            # (default: 128Mi) — see note below
 ```
+
+The optional `git_server.memory_limit` sizes the in-cluster git-server that
+serves your app worktrees to the build jobs. The `128Mi` default suits small
+repos, but git's pack compression on `git-upload-pack` of a large monorepo can
+spike past it and get the pod OOMKilled mid-build (the build then fails and app
+pods stay `Pending`). Raise it (e.g. `512Mi` or `1Gi`) when building from
+sizeable repos; the new limit is applied on your next `flywheel up`. Any
+Kubernetes memory quantity is accepted (`128Mi`, `512Mi`, `1Gi`).
 
 Per-developer overrides go in a gitignored `flywheel.yaml.local`. Ports and the
 repo path are also tracked in `~/.config/flywheel/allocations.json` so multiple
