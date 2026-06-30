@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	flywheel "github.com/cobr-io/flywheel"
 	"github.com/cobr-io/flywheel/internal/cli/age"
 	"github.com/cobr-io/flywheel/internal/cli/converge"
 )
@@ -223,6 +224,51 @@ func TestInit_DefaultsToBuildVersion(t *testing.T) {
 	}
 	if res.FlywheelSHA != fixedSHA {
 		t.Errorf("FlywheelSHA = %q, want %q", res.FlywheelSHA, fixedSHA)
+	}
+}
+
+func TestInit_DefaultsToReleaseTagFromBuildVersion(t *testing.T) {
+	// Regression for #39: a release-built binary stamps a v-prefixed release
+	// tag into flywheel.BuildVersion (via the {{.Tag}} ldflags, PR #30). When
+	// no --version is given, `init` must pin that release tag — NOT a bare git
+	// build id — both in the Result and in the rendered flywheel.yaml. This
+	// guards the "default: latest release tag" promise so it's enforced by CI
+	// rather than a manual post-tag check.
+	//
+	// Mutates the package-global flywheel.BuildVersion, so this test must NOT
+	// run in parallel and must restore the original value on exit.
+	const releaseTag = "v0.1.0"
+	orig := flywheel.BuildVersion
+	flywheel.BuildVersion = releaseTag
+	defer func() { flywheel.BuildVersion = orig }()
+
+	parent := t.TempDir()
+	home := t.TempDir()
+	opts := Options{
+		Name:             "acme",
+		ParentDir:        parent,
+		HomeOverride:     home,
+		SkeletonFS:       os.DirFS(skeletonDir(t)),
+		Age:              age.FixedKeypair(age.Keypair{PublicKey: fixedAgePub, PrivateKey: fixedAgePriv}),
+		FlywheelSHA:      fixedSHA,
+		SkipEmbedExtract: true,
+		SkipGitCommit:    true,
+	}
+	res, err := Run(opts)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.FlywheelTag != releaseTag {
+		t.Errorf("FlywheelTag = %q, want %q (release tag from BuildVersion)", res.FlywheelTag, releaseTag)
+	}
+
+	// The pin must also reach the rendered flywheel.yaml the client commits.
+	b, err := os.ReadFile(filepath.Join(res.RepoDir, "flywheel.yaml"))
+	if err != nil {
+		t.Fatalf("read rendered flywheel.yaml: %v", err)
+	}
+	if !strings.Contains(string(b), "version: "+releaseTag) {
+		t.Errorf("flywheel.yaml does not pin %q:\n%s", "version: "+releaseTag, b)
 	}
 }
 
