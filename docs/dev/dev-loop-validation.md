@@ -9,11 +9,12 @@ It's written so a human *or* an agent can follow it step by step and decide
 PASS/FAIL from explicit checks. Every command below was run as-is during the
 v0.1.0 pre-release validation.
 
-> There is also `scripts/e2e.sh` + `testdata/scenarios/` (the CI-shaped k3d-e2e
-> harness). As of this writing those are **stale** — they pin only 3 of the 4
-> runtime images, include a scenario calling the removed `flywheel update`
-> command, and hand-scaffold app workloads that `add app` now generates itself.
-> Prefer this runbook until that harness is refreshed.
+> There is also an automated harness: the CI `k3d-e2e` job
+> (`.github/workflows/test.yml`) and the local `make e2e` (`scripts/e2e.sh`),
+> which drive the `testdata/scenarios/` scripts (scenario 1 = baseline dev loop,
+> 5 = orphan-job reaper; 2–4 cover branch switches). This runbook is the manual,
+> human/agent-followable counterpart — handy for ad-hoc checks and for eyeballing
+> `add app`'s scaffolding interactively.
 
 ## Prerequisites
 

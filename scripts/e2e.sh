@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Run the k3d-e2e suite locally — the same flow as the `k3d-e2e` job in
-# .github/workflows/test.yml: build the three runtime images, `flywheel init` +
-# `up` into a throwaway cluster, run scenarios 1 + 5 + update, then `down`.
+# .github/workflows/test.yml: build the four runtime images, `flywheel init` +
+# `up` into a throwaway cluster, run scenarios 1 + 5, then `down`.
 #
 # Requires a `flywheel` binary on PATH (run `make build`, or use `make e2e`),
 # plus k3d, docker, and mkcert. The client repo lives under a host path the
@@ -19,7 +19,7 @@ CLIENT_REPO="$E2E_ROOT/$CLIENT_NAME"
 command -v flywheel >/dev/null || { echo "flywheel not on PATH — run 'make build' first." >&2; exit 1; }
 
 echo "==> [1/4] building runtime images (flywheel-dev/*:$TAG)"
-for img in git-server git-auto-sync image-builder-controller; do
+for img in git-server git-auto-sync image-builder-controller git-deploy-controller; do
 	docker build -q -t "flywheel-dev/$img:$TAG" -f "$REPO_ROOT/Dockerfile.$img" "$REPO_ROOT" >/dev/null
 done
 
@@ -42,6 +42,7 @@ flywheel:
     git-server: flywheel-dev/git-server:$TAG
     git-auto-sync: flywheel-dev/git-auto-sync:$TAG
     image-builder-controller: flywheel-dev/image-builder-controller:$TAG
+    git-deploy-controller: flywheel-dev/git-deploy-controller:$TAG
 EOF
 	# Issue #1: squat the just-allocated http_port so `up` step 5b must heal
 	# the collision; the scenarios then prove the cluster came up on the new
@@ -72,6 +73,5 @@ export REGISTRY_PORT=0 # only a presence-guard in lib.sh; the registry is used b
 export CLIENT_NAME
 bash "$REPO_ROOT/testdata/scenarios/scenario-1-baseline.sh"
 bash "$REPO_ROOT/testdata/scenarios/scenario-5-orphan-job-reaper.sh"
-bash "$REPO_ROOT/testdata/scenarios/scenario-update-converge.sh"
 
 echo "==> k3d-e2e PASSED"
