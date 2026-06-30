@@ -44,8 +44,9 @@ common local setup, so it's a likely release blocker for the macOS happy path.
 
 - A port-availability check that is correct on macOS (colima **and** Docker
   Desktop), Linux (native docker), and Windows WSL2.
-- Wiring it into the two allocation paths: `init` (allocator) and `up`
-  (portheal).
+- Wiring it into three call sites: `init` (allocator), `up` (portheal), and
+  `doctor`'s pre-flight port check (with the same "owned by this cluster"
+  nuance, so it proactively warns instead of false-alarming on your own cluster).
 - A defensive retry-on-collision net so a TOCTOU race or an unforeseen backend
   quirk degrades to a reallocation+retry rather than a crash.
 
@@ -82,8 +83,8 @@ A small helper queries docker once and returns the set of host ports any running
 container publishes:
 
 ```go
-// internal/cli/dockerports (new package; alternatively extend internal/cli/k3d,
-// which already shells docker).
+// internal/cli/dockerports (new package — chosen over extending
+// internal/cli/k3d so a docker-generic query isn't filed under a k3d pkg).
 //
 // PublishedPorts returns the set of host TCP ports currently published by any
 // running docker container, parsed from `docker ps --format '{{.Ports}}'`.
@@ -133,13 +134,14 @@ loopback variant for allocation decisions (it's the least faithful — see
 
 ### 3. Wiring
 
-Both call sites already take an injected `bindable func(int) bool`, so this is a
-thread-the-probe change, not a rewrite:
+The allocation call sites already take an injected `bindable func(int) bool`, so
+this is mostly a thread-the-probe change, not a rewrite:
 
 | Path | Today | Change |
 |---|---|---|
 | `init` (allocator) | `allocator.go:162` package var `portIsBindable`; `pickFree` (`:183`) → `PickFreePort` (`:194`) | `init` builds the composed probe and passes it into `Allocate`; `Allocate` forwards it to `pickFree`. |
 | `up` (portheal) | `portheal.go:77` passes `netutil.PortIsBindableWildcard` | pass the composed probe instead. |
+| `doctor` (pre-flight) | `doctor/full.go:155` `portIsBindable` wraps `netutil.PortIsBindable` | use the composed probe, plus the `RegistryExists`/`ClusterRunning` "owned" guard so this cluster's own ports aren't flagged. |
 
 `PickFreePort(pool, taken, bindable)` is unchanged — it already accepts the
 probe. The only signature change is `allocator.Allocate` (see below).
@@ -225,12 +227,18 @@ func (f *File) Allocate(clientName, repoPath string, bindable func(int) bool) (T
 // one (was: netutil.PortIsBindableWildcard).
 
 // NEW — internal/cli/up (retry-on-collision wrapper around k3d create)
+// Per-slot, reheal within the pool, retry once.
 func createWithPortRetry(...) error
 func isPortAllocatedErr(err error) bool
+
+// CHANGED — internal/cli/doctor/full.go
+// The port check uses the composed docker-aware probe, guarded by
+// RegistryExists/ClusterRunning so this cluster's own ports aren't flagged.
 ```
 
 Callers updated: `initcmd` (passes the composed probe into `Allocate`), `up`
-(portheal probe + the two create call sites at `up.go:162`/cluster create).
+(portheal probe + the two create call sites at `up.go:162`/cluster create),
+`doctor` (composed probe + owned-guard).
 
 ## Migration plan
 
@@ -262,6 +270,9 @@ Greenfield behaviorally — no data or format migration:
 - **Unit — retry net**: `isPortAllocatedErr` matches the docker daemon strings
   and rejects unrelated errors; `createWithPortRetry` retries exactly once after
   a successful reheal and propagates other errors unchanged.
+- **Unit — doctor**: the docker-aware port check flags a foreign docker-held port
+  but does NOT flag a port held by *this* cluster's own registry/serverlb
+  (owned-guard via `RegistryExists`/`ClusterRunning`).
 - **Integration — keep CI green**: the Linux `k3d-e2e` port-heal assertion in
   `scripts/e2e.sh` (squat the http_port, expect `up` to heal) must still pass.
 - **Manual acceptance (colima)**: reproduce the original failure — bring up one
@@ -273,21 +284,25 @@ Greenfield behaviorally — no data or format migration:
   non-docker host process (host term still catches it); docker daemon down
   (graceful fallback + warning).
 
+## Decisions
+
+The five design questions are resolved (2026-06-30):
+
+1. **Doctor consistency — INCLUDED.** `doctor`'s port check adopts the docker-aware
+   probe with the `RegistryExists`/`ClusterRunning` owned-guard, so it proactively
+   warns about a collision before `up` runs without false-alarming on this
+   cluster's own ports.
+2. **Helper home — NEW PACKAGE.** `internal/cli/dockerports` (a docker-generic
+   query doesn't belong under the k3d-named package).
+3. **Port sources — `docker ps` ALONE.** It already includes k3d's own containers
+   and any foreign squatter; stopped containers don't hold ports, and flywheel's
+   own clusters stay reserved via `allocations.json`. No `k3d list` cross-check.
+4. **Retry net — ONCE, PER-SLOT, WITHIN-POOL.** On a docker port-allocation error,
+   reheal the affected slot from its pool and retry the create exactly once;
+   otherwise surface the error.
+5. **Docker access — SHELL `docker ps`.** Matches the codebase's exec pattern, no
+   new dependency; the `{{.Ports}}` parser is table-tested.
+
 ## Open questions
 
-1. **Doctor consistency.** Should `doctor`'s port check (`doctor/full.go:155`
-   `portIsBindable`) adopt the same docker-aware probe so pre-flight diagnostics
-   agree with `init`/`up`? Small add; needs the "owned by this cluster" nuance so
-   it doesn't flag the user's own running cluster. Not committed to in this scope
-   — include or defer?
-2. **Helper home.** New `internal/cli/dockerports` package vs. extending
-   `internal/cli/k3d` (already shells docker). Leaning new package (it's
-   docker-generic, not k3d-specific), but open.
-3. **k3d cross-check.** Worth also folding in `k3d registry/cluster list` ports
-   as a secondary source, or is `docker ps` (which already includes k3d's
-   containers) sufficient? Leaning sufficient.
-4. **Retry breadth.** Retry once per slot vs. a small bounded loop; and should
-   the retry also cover a foreign *non-pool* port (out of our ranges) — or only
-   reheal within the pools? Leaning: reheal within pools, retry once.
-5. **Docker CLI vs SDK.** Keep shelling `docker ps` (consistent, no dep) — assumed
-   yes; flagging in case we'd rather take the docker SDK for robust parsing.
+None remaining — the five above are resolved.
