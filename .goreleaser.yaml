@@ -51,12 +51,16 @@ archives:
       - LICENSE*
       - README.md
 
-# Multi-arch container images for the three runtime components.
-# Dockerfiles are at the repo root.
+# Multi-arch container images for the four runtime components.
+# Dockerfiles are at the repo root. Image tags use {{ .Tag }} (e.g. v0.1.0),
+# NOT {{ .Version }} (0.1.0): `flywheel up` pulls the released ref
+# ghcr.io/cobr-io/<name>:<flywheel.version>, and flywheel.version keeps the
+# leading v (init pins it from BuildVersion={{.Tag}}). A v-less image tag here
+# 404s every runtime image pull at `up` step 9.
 dockers:
   - id: git-server-amd64
     image_templates:
-      - "ghcr.io/cobr-io/git-server:{{ .Version }}-amd64"
+      - "ghcr.io/cobr-io/git-server:{{ .Tag }}-amd64"
     dockerfile: Dockerfile.git-server
     use: buildx
     build_flag_templates:
@@ -68,7 +72,7 @@ dockers:
       - scripts/git-server
   - id: git-server-arm64
     image_templates:
-      - "ghcr.io/cobr-io/git-server:{{ .Version }}-arm64"
+      - "ghcr.io/cobr-io/git-server:{{ .Tag }}-arm64"
     dockerfile: Dockerfile.git-server
     use: buildx
     build_flag_templates:
@@ -82,7 +86,7 @@ dockers:
 
   - id: git-auto-sync-amd64
     image_templates:
-      - "ghcr.io/cobr-io/git-auto-sync:{{ .Version }}-amd64"
+      - "ghcr.io/cobr-io/git-auto-sync:{{ .Tag }}-amd64"
     dockerfile: Dockerfile.git-auto-sync
     use: buildx
     build_flag_templates:
@@ -94,7 +98,7 @@ dockers:
       - scripts/git-auto-sync
   - id: git-auto-sync-arm64
     image_templates:
-      - "ghcr.io/cobr-io/git-auto-sync:{{ .Version }}-arm64"
+      - "ghcr.io/cobr-io/git-auto-sync:{{ .Tag }}-arm64"
     dockerfile: Dockerfile.git-auto-sync
     use: buildx
     build_flag_templates:
@@ -108,7 +112,7 @@ dockers:
 
   - id: image-builder-controller-amd64
     image_templates:
-      - "ghcr.io/cobr-io/image-builder-controller:{{ .Version }}-amd64"
+      - "ghcr.io/cobr-io/image-builder-controller:{{ .Tag }}-amd64"
     dockerfile: Dockerfile.image-builder-controller
     use: buildx
     build_flag_templates:
@@ -123,7 +127,7 @@ dockers:
       - go.sum
   - id: image-builder-controller-arm64
     image_templates:
-      - "ghcr.io/cobr-io/image-builder-controller:{{ .Version }}-arm64"
+      - "ghcr.io/cobr-io/image-builder-controller:{{ .Tag }}-arm64"
     dockerfile: Dockerfile.image-builder-controller
     use: buildx
     build_flag_templates:
@@ -139,7 +143,7 @@ dockers:
       - go.sum
   - id: git-deploy-controller-amd64
     image_templates:
-      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}-amd64"
+      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Tag }}-amd64"
     dockerfile: Dockerfile.git-deploy-controller
     use: buildx
     build_flag_templates:
@@ -154,7 +158,7 @@ dockers:
       - go.sum
   - id: git-deploy-controller-arm64
     image_templates:
-      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}-arm64"
+      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Tag }}-arm64"
     dockerfile: Dockerfile.git-deploy-controller
     use: buildx
     build_flag_templates:
@@ -170,22 +174,22 @@ dockers:
       - go.sum
 
 docker_manifests:
-  - name_template: "ghcr.io/cobr-io/git-server:{{ .Version }}"
+  - name_template: "ghcr.io/cobr-io/git-server:{{ .Tag }}"
     image_templates:
-      - "ghcr.io/cobr-io/git-server:{{ .Version }}-amd64"
-      - "ghcr.io/cobr-io/git-server:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/cobr-io/git-auto-sync:{{ .Version }}"
+      - "ghcr.io/cobr-io/git-server:{{ .Tag }}-amd64"
+      - "ghcr.io/cobr-io/git-server:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/cobr-io/git-auto-sync:{{ .Tag }}"
     image_templates:
-      - "ghcr.io/cobr-io/git-auto-sync:{{ .Version }}-amd64"
-      - "ghcr.io/cobr-io/git-auto-sync:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/cobr-io/image-builder-controller:{{ .Version }}"
+      - "ghcr.io/cobr-io/git-auto-sync:{{ .Tag }}-amd64"
+      - "ghcr.io/cobr-io/git-auto-sync:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/cobr-io/image-builder-controller:{{ .Tag }}"
     image_templates:
-      - "ghcr.io/cobr-io/image-builder-controller:{{ .Version }}-amd64"
-      - "ghcr.io/cobr-io/image-builder-controller:{{ .Version }}-arm64"
-  - name_template: "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}"
+      - "ghcr.io/cobr-io/image-builder-controller:{{ .Tag }}-amd64"
+      - "ghcr.io/cobr-io/image-builder-controller:{{ .Tag }}-arm64"
+  - name_template: "ghcr.io/cobr-io/git-deploy-controller:{{ .Tag }}"
     image_templates:
-      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}-amd64"
-      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Version }}-arm64"
+      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Tag }}-amd64"
+      - "ghcr.io/cobr-io/git-deploy-controller:{{ .Tag }}-arm64"
 
 # No :latest — design § Versioning makes flywheel.yaml the source of truth.
 release:
