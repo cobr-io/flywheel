@@ -32,24 +32,12 @@ reaping any superseded machinery the previous version left running.
 
 ## The dev loop
 
-Once you've pointed Flywheel at a working directory with `flywheel add app
-<dir>`, every commit flows to a pod entirely on your machine:
+Once you've pointed Flywheel at a working directory with `flywheel add app <dir>`, every commit flows to a pod entirely on your machine:
 
-```
-  you save + git commit            (in your app's worktree)
-        │
-        ▼
-  git-auto-sync  ──pushes──▶  in-cluster git-server   (a bare mirror of the worktree)
-        │
-        ▼
-  image-builder-controller   builds an image on the new commit (Kaniko / BuildKit)
-        │
-        ▼
-  Flux image-automation      rolls the new image into the Deployment
-        │
-        ▼
-  your pod is running the new code        (typically a few seconds; ~30s worst case)
-```
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/devloop-dark.svg">
+  <img alt="The Flywheel dev loop: you commit → git-auto-sync pushes to the in-cluster git-server → image-builder-controller builds an image → Flux image-automation rolls it into the Deployment → your pod runs the new code, all on your machine" src="docs/assets/devloop-light.svg" width="720">
+</picture>
 
 No CI round-trip, no remote registry, no `docker build && kubectl set image` —
 the cluster converges the same way Flux would converge production from a git

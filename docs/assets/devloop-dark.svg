@@ -1,0 +1,102 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="1010" viewBox="0 0 720 1010" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="2" stdDeviation="6" flood-color="#000000" flood-opacity="0.40"/>
+    </filter>
+    <filter id="panelShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="20" flood-color="#0B1220" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+  
+  <rect x="12" y="12" width="696" height="984" rx="22" fill="#10151C" stroke="#232B35" stroke-width="1"/>
+  <g>
+    <rect x="80" y="238.0" width="560" height="690.0" rx="18" fill="#131A24" stroke="#283341" stroke-width="1"/>
+    <rect x="96" y="249.0" width="144.4" height="22" rx="8" fill="#1E2836"/>
+    <text x="168.2" y="264.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10" font-weight="600" letter-spacing="1.5" fill="#8A94A0" text-anchor="middle">LOCAL K3D CLUSTER</text>
+  </g>
+  <g>
+    <circle cx="192" cy="42" r="4" fill="#2DD4A6"/>
+    <line x1="40" y1="42" x2="244" y2="42" stroke="#232B35" stroke-width="1"/>
+    <line x1="476" y1="42" x2="680" y2="42" stroke="#232B35" stroke-width="1"/>
+    <text x="360" y="46" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" letter-spacing="2.4" fill="#7E8896" text-anchor="middle">EVERYTHING RUNS ON YOUR MACHINE</text>
+  </g>
+  <line x1="360" y1="104.0" x2="360" y2="107.0" stroke="#313A46" stroke-width="2"/><path d="M 355 104.0 L 360 111.0 L 365 104.0" fill="none" stroke="#4C5663" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><g>
+    <circle cx="360" cy="89.0" r="15" fill="#171D26" stroke="#2DD4A6" stroke-width="2"/>
+    <text x="360" y="93.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#74ECC9" text-anchor="middle">01</text>
+  </g><line x1="360" y1="276.0" x2="360" y2="279.0" stroke="#313A46" stroke-width="2"/><path d="M 355 276.0 L 360 283.0 L 365 276.0" fill="none" stroke="#4C5663" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="360" y1="204" x2="360" y2="246.0" stroke="#313A46" stroke-width="2"/><g>
+          <rect x="277.0" y="213.0" width="166.0" height="24" rx="12" fill="#171D26" stroke="#2A323D"/>
+          <text x="360" y="229.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12" fill="#9AA4B1" text-anchor="middle">git-auto-sync pushes</text>
+        </g><g>
+    <circle cx="360" cy="261.0" r="15" fill="#171D26" stroke="#6A92FF" stroke-width="2"/>
+    <text x="360" y="265.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#AAC1FF" text-anchor="middle">02</text>
+  </g><line x1="360" y1="448.0" x2="360" y2="451.0" stroke="#313A46" stroke-width="2"/><path d="M 355 448.0 L 360 455.0 L 365 448.0" fill="none" stroke="#4C5663" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="360" y1="376" x2="360" y2="418.0" stroke="#313A46" stroke-width="2"/><g>
+    <circle cx="360" cy="433.0" r="15" fill="#171D26" stroke="#6A92FF" stroke-width="2"/>
+    <text x="360" y="437.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#AAC1FF" text-anchor="middle">03</text>
+  </g><line x1="360" y1="640.0" x2="360" y2="643.0" stroke="#313A46" stroke-width="2"/><path d="M 355 640.0 L 360 647.0 L 365 640.0" fill="none" stroke="#4C5663" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="360" y1="568" x2="360" y2="610.0" stroke="#313A46" stroke-width="2"/><g>
+    <circle cx="360" cy="625.0" r="15" fill="#171D26" stroke="#A78BFA" stroke-width="2"/>
+    <text x="360" y="629.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#CBB8FF" text-anchor="middle">04</text>
+  </g><line x1="360" y1="812.0" x2="360" y2="815.0" stroke="#313A46" stroke-width="2"/><path d="M 355 812.0 L 360 819.0 L 365 812.0" fill="none" stroke="#4C5663" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="360" y1="740" x2="360" y2="782.0" stroke="#313A46" stroke-width="2"/><g>
+    <circle cx="360" cy="797.0" r="15" fill="#171D26" stroke="#2DD4A6" stroke-width="2"/>
+    <text x="360" y="801.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#74ECC9" text-anchor="middle">05</text>
+  </g>
+  <g>
+    <rect x="92" y="112" width="536" height="92" rx="16" fill="#171D26" stroke="#2A323D" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="128" width="4" height="60" rx="2" fill="#2DD4A6"/>
+    <g>
+    <rect x="564.2" y="130.0" width="41.8" height="20" rx="10" fill="#0E2A24"/>
+    <text x="585.1" y="144.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#74ECC9" text-anchor="middle">YOU</text>
+  </g>
+    <text x="126" y="153.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="17.5" font-weight="650" fill="#E8EEF5" letter-spacing="-0.1">you save + git commit</text>
+    <text x="126" y="177.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#98A2AF">in your app’s worktree</text>
+  </g>
+  <g>
+    <rect x="92" y="284" width="536" height="92" rx="16" fill="#171D26" stroke="#2A323D" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="300" width="4" height="60" rx="2" fill="#6A92FF"/>
+    <g>
+    <rect x="531.2" y="302.0" width="74.8" height="20" rx="10" fill="#17223A"/>
+    <text x="568.6" y="316.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#AAC1FF" text-anchor="middle">FLYWHEEL</text>
+  </g>
+    <text x="126" y="325.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16.5" font-weight="650" fill="#E8EEF5" letter-spacing="-0.2">in-cluster git-server</text>
+    <text x="126" y="349.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#98A2AF">a bare mirror of the worktree</text>
+  </g>
+  <g>
+    <rect x="92" y="456" width="536" height="112" rx="16" fill="#171D26" stroke="#2A323D" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="472" width="4" height="80" rx="2" fill="#6A92FF"/>
+    <g>
+    <rect x="531.2" y="474.0" width="74.8" height="20" rx="10" fill="#17223A"/>
+    <text x="568.6" y="488.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#AAC1FF" text-anchor="middle">FLYWHEEL</text>
+  </g>
+    <text x="126" y="498.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16.5" font-weight="650" fill="#E8EEF5" letter-spacing="-0.2">image-builder-controller</text>
+    <text x="126" y="522.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#98A2AF">builds an image on the new commit</text>
+    <text x="126" y="541.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#98A2AF">Kaniko / BuildKit</text>
+  </g>
+  <g>
+    <rect x="92" y="648" width="536" height="92" rx="16" fill="#171D26" stroke="#2A323D" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="664" width="4" height="60" rx="2" fill="#A78BFA"/>
+    <g>
+    <rect x="557.6" y="666.0" width="48.4" height="20" rx="10" fill="#211A3A"/>
+    <text x="581.8" y="680.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#CBB8FF" text-anchor="middle">FLUX</text>
+  </g>
+    <text x="126" y="689.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16.5" font-weight="650" fill="#E8EEF5" letter-spacing="-0.2">Flux image-automation</text>
+    <text x="126" y="713.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#98A2AF">rolls the new image into the Deployment</text>
+  </g>
+  <g>
+    <rect x="92" y="820" width="536" height="92" rx="16" fill="#171D26" stroke="#2A323D" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="836" width="4" height="60" rx="2" fill="#2DD4A6"/>
+    <g>
+    <rect x="564.2" y="838.0" width="41.8" height="20" rx="10" fill="#0E2A24"/>
+    <text x="585.1" y="852.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#74ECC9" text-anchor="middle">YOU</text>
+  </g>
+    <text x="126" y="861.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="17.5" font-weight="650" fill="#E8EEF5" letter-spacing="-0.1">your pod is running the new code</text>
+    <text x="126" y="885.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#98A2AF">typically a few seconds · ~30s worst case</text>
+  </g>
+  <g>
+    <path d="M 92 866.0 H 70 Q 52 866.0 52 848.0 V 176.0 Q 52 158.0 70 158.0 H 84" fill="none" stroke="#2DD4A6" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round"/>
+    <path d="M 83 153.0 L 91 158.0 L 83 163.0" fill="none" stroke="#2DD4A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(52, 512.0) rotate(-90)">
+      <rect x="-159.3" y="-11" width="318.5" height="22" rx="11" fill="#10151C"/>
+      <text x="0" y="4" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="600" fill="#74ECC9" text-anchor="middle">you observe the result → make the next change</text>
+    </g>
+  </g>
+  <line x1="40" y1="948" x2="680" y2="948" stroke="#232B35" stroke-width="1"/><circle cx="260.5" cy="966.0" r="4.5" fill="#2DD4A6"/><text x="273.0" y="970.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#98A2AF">you</text><circle cx="324.5" cy="966.0" r="4.5" fill="#6A92FF"/><text x="337.0" y="970.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#98A2AF">flywheel</text><circle cx="423.5" cy="966.0" r="4.5" fill="#A78BFA"/><text x="436.0" y="970.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#98A2AF">flux</text>
+</svg>
