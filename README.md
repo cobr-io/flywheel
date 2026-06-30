@@ -23,9 +23,10 @@ Flux" surprises — the pipeline *is* the real one.
 
 `flywheel` is a single static Go binary that embeds the Flux manifest tree and
 the GitOps-repo skeleton, so nothing else needs cloning once it's installed.
-Three runtime images on `ghcr.io/cobr-io/` (`git-server`, `git-auto-sync`,
-`image-builder-controller`) provide the dev-loop machinery, pinned by the
-version in your `flywheel.yaml`; bumping that line and re-running `flywheel up`
+Four runtime images on `ghcr.io/cobr-io/` (`git-server`, `git-auto-sync`,
+`image-builder-controller`, `git-deploy-controller`) provide the dev-loop
+machinery, pinned by the version in your `flywheel.yaml`; bumping that line and
+re-running `flywheel up`
 re-converges the cluster onto the new binary — applying the new machinery and
 reaping any superseded machinery the previous version left running.
 
@@ -77,8 +78,8 @@ Prerequisites: `git`, `k3d`, the `docker` CLI + daemon, and `mkcert`. Run
 `flywheel doctor` to check them (`--quick` for the minimal subset `up` needs).
 
 ```sh
-# 1. Install the CLI from source
-git clone https://github.com/cobr-io/flywheel && cd flywheel && make install
+# 1. Install the CLI (prebuilt binary)
+curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/install.sh | bash
 
 # 2. Scaffold and launch a local GitOps environment
 mkdir my-gitops && cd my-gitops
@@ -88,6 +89,9 @@ flywheel up              # bring up k3d + Flux, pull runtime images
 # 3. Wire up an app with a live dev loop
 flywheel add app <dir>   # scaffold a builder + workload from a worktree dir
 ```
+
+Need a specific version, or an install without `sudo`? See
+[Installation](#installation).
 
 `flywheel up` prints the URL to visit (`https://<app>.<domain>:<https_port>/`).
 Reaching it in a browser also needs local name resolution — see the
@@ -100,6 +104,45 @@ the local SOPS age key at `clusters/local/age.key`. See the
 
 ## Installation
 
+### Install script (recommended)
+
+Downloads a prebuilt binary for your OS/arch from the
+[latest release](https://github.com/cobr-io/flywheel/releases), verifies its
+checksum, and installs it on your `$PATH` (darwin/linux × amd64/arm64):
+
+```sh
+curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/install.sh | bash
+```
+
+Re-run it to upgrade — it's idempotent and no-ops when the target version is
+already installed. It deliberately does **not** auto-update: Flywheel pins its
+version in `flywheel.yaml` (the source of truth), so the binary should track
+that pin rather than float ahead of it.
+
+Tune it with environment variables — note these go on the **`bash`** side of the
+pipe, not the `curl` side:
+
+| Variable | Default | Effect |
+|---|---|---|
+| `TAG` | latest | Install a specific release, e.g. `TAG=v1.2.3`. |
+| `INSTALL_DIR` | `/usr/local/bin` | Where to put the binary (uses `sudo` only if the dir isn't writable). |
+| `USE_SUDO` | auto | Set `false` to never elevate (pair with a writable `INSTALL_DIR`). |
+| `FORCE` | `false` | Reinstall even when the target version is already present. |
+
+```sh
+# pin a specific version
+curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/install.sh | TAG=v1.2.3 bash
+
+# user-local install, no sudo
+curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/install.sh \
+  | INSTALL_DIR="$HOME/.local/bin" USE_SUDO=false bash
+```
+
+There is no native Windows build — run inside WSL2
+([guide](docs/guides/windows-wsl.md)). A Homebrew tap is planned.
+
+### From source
+
 Flywheel builds with the Go toolchain (see [`go.mod`](go.mod)) plus the `docker`
 CLI. From a checkout:
 
@@ -109,11 +152,10 @@ make build        # just the binary
 ```
 
 `make install` installs the version-stamped binary into `$(go env GOBIN)` (put
-it on your `$PATH`), builds the three runtime images locally for
+it on your `$PATH`), builds the four runtime images locally for
 [Dogfood mode](docs/dev/dogfood.md), and installs shell completions. You can
 also `go install github.com/cobr-io/flywheel/cmd/flywheel@vX.Y.Z` (stamped
-`v0.0.0-dev`). There is no native Windows build — run inside WSL2
-([guide](docs/guides/windows-wsl.md)). A Homebrew tap is planned.
+`v0.0.0-dev`).
 
 ## Commands
 
