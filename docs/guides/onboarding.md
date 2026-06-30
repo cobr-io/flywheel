@@ -29,6 +29,11 @@ of the repo.
 > it re-allocates ports and re-scaffolds over the committed config. Cloning then
 > running `up` is the whole onboarding flow.
 
+> **Version skew on first up.** If your installed `flywheel` is older than the
+> repo's pinned `flywheel.version`, `up` stops and asks you to upgrade the binary
+> first; if it's newer, `up` offers to roll the pin forward. See
+> [Upgrading flywheel & the version pin](upgrading.md).
+
 ## Why there's no key handoff (for local)
 
 Flux decrypts the repo's SOPS-encrypted secrets (`clusters/local/*.enc.yaml`)

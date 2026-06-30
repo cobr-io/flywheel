@@ -55,6 +55,19 @@ func SetClusterPort(path, key string, port int) error {
 	})
 }
 
+// SetFlywheelVersion sets flywheel.version to version in the YAML file at path,
+// preserving comments (notably the inline `flywheel.version` tag comment) and
+// unrelated content. The flywheel: node is created if somehow absent. Used by
+// `flywheel up`'s version-drift gate to roll the pin forward to the installed
+// binary's release.
+func SetFlywheelVersion(path, version string) error {
+	return editRoot(path, func(root *yaml.Node) error {
+		fw := mapEnsure(root, "flywheel", yaml.MappingNode, "!!map")
+		mapSetScalar(fw, "version", "!!str", version)
+		return nil
+	})
+}
+
 // editWorkspaceRepos hands fn the workspace.repos sequence node (created if
 // absent) within the YAML document at path.
 func editWorkspaceRepos(path string, fn func(repos *yaml.Node) error) error {

@@ -79,6 +79,29 @@ func TestUpsertWorkspaceRepo_CreatesBlockAndPreservesComments(t *testing.T) {
 	}
 }
 
+func TestSetFlywheelVersion_UpdatesValueAndKeepsComment(t *testing.T) {
+	p := write(t, sampleYAML)
+	if err := SetFlywheelVersion(p, "v0.2.0"); err != nil {
+		t.Fatal(err)
+	}
+	got := read(t, p)
+
+	if !strings.Contains(got, "# pinned tag") {
+		t.Errorf("lost the inline flywheel.version comment:\n%s", got)
+	}
+	if strings.Contains(got, "v0.1.0") {
+		t.Errorf("old version still present:\n%s", got)
+	}
+	f := reparse(t, p)
+	if f.Flywheel.Version != "v0.2.0" {
+		t.Errorf("flywheel.version = %q, want v0.2.0", f.Flywheel.Version)
+	}
+	// Unrelated sections untouched.
+	if f.Client.Name != "acme" || f.IntegrationBranch() != "main" {
+		t.Errorf("unrelated fields changed: client=%q branch=%q", f.Client.Name, f.IntegrationBranch())
+	}
+}
+
 func TestUpsertWorkspaceRepo_LocalOnly(t *testing.T) {
 	p := write(t, sampleYAML)
 	if err := UpsertWorkspaceRepo(p, schema.WorkspaceRepo{Name: "hello-py", LocalOnly: true}); err != nil {

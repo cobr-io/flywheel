@@ -84,6 +84,15 @@ func Run(ctx context.Context, opts Options) error {
 	}
 	style.Step(out, "%s @ %s", cfg.Client.Name, cfg.Flywheel.Version)
 
+	// Version-drift gate — before any host/network work. `up` only proceeds
+	// when the installed binary and the pinned flywheel.version agree (or the
+	// user accepts a forward bump). A dev build skips. See checkVersionDrift.
+	newVersion, err := checkVersionDrift(out, opts.Stdin, opts.RepoDir, cfg.Flywheel.Version)
+	if err != nil {
+		return err
+	}
+	cfg.Flywheel.Version = newVersion
+
 	// Step 2 — doctor BEFORE network (closed material gap O7 / plan
 	// T1.3 reorder).
 	style.Step(out, "checking host prerequisites")
@@ -505,7 +514,7 @@ func reconcileWorktrees(ctx context.Context, opts Options, cfg *schema.File, wsR
 		for _, r := range clonable {
 			style.Detail(out, "  %s  ←  %s", r.Name, r.URL)
 		}
-		doClone = promptYesNo(opts.Stdin, out, "clone them now?")
+		doClone = promptYesNo(opts.Stdin, out, "clone them now?", false)
 	default:
 		style.Warn(out, "%d app worktree(s) missing; re-run with --clone to materialise (or --no-clone to silence). Skipping.", len(clonable))
 		return
@@ -542,17 +551,23 @@ func isTTY(r io.Reader) bool {
 	return ok && term.IsTerminal(int(f.Fd()))
 }
 
-func promptYesNo(stdin io.Reader, out io.Writer, question string) bool {
-	fmt.Fprintf(out, "%s [y/N]: ", question)
+func promptYesNo(stdin io.Reader, out io.Writer, question string, defaultYes bool) bool {
+	hint := "[y/N]"
+	if defaultYes {
+		hint = "[Y/n]"
+	}
+	fmt.Fprintf(out, "%s %s: ", question, hint)
 	line, err := bufio.NewReader(stdin).ReadString('\n')
 	if err != nil && line == "" {
-		return false
+		return false // EOF / read error (e.g. Ctrl-D) → decline, regardless of default
 	}
 	switch strings.ToLower(strings.TrimSpace(line)) {
 	case "y", "yes":
 		return true
-	default:
+	case "n", "no":
 		return false
+	default: // blank line or unrecognised input → take the default
+		return defaultYes
 	}
 }
 

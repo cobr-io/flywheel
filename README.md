@@ -184,6 +184,7 @@ local clusters don't collide.
 ## Guides
 
 * [Onboarding](docs/guides/onboarding.md) — join a repo a teammate created (age key, SOPS recipients, port collisions).
+* [Upgrading & the version pin](docs/guides/upgrading.md) — how `up` keeps your binary and `flywheel.version` in sync.
 * [Local DNS](docs/guides/local-dns.md) — resolve `*.<domain>` to your apps in the browser.
 * [Branch following & `flywheel use`](docs/guides/branch-following.md) — opt-in branch deploys.
 * [Build secrets](docs/guides/build-secrets.md) — supplying secrets to builds.

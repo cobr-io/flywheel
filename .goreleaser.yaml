@@ -32,7 +32,14 @@ builds:
     flags:
       - -trimpath
     ldflags:
-      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}}
+      # Stamp the same symbol the Makefile does (github.com/cobr-io/flywheel.BuildVersion);
+      # `main.version`/`main.commit` are no-ops — the main package has no such vars,
+      # so a released binary would otherwise report the default v0.0.0-dev.
+      # Use {{.Tag}} (e.g. v1.2.3), not {{.Version}} (which strips the leading v →
+      # 1.2.3): the up drift gate validates this via golang.org/x/mod/semver, whose
+      # IsValid requires the leading v. A v-less stamp fails isReleaseVersion and
+      # leaves the gate permanently dormant — matching the Makefile's git-describe.
+      - -s -w -X github.com/cobr-io/flywheel.BuildVersion={{.Tag}}
 
 archives:
   - id: flywheel
