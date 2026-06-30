@@ -26,8 +26,10 @@ ImagePolicy live in `flux-system` (where Flux's image-automation runs).
   `{{ .RegistryURL }}/{{ .ClientName }}/{{ .Image }}` and picks the
   newest tag (Unix-ts-prefixed) for IUA to bump into your manifests.
 
-Edit `apps/base/{{ .AppName }}/deployment.yaml` manually — Flywheel
-doesn't scaffold app workload manifests in v0.1.
+Your app workload is scaffolded for you at `apps/base/{{ .AppName }}/`
+(a Deployment, Service, and Ingress) — the image line is wired as a Flux
+image-automation target. Those manifests are yours to edit (replicas, env,
+resources, …).
 
 ## Namespace
 
