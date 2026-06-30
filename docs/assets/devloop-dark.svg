@@ -85,5 +85,13 @@
     <text x="126" y="861.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="17.5" font-weight="650" fill="#E8EEF5" letter-spacing="-0.1">your pod is running the new code</text>
     <text x="126" y="885.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#98A2AF">typically a few seconds · ~30s worst case</text>
   </g>
+  <g>
+    <path d="M 628 866.0 H 650 Q 668 866.0 668 848.0 V 176.0 Q 668 158.0 650 158.0 H 636" fill="none" stroke="#2DD4A6" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round"/>
+    <path d="M 637 153.0 L 629 158.0 L 637 163.0" fill="none" stroke="#2DD4A6" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(668, 512.0) rotate(-90)">
+      <rect x="-159.3" y="-11" width="318.5" height="22" rx="11" fill="#10151C"/>
+      <text x="0" y="4" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="600" fill="#74ECC9" text-anchor="middle">you observe the result → make the next change</text>
+    </g>
+  </g>
   <line x1="40" y1="926" x2="680" y2="926" stroke="#232B35" stroke-width="1"/><circle cx="260.5" cy="944.0" r="4.5" fill="#2DD4A6"/><text x="273.0" y="948.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#98A2AF">you</text><circle cx="324.5" cy="944.0" r="4.5" fill="#6A92FF"/><text x="337.0" y="948.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#98A2AF">flywheel</text><circle cx="423.5" cy="944.0" r="4.5" fill="#A78BFA"/><text x="436.0" y="948.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#98A2AF">flux</text>
 </svg>

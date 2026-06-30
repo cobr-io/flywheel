@@ -149,6 +149,39 @@ function connectors(p) {
   return out;
 }
 
+// The feedback return that makes it a loop, not a chain: from the running
+// pod back up to the next commit, routed up the right gutter as a dotted
+// "you" edge (the developer closes the loop by observing + editing again).
+function loopEdge(p) {
+  const r = p.you;
+  const first = layout[0];
+  const last = layout[layout.length - 1];
+  const y1 = first.top + first.h / 2;
+  const y5 = last.top + last.h / 2;
+  const xCard = CARD_X + CARD_W;                 // right edge of the cards
+  const xBus = xCard + 40;                       // vertical return lane
+  const R = 18;
+  const midY = (y1 + y5) / 2;
+  const label = 'you observe the result → make the next change';
+  const lw = label.length * 6.9 + 8;
+  const d = [
+    `M ${xCard} ${y5.toFixed(1)}`,
+    `H ${xBus - R}`,
+    `Q ${xBus} ${y5.toFixed(1)} ${xBus} ${(y5 - R).toFixed(1)}`,
+    `V ${(y1 + R).toFixed(1)}`,
+    `Q ${xBus} ${y1.toFixed(1)} ${xBus - R} ${y1.toFixed(1)}`,
+    `H ${xCard + 8}`,
+  ].join(' ');
+  return `<g>
+    <path d="${d}" fill="none" stroke="${r.accent}" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round"/>
+    <path d="M ${xCard + 9} ${(y1 - 5).toFixed(1)} L ${xCard + 1} ${y1.toFixed(1)} L ${xCard + 9} ${(y1 + 5).toFixed(1)}" fill="none" stroke="${r.accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <g transform="translate(${xBus}, ${midY.toFixed(1)}) rotate(-90)">
+      <rect x="${(-lw / 2).toFixed(1)}" y="-11" width="${lw.toFixed(1)}" height="22" rx="11" fill="${p.panel}"/>
+      <text x="0" y="4" font-family="${MONO}" font-size="11.5" font-weight="600" fill="${r.chipText}" text-anchor="middle">${esc(label)}</text>
+    </g>
+  </g>`;
+}
+
 function header(p) {
   const cy = PANEL_TOP + 34;
   const text = 'EVERYTHING RUNS ON YOUR MACHINE';
@@ -202,6 +235,7 @@ function build(name) {
   ${header(p)}
   ${connectors(p)}
   ${layout.map((c) => card(p, c)).join('\n  ')}
+  ${loopEdge(p)}
   ${legend(p)}
 </svg>`;
   return svg;
