@@ -9,32 +9,22 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-### Added (2026-06-28, flywheel-free bring-up — committed vanilla Flux entrypoint)
+### Added (2026-06-30, flywheel-free bring-up guide)
 
-- **`flywheel init` now scaffolds a committed `clusters/local/flux-system/`
-  entrypoint** so the same local cluster can be brought up with stock Flux and
-  **zero `flywheel` binary** (you forgo the fast dev loop). Previously the repo
-  had no committed Flux entrypoint at all — `apps/` and `infra/` were plain
-  Kustomize but inert — so the gitops repo only worked through flywheel. This
-  removes that implicit lock-in.
-  - Five plain-Flux files: a `GitRepository/flux-system` → your GitHub remote on
-    `main`, `client-infra`/`client-apps` `Kustomization`s over
-    `infra/overlays/local` + `apps/overlays/local`, the `apps` namespace, and a
-    `kubectl apply -k`-able aggregator. No mirror, no `flywheel/local-deploy`
-    branch, no builders.
-  - **Non-interfering:** `flywheel up` renders its own entrypoint at runtime and
-    never reconciles `./clusters/`, so the committed tree is inert during normal
-    operation and only activates on an explicit `kubectl apply -k`. Applying it
-    toggles the cluster's source from the in-cluster mirror to GitHub; the two
-    workflows are mutually exclusive.
-  - New guide `docs/flywheel-free-bringup.md` documents the four-step bring-up
-    and the one caveat — app manifests ship a dev-loop `:0-placeholder` image
-    that only flywheel's image automation rewrites, so vanilla pods need real,
-    pullable image refs committed. Linked from the Flywheel README's guide index
-    and the scaffolded client README, whose "Flux entrypoint" section now
-    describes both the committed vanilla entrypoint and flywheel's runtime one
-    (it previously stated `clusters/local/flux-system/` was never committed).
-  - Design: `docs/designs/2026-06-28-flywheel-free-bringup-design.md`.
+- **New guide `docs/flywheel-free-bringup.md`** documenting how to bring the same
+  local cluster up with stock Flux and **zero `flywheel` binary** (you forgo the
+  fast dev loop). `apps/` and `infra/` are plain Kustomize, so the guide walks
+  through hand-authoring a vanilla `clusters/local/flux-system/` entrypoint
+  (`GitRepository` → your GitHub remote plus `client-infra`/`client-apps`
+  `Kustomization`s), the bring-up steps, and the one caveat — app manifests ship
+  a dev-loop `:0-placeholder` image that only flywheel's image automation
+  rewrites, so vanilla pods need real, pullable image refs committed. Linked from
+  the Flywheel README's guide index and the scaffolded client README. This keeps
+  the anti-lock-in story as **documentation** rather than tool logic: `flywheel
+  init` does not scaffold the entrypoint for you.
+  - An earlier iteration had `flywheel init` commit the vanilla entrypoint into
+    every client repo; that was reverted before release in favor of this guide,
+    so the tool itself carries no flywheel-escape machinery.
 
 ### Changed (2026-06-18, `add-app` → `add app`)
 
