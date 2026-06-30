@@ -159,6 +159,67 @@ func TestRenderBootstrap_RejectsUntaggedOverride(t *testing.T) {
 	}
 }
 
+// The bootstrap tree is applied by `up` step 11d, so every object it emits
+// must carry app.kubernetes.io/managed-by=flywheel (directive: label
+// everything `up` creates, issue #27). The label lives in the root
+// kustomization's `labels:` block, which only materialises when kustomize
+// builds the tree — so this builds it (the same krusty engine the applier
+// uses) and asserts the marker lands on EVERY resource. A build failure here
+// would also catch the labels block breaking the kustomization.
+func TestRenderBootstrap_EveryResourceLabeledManagedBy(t *testing.T) {
+	cfg := &flywheelSchema.File{}
+	cfg.Client.Name = "acme"
+	cfg.Cluster.Name = "acme-local"
+	cfg.Cluster.Registry = "acme-local-registry"
+	cfg.Cluster.RegistryPort = 50001
+	cfg.Flux.IntervalLocal = "10s"
+	cfg.Local.Domain = "localdev.me"
+
+	refs := map[string]string{
+		"git-server":               "ghcr.io/cobr-io/git-server:v0.1.0",
+		"git-auto-sync":            "ghcr.io/cobr-io/git-auto-sync:v0.1.0",
+		"image-builder-controller": "ghcr.io/cobr-io/image-builder-controller:v0.1.0",
+		"git-deploy-controller":    "ghcr.io/cobr-io/git-deploy-controller:v0.1.0",
+	}
+	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops")
+	if err != nil {
+		t.Fatalf("RenderBootstrap: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	built := buildKustomizeForTest(t, dir)
+
+	// Walk each emitted document; every one must carry the marker label. We
+	// also assert the kinds we specifically widened the label onto (the Flux
+	// objects + namespaces, which weren't labeled before) actually appear, so
+	// the test can't pass vacuously on an empty build.
+	docs := strings.Split(built, "\n---\n")
+	kinds := map[string]bool{}
+	resources := 0
+	for _, doc := range docs {
+		if strings.TrimSpace(doc) == "" {
+			continue
+		}
+		resources++
+		if !strings.Contains(doc, "app.kubernetes.io/managed-by: flywheel") {
+			t.Errorf("a bootstrap resource is missing the managed-by label:\n%s", doc)
+		}
+		for _, line := range strings.Split(doc, "\n") {
+			if strings.HasPrefix(line, "kind: ") {
+				kinds[strings.TrimSpace(strings.TrimPrefix(line, "kind:"))] = true
+			}
+		}
+	}
+	if resources == 0 {
+		t.Fatal("bootstrap build produced no resources")
+	}
+	for _, want := range []string{"Namespace", "GitRepository", "Kustomization", "ConfigMap"} {
+		if !kinds[want] {
+			t.Errorf("expected the bootstrap build to include a %s (got kinds %v)", want, kinds)
+		}
+	}
+}
+
 func mustRead(t *testing.T, path string) string {
 	t.Helper()
 	raw, err := os.ReadFile(path)

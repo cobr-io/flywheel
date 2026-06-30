@@ -26,7 +26,10 @@ import (
 // MUST match the limit the flywheel-dev-loop Flux Kustomization applies
 // (builders-kustomization.yaml.tmpl), or the two reconcile paths would
 // fight — both are rendered from the same cfg.GitServerMemoryLimit().
-func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, refs map[string]string, gitServerMemLimit string, out io.Writer) error {
+// It returns a ResourceRef for every object it applied, so `up` can fold the
+// dev-loop machinery into the keep set its orphan prune
+// (PruneOrphanedMachinery) scans against.
+func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, refs map[string]string, gitServerMemLimit string, out io.Writer) ([]applier.ResourceRef, error) {
 	// Create the transient overlay as a sibling of `base` inside the
 	// cache tree, so the resource reference is simply `../base` — no
 	// absolute paths (kustomize forbids them) and no `/var`→`/private/var`
@@ -35,15 +38,15 @@ func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, re
 	devLoopRoot := filepath.Dir(devLoopDir) // .../manifests/dev-loop
 	tmp, err := os.MkdirTemp(devLoopRoot, ".flywheel-tmp-overlay-")
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer os.RemoveAll(tmp)
 
 	kustomization := renderDevLoopKustomization(refs, gitServerMemLimit)
 	if err := os.WriteFile(filepath.Join(tmp, "kustomization.yaml"), []byte(kustomization), 0o644); err != nil {
-		return err
+		return nil, err
 	}
-	return a.ApplyKustomize(ctx, tmp, out)
+	return a.ApplyKustomizeTracked(ctx, tmp, out)
 }
 
 // renderDevLoopKustomization builds the transient overlay's kustomization.yaml:
@@ -139,7 +142,8 @@ func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelS
 			"metadata": map[string]interface{}{
 				"name":      "flywheel-config",
 				"namespace": cfg.Namespaces.Flywheel,
-				// Marks this as flywheel-applied machinery for `update --prune`.
+				// Marks this as flywheel-applied machinery so `up`'s orphan
+				// prune (PruneOrphanedMachinery) keeps it in scope.
 				"labels": map[string]interface{}{
 					"app.kubernetes.io/managed-by": "flywheel",
 				},
