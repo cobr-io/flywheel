@@ -1,12 +1,16 @@
 # Dogfood mode
 
-"Dogfood mode" is for hacking on the three runtime images (`git-server`,
-`git-auto-sync`, `image-builder-controller`) themselves, rather than running the
-published `ghcr.io/cobr-io/*` ones. You build them locally and pin the refs via
-`flywheel.yaml.local` (gitignored, per-developer).
+"Dogfood mode" is for hacking on the four runtime images (`git-server`,
+`git-auto-sync`, `image-builder-controller`, `git-deploy-controller`) themselves,
+rather than running the published `ghcr.io/cobr-io/*` ones. You build them locally
+and pin the refs via `flywheel.yaml.local` (gitignored, per-developer).
+
+The canonical image list is `schema.ImageNames`; when a new image is added there,
+pin it here too or `up` falls back to its (likely unpublished) ghcr.io default and
+fails fast.
 
 1. **Build the images** from the Flywheel source tree. `make install` (and
-   `make images`) build all three as `flywheel-dev/<name>:dogfood`:
+   `make images`) build all four as `flywheel-dev/<name>:dogfood`:
 
    ```sh
    cd ~/src/github.com/cobr.io/flywheel
@@ -24,6 +28,7 @@ published `ghcr.io/cobr-io/*` ones. You build them locally and pin the refs via
        git-server: flywheel-dev/git-server:dogfood
        git-auto-sync: flywheel-dev/git-auto-sync:dogfood
        image-builder-controller: flywheel-dev/image-builder-controller:dogfood
+       git-deploy-controller: flywheel-dev/git-deploy-controller:dogfood
    ```
 
 3. **`flywheel up`** sees the refs in your host docker store, skips the ghcr.io

@@ -3,17 +3,17 @@
 # `make install` compiles the binary with a real version stamp — so
 # `flywheel.BuildVersion`, and the `flywheel.version` that `init` records into
 # flywheel.yaml, is a meaningful git ref instead of the default `v0.0.0-dev` —
-# builds the three runtime images, and installs the shell-completion script for
+# builds the four runtime images, and installs the shell-completion script for
 # your $SHELL, cleanly replacing any older copy. The binary on its own can't do
 # much useful work without the images it runs in-cluster, so they build together.
 
 VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo v0.0.0-dev)
 LDFLAGS := -X github.com/cobr-io/flywheel.BuildVersion=$(VERSION)
 
-# The three runtime images, built from Dockerfile.<name> in the repo root and
+# The four runtime images, built from Dockerfile.<name> in the repo root and
 # tagged flywheel-dev/<name>:$(IMAGE_TAG). Keep in sync with schema.ImageNames.
 # IMAGE_TAG defaults to `dogfood` to match the `flywheel-dev/<img>:dogfood`
-# pins in a per-developer flywheel.yaml.local. `flywheel update` content-
+# pins in a per-developer flywheel.yaml.local. `flywheel up` content-
 # addresses the imported image by its build digest at deploy time, so the
 # Deployment rolls when content changes without per-build tag bookkeeping here.
 IMAGES := git-server git-auto-sync image-builder-controller git-deploy-controller
@@ -37,7 +37,7 @@ build:
 ## install: build the binary + runtime images, then install shell completions
 install: build images completions
 
-## images: build the three runtime images as flywheel-dev/<name>:$(IMAGE_TAG)
+## images: build the four runtime images as flywheel-dev/<name>:$(IMAGE_TAG)
 images:
 	@tag="$(IMAGE_TAG)"; \
 	for img in $(IMAGES); do \
@@ -49,11 +49,11 @@ images:
 ## push-local: push the built dogfood images into a cluster's local registry (REGISTRY_PORT=<port> required)
 # Dogfood images are now served from the cluster's LOCAL REGISTRY (not a per-node
 # `k3d image import` side-load), under a content-addressed `dogfood-<id>` tag —
-# matching imagepin.pushDogfood, so a node pulls on demand and a content change
+# matching imagepin.dogfoodTag, so a node pulls on demand and a content change
 # forces a re-pull. Find the host port with `k3d registry list` (it's the
 # client's cluster.registry_port, e.g. 50001).
 #
-# NOTE: this only pre-populates the registry. The usual path is `flywheel update`,
+# NOTE: this only pre-populates the registry. The usual path is `flywheel up`,
 # which pushes AND rolls the Deployment to the new content-addressed ref. Use
 # push-local only when you want the bits in the registry without a reconcile.
 push-local:
