@@ -1,6 +1,7 @@
 package initcmd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -14,6 +15,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/age"
 	"github.com/cobr-io/flywheel/internal/cli/allocator"
 	"github.com/cobr-io/flywheel/internal/cli/converge"
+	"github.com/cobr-io/flywheel/internal/cli/dockerports"
 	"github.com/cobr-io/flywheel/internal/cli/embedcache"
 	"github.com/cobr-io/flywheel/internal/cli/render"
 )
@@ -85,6 +87,11 @@ type Options struct {
 	// Injectable deps for determinism.
 	Age   age.Generator    // default RealGenerator{}
 	Clock func() time.Time // default time.Now
+	// BindableProbe decides whether a port is free during allocation. Default
+	// (nil) builds the docker-aware probe (dockerports.AvailabilityProbe); tests
+	// inject a deterministic stub so allocation doesn't depend on the host's
+	// live docker/port state.
+	BindableProbe func(int) bool
 
 	// FlywheelSHA is the commit SHA stamped into rendered output (state
 	// file, in-cluster GitRepository spec). Empty = derive via
@@ -165,7 +172,16 @@ func Run(opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	triple, err := alloc.Allocate(opts.Name, repoDir)
+	// Prefer a docker-aware probe so the initial allocation avoids ports docker
+	// already publishes (e.g. another k3d cluster). Best-effort: if docker isn't
+	// reachable yet, the probe falls back to a host-only check, and `up`'s
+	// portheal re-checks against docker before binding anyway. Tests inject a
+	// deterministic probe via opts.BindableProbe.
+	probe := opts.BindableProbe
+	if probe == nil {
+		probe, _ = dockerports.AvailabilityProbe(context.Background())
+	}
+	triple, err := alloc.Allocate(opts.Name, repoDir, probe)
 	if err != nil {
 		return nil, fmt.Errorf("allocate ports: %w", err)
 	}

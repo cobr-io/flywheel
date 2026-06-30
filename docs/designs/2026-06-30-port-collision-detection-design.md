@@ -1,6 +1,6 @@
 # Design: cross-platform port-collision detection
 
-**Status:** draft
+**Status:** accepted
 **Author:** Matthijs van der Kroon
 **Date:** 2026-06-30
 

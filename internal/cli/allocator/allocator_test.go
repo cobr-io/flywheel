@@ -9,18 +9,20 @@ import (
 	"testing"
 )
 
-// stubBindable overrides the host-bindability probe for the duration of a
-// test and restores it on cleanup. A nil predicate means "all ports
-// bindable", which isolates ledger-selection tests from whatever ports
-// happen to be in use on the host running the suite.
+// testBindable is the probe tests inject into Allocate/pickFree. stubBindable
+// swaps it for the duration of a test. A nil predicate means "all ports
+// bindable", which isolates ledger-selection tests from whatever ports happen
+// to be in use on the host running the suite.
+var testBindable = func(int) bool { return true }
+
 func stubBindable(t *testing.T, pred func(int) bool) {
 	t.Helper()
 	if pred == nil {
 		pred = func(int) bool { return true }
 	}
-	prev := portIsBindable
-	portIsBindable = pred
-	t.Cleanup(func() { portIsBindable = prev })
+	prev := testBindable
+	testBindable = pred
+	t.Cleanup(func() { testBindable = prev })
 }
 
 // T0.3 — allocates a fresh triple, refuses a duplicate, prunes a
@@ -29,7 +31,7 @@ func stubBindable(t *testing.T, pred func(int) bool) {
 func TestAllocate_FreshTripleFromLowestFreePort(t *testing.T) {
 	stubBindable(t, nil)
 	f := &File{Schema: SchemaLabel, Clients: map[string]Triple{}}
-	tr, err := f.Allocate("acme", "/Users/dev/acme-gitops")
+	tr, err := f.Allocate("acme", "/Users/dev/acme-gitops", testBindable)
 	if err != nil {
 		t.Fatalf("Allocate: %v", err)
 	}
@@ -47,10 +49,10 @@ func TestAllocate_FreshTripleFromLowestFreePort(t *testing.T) {
 func TestAllocate_RefusesDuplicateClient(t *testing.T) {
 	stubBindable(t, nil)
 	f := &File{Schema: SchemaLabel, Clients: map[string]Triple{}}
-	if _, err := f.Allocate("acme", "/path/one"); err != nil {
+	if _, err := f.Allocate("acme", "/path/one", testBindable); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.Allocate("acme", "/path/two"); err == nil {
+	if _, err := f.Allocate("acme", "/path/two", testBindable); err == nil {
 		t.Fatal("second Allocate for same client should fail")
 	}
 }
@@ -58,8 +60,8 @@ func TestAllocate_RefusesDuplicateClient(t *testing.T) {
 func TestAllocate_SecondClientGetsNextFreePorts(t *testing.T) {
 	stubBindable(t, nil)
 	f := &File{Schema: SchemaLabel, Clients: map[string]Triple{}}
-	_, _ = f.Allocate("first", "/p/1")
-	tr, err := f.Allocate("second", "/p/2")
+	_, _ = f.Allocate("first", "/p/1", testBindable)
+	tr, err := f.Allocate("second", "/p/2", testBindable)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +80,7 @@ func TestAllocate_SkipsForbiddenPorts(t *testing.T) {
 	// the skip mechanism.
 	stubBindable(t, nil)
 	f := &File{Schema: SchemaLabel, Clients: map[string]Triple{}}
-	tr, _ := f.Allocate("a", "/p")
+	tr, _ := f.Allocate("a", "/p", testBindable)
 	for _, skip := range []int{5000, 50000} {
 		if tr.RegistryPort == skip {
 			t.Errorf("allocated forbidden port %d", skip)
@@ -94,7 +96,7 @@ func TestRelease_IdempotentOnMissingClient(t *testing.T) {
 func TestRelease_RemovesEntry(t *testing.T) {
 	stubBindable(t, nil)
 	f := &File{Schema: SchemaLabel, Clients: map[string]Triple{}}
-	_, _ = f.Allocate("acme", "/p")
+	_, _ = f.Allocate("acme", "/p", testBindable)
 	f.Release("acme")
 	if _, ok := f.Clients["acme"]; ok {
 		t.Error("Release did not remove client")
@@ -142,7 +144,7 @@ func TestSaveLoad_RoundTrip(t *testing.T) {
 	path := filepath.Join(tmp, "sub", "allocations.json") // tests MkdirAll
 	stubBindable(t, nil)
 	f := &File{Schema: SchemaLabel, Clients: map[string]Triple{}}
-	_, _ = f.Allocate("acme", "/p/acme")
+	_, _ = f.Allocate("acme", "/p/acme", testBindable)
 	if err := f.Save(path); err != nil {
 		t.Fatalf("Save: %v", err)
 	}
@@ -174,7 +176,7 @@ func TestPickFree_SkipsHostBoundPort(t *testing.T) {
 	stubBindable(t, func(port int) bool { return port != bound })
 
 	f := &File{Schema: SchemaLabel, Clients: map[string]Triple{}}
-	got, err := f.pickFree(Pools.Registry, func(tr Triple) int { return tr.RegistryPort })
+	got, err := f.pickFree(Pools.Registry, func(tr Triple) int { return tr.RegistryPort }, testBindable)
 	if err != nil {
 		t.Fatalf("pickFree: %v", err)
 	}
@@ -245,7 +247,7 @@ func TestAllocate_SkipsRealHostBoundRegistryPort(t *testing.T) {
 	defer func() { _ = ln.Close() }()
 
 	f := &File{Schema: SchemaLabel, Clients: map[string]Triple{}}
-	tr, err := f.Allocate("acme", "/p/acme")
+	tr, err := f.Allocate("acme", "/p/acme", nil) // nil → real host probe (the point of this test)
 	if err != nil {
 		t.Fatalf("Allocate: %v", err)
 	}

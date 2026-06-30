@@ -115,19 +115,25 @@ func (f *File) Save(path string) error {
 // Allocate finds the first free triple from the pools and records it
 // under clientName. The recorded repoPath is what `allocator gc` checks
 // later to detect leaks from `rm -rf` without `destroy`.
-func (f *File) Allocate(clientName, repoPath string) (Triple, error) {
+// bindable reports whether a port is free for k3d to publish. Callers compose a
+// docker-aware probe (dockerports.AvailabilityProbe); a nil probe falls back to
+// the host-only netutil.PortIsBindable so other callers/tests stay simple.
+func (f *File) Allocate(clientName, repoPath string, bindable func(int) bool) (Triple, error) {
+	if bindable == nil {
+		bindable = netutil.PortIsBindable
+	}
 	if _, exists := f.Clients[clientName]; exists {
 		return Triple{}, fmt.Errorf("client %q already allocated; use destroy first", clientName)
 	}
-	registry, err := f.pickFree(Pools.Registry, func(t Triple) int { return t.RegistryPort })
+	registry, err := f.pickFree(Pools.Registry, func(t Triple) int { return t.RegistryPort }, bindable)
 	if err != nil {
 		return Triple{}, fmt.Errorf("registry_port: %w", err)
 	}
-	http, err := f.pickFree(Pools.Http, func(t Triple) int { return t.HttpPort })
+	http, err := f.pickFree(Pools.Http, func(t Triple) int { return t.HttpPort }, bindable)
 	if err != nil {
 		return Triple{}, fmt.Errorf("http_port: %w", err)
 	}
-	https, err := f.pickFree(Pools.Https, func(t Triple) int { return t.HttpsPort })
+	https, err := f.pickFree(Pools.Https, func(t Triple) int { return t.HttpsPort }, bindable)
 	if err != nil {
 		return Triple{}, fmt.Errorf("https_port: %w", err)
 	}
@@ -156,31 +162,24 @@ func (f *File) GC() []string {
 	return pruned
 }
 
-// portIsBindable is the host-availability probe used when picking ports.
-// It's a package var so tests can substitute a deterministic stub; in
-// production it's netutil.PortIsBindable (an actual net.Listen probe).
-var portIsBindable = netutil.PortIsBindable
-
 // pickFree returns the lowest port in the pool that is BOTH un-ledgered
-// (not recorded for any existing client) AND currently bindable on the
-// host. The host probe stops the allocator from handing out a port that
-// something outside its own bookkeeping already holds — another k3d
-// cluster, a non-flywheel process, or a stale ledger after `rm -rf`
-// without `destroy` — which would otherwise surface as a raw k3d FATA
-// in `flywheel up`.
+// (not recorded for any existing client) AND free per the injected `bindable`
+// probe. The probe stops the allocator from handing out a port something
+// outside its own bookkeeping already holds — another k3d cluster, a
+// non-flywheel process, or a stale ledger after `rm -rf` without `destroy` —
+// which would otherwise surface as a raw k3d FATA in `flywheel up`.
 //
-// The probe is best-effort: it's a point-in-time check (TOCTOU — a port
-// can be taken between `init` and `up`), and it tests 127.0.0.1 while
-// k3d binds 0.0.0.0, so a port bound only on a non-loopback interface
-// could pass here yet still fail k3d. See netutil.PortIsBindable. It
-// nonetheless catches the common collision class (a registry/cluster
-// already holding 0.0.0.0:<port>).
-func (f *File) pickFree(p Pool, get func(Triple) int) (int, error) {
+// The probe is best-effort and point-in-time (TOCTOU — a port can be taken
+// between `init` and `up`). Production callers pass a docker-aware probe
+// (dockerports.AvailabilityProbe) so the check is correct even when docker runs
+// in a VM (colima/Docker Desktop/WSL2) and a host net.Listen would not see the
+// docker-held port.
+func (f *File) pickFree(p Pool, get func(Triple) int, bindable func(int) bool) (int, error) {
 	used := map[int]struct{}{}
 	for _, t := range f.Clients {
 		used[get(t)] = struct{}{}
 	}
-	return PickFreePort(p, used, portIsBindable)
+	return PickFreePort(p, used, bindable)
 }
 
 // PickFreePort returns the lowest port in pool p that is neither in the
