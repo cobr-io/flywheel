@@ -79,6 +79,76 @@ func TestUpsertWorkspaceRepo_CreatesBlockAndPreservesComments(t *testing.T) {
 	}
 }
 
+// A flywheel.yaml that already carries a real workspace block wedged between
+// other sections, with comments and blank lines around it — the exact shape the
+// surgical splice must edit without disturbing its surroundings (issue #37).
+const workspaceMidYAML = `schema: v1alpha1
+
+# top-of-file note
+flywheel:
+  version: v0.1.0    # pinned tag
+
+workspace:
+  repos:
+    - name: existing-app
+      url: git@github.com:acme/existing-app.git
+
+git:
+  # keep this comment
+  integration_branch: main
+`
+
+// Upserting into an existing block must re-render ONLY the workspace block:
+// every byte before `workspace:` and after the block stays identical, so
+// blank lines and the (untouched) flywheel.version comment formatting survive.
+func TestUpsertWorkspaceRepo_SurgicalSplicePreservesSurroundings(t *testing.T) {
+	p := write(t, workspaceMidYAML)
+	before := read(t, p)
+	if err := UpsertWorkspaceRepo(p, schema.WorkspaceRepo{Name: "new-app", URL: "git@github.com:acme/new-app.git"}); err != nil {
+		t.Fatal(err)
+	}
+	after := read(t, p)
+
+	head := before[:strings.Index(before, "workspace:")]
+	tail := before[strings.Index(before, "\ngit:"):]
+	if !strings.HasPrefix(after, head) {
+		t.Errorf("content before the workspace block changed.\n--- want prefix ---\n%q\n--- got ---\n%q", head, after)
+	}
+	if !strings.HasSuffix(after, tail) {
+		t.Errorf("content after the workspace block changed.\n--- want suffix ---\n%q\n--- got ---\n%q", tail, after)
+	}
+	// The inline flywheel.version comment keeps its original 4-space alignment —
+	// the whole-document re-encode used to collapse it to a single space.
+	if !strings.Contains(after, "v0.1.0    # pinned tag") {
+		t.Errorf("flywheel.version comment was re-wrapped:\n%s", after)
+	}
+	// Both the pre-existing and the new entry parse back.
+	f := reparse(t, p)
+	if _, ok := f.WorkspaceRepo("existing-app"); !ok {
+		t.Errorf("existing entry was dropped:\n%s", after)
+	}
+	if r, ok := f.WorkspaceRepo("new-app"); !ok || r.URL != "git@github.com:acme/new-app.git" {
+		t.Errorf("new entry round-trip = %+v, ok=%v", r, ok)
+	}
+}
+
+// Creating a workspace block where none exists must append it and leave the
+// entire prior file byte-for-byte intact (the issue's "noisy diff" complaint).
+func TestUpsertWorkspaceRepo_AppendPreservesExistingBytes(t *testing.T) {
+	p := write(t, sampleYAML)
+	before := read(t, p)
+	if err := UpsertWorkspaceRepo(p, schema.WorkspaceRepo{Name: "sample-app", URL: "git@github.com:acme/sample-app.git"}); err != nil {
+		t.Fatal(err)
+	}
+	after := read(t, p)
+	if !strings.HasPrefix(after, before) {
+		t.Errorf("appending a workspace block rewrote existing content.\n--- before ---\n%q\n--- after ---\n%q", before, after)
+	}
+	if !strings.Contains(after, "name: sample-app") {
+		t.Errorf("appended entry missing:\n%s", after)
+	}
+}
+
 func TestSetFlywheelVersion_UpdatesValueAndKeepsComment(t *testing.T) {
 	p := write(t, sampleYAML)
 	if err := SetFlywheelVersion(p, "v0.2.0"); err != nil {
