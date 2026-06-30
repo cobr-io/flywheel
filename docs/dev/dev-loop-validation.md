@@ -173,20 +173,6 @@ rm -rf "$ROOT"
 
 ## Known gotchas
 
-- **Port-collision detection is blind under colima (can fail step 3).** `up` may
-  crash at registry/cluster create with docker `port is already allocated` if a
-  port in flywheel's pools (`registry 50001–50099`, `http 8080–8099`,
-  `https 8540–8559`) is held by another k3d cluster or a stale registry.
-  flywheel's probe `net.Listen`s on the **mac host**, which can't see
-  docker-published ports inside the Lima VM, so neither `init` nor `up`'s
-  port-heal catches it. Workaround — pick a docker-free port and set it before
-  `up`:
-  ```sh
-  docker ps --format '{{.Ports}}' | grep -oE '0.0.0.0:[0-9]+'   # ports docker already holds
-  # edit flywheel.yaml cluster.registry_port / http_port / https_port to free values
-  ```
-  (Tip: `k3d cluster delete <name>` + `docker rm -f <leftover-registry>` frees
-  stale ports. `flywheel down` reaps its own registry, but not foreign ones.)
 - **Pre-release version pin.** With no tags published, `init` pins
   `flywheel.version` to the git build id (e.g. `1565109`), not a `vX.Y.Z` tag.
   Expected; after tagging, confirm `init` pins the real tag.
