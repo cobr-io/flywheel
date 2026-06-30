@@ -26,7 +26,8 @@ the GitOps-repo skeleton, so nothing else needs cloning once it's installed.
 Three runtime images on `ghcr.io/cobr-io/` (`git-server`, `git-auto-sync`,
 `image-builder-controller`) provide the dev-loop machinery, pinned by the
 version in your `flywheel.yaml`; bumping that line and re-running `flywheel up`
-re-converges the cluster onto the new binary.
+re-converges the cluster onto the new binary — applying the new machinery and
+reaping any superseded machinery the previous version left running.
 
 ## The dev loop
 
@@ -121,7 +122,7 @@ Run `flywheel --help` or `flywheel <command> --help` for full flag details.
 | Command | What it does |
 |---|---|
 | `flywheel init [<path>]` | Scaffold a GitOps repo (cwd, or the given path). |
-| `flywheel up` | Reconcile the cluster to `flywheel.yaml` — creates k3d + Flux if needed. |
+| `flywheel up` | Reconcile the cluster to `flywheel.yaml` — creates k3d + Flux if needed; also prunes superseded flywheel-managed machinery a version bump no longer renders (never your app/infra workloads). |
 | `flywheel down` | Delete the cluster + local registry (destructive). |
 | `flywheel add app <dir>` | Scaffold a per-app builder + workload from a worktree dir. |
 | `flywheel publish-app <name>` | Promote a `local_only` app once its worktree has a remote. |
