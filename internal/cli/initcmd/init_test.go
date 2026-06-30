@@ -61,7 +61,8 @@ func runInitForGolden(t *testing.T, name, version string) string {
 		Age:              age.FixedKeypair(age.Keypair{PublicKey: fixedAgePub, PrivateKey: fixedAgePriv}),
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
-		SkipGitCommit:    true, // goldens don't include .git/
+		SkipGitCommit:    true,                           // goldens don't include .git/
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	if _, err := Run(opts); err != nil {
 		t.Fatalf("Run: %v", err)
@@ -97,6 +98,7 @@ func TestInit_RefusesNonEmptyTarget(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	if _, err := Run(opts); err == nil {
 		t.Fatal("Run should refuse to init into a non-empty dir")
@@ -120,6 +122,7 @@ func TestInit_InitInPlace_TargetDirEmpty(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	res, err := Run(opts)
 	if err != nil {
@@ -153,6 +156,7 @@ func TestInit_ReadmeTitle_NoDoubledGitopsSuffix(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	if _, err := Run(opts); err != nil {
 		t.Fatalf("init in-place into acme-gitops: %v", err)
@@ -187,6 +191,7 @@ func TestInit_InitInPlace_OnlyGitOK(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	if _, err := Run(opts); err != nil {
 		t.Fatalf("init with only .git/ present should succeed: %v", err)
@@ -207,6 +212,7 @@ func TestInit_DefaultsToBuildVersion(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	res, err := Run(opts)
 	if err != nil {
@@ -259,6 +265,7 @@ func TestInit_ReusesExistingAgeKey(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	})
 	if err != nil {
 		t.Fatalf("Run with pre-existing key: %v", err)
@@ -311,6 +318,7 @@ func TestInit_AgeKeyStableAcrossTwoInits(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 
 	first := base
@@ -366,6 +374,7 @@ func TestInit_AgeKeyWrittenWithMode0600(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	res, err := Run(opts)
 	if err != nil {
@@ -395,6 +404,7 @@ func TestInit_PortsRecorded(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	res, err := Run(opts)
 	if err != nil {
@@ -422,6 +432,7 @@ func TestInit_StateFileRecordsClusterBaseline(t *testing.T) {
 		FlywheelSHA:      fixedSHA,
 		SkipEmbedExtract: true,
 		SkipGitCommit:    true,
+		BindableProbe:    func(int) bool { return true }, // deterministic: ignore host docker/port state
 	}
 	res, err := Run(opts)
 	if err != nil {

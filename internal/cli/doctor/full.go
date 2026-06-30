@@ -7,10 +7,13 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 
 	"github.com/cobr-io/flywheel/internal/cli/allocator"
+	"github.com/cobr-io/flywheel/internal/cli/dockerports"
 	"github.com/cobr-io/flywheel/internal/cli/hostmount"
+	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	"github.com/cobr-io/flywheel/internal/cli/netutil"
 )
 
@@ -121,30 +124,44 @@ func yqCheck() Check {
 	}
 }
 
-// allocatorPortCollisionCheck binds a TCP listener to every allocated
-// port and reports a collision if the bind fails (something else holds
-// the port). Excludes ports already in use by the *current* user's
-// k3d clusters (which are expected to hold them).
+// allocatorPortCollisionCheck reports a collision when an allocated port is held
+// by something OTHER than the owning client's own k3d objects. "Held" is decided
+// against docker's published-port ledger first (the authority — a host
+// net.Listen is blind to docker-held ports when docker runs in a VM, e.g.
+// colima/Docker Desktop/WSL2), then a host bind probe (to also catch non-docker
+// squatters). A port held by the client's own running registry/cluster is
+// expected and skipped (owned-guard via RegistryExists/ClusterRunning).
 func allocatorPortCollisionCheck(homeOverride string) Check {
 	return Check{
 		Name:        "ports",
-		Description: "no live process holds an allocated port",
+		Description: "no foreign process holds an allocated port",
 		Run: func(ctx context.Context) error {
 			path := allocationsPath(homeOverride)
 			alloc, err := allocator.Load(path)
 			if err != nil {
 				return fmt.Errorf("read %s: %w", path, err)
 			}
-			var collisions []string
-			for client, t := range alloc.Clients {
-				for _, port := range []int{t.RegistryPort, t.HttpPort, t.HttpsPort} {
-					if !portIsBindable(port) {
-						collisions = append(collisions, fmt.Sprintf("%d (client %s)", port, client))
-					}
+			// Best-effort docker ledger; on error fall back to the host probe only.
+			published, _ := dockerports.PublishedPorts(ctx)
+			held := func(port int) bool {
+				if _, ok := published[port]; ok {
+					return true
 				}
+				return !netutil.PortIsBindableWildcard(port)
 			}
+			// By convention init names the cluster <client>-local and the
+			// registry <client>-local-registry; ports those own are expected.
+			regOwned := func(client string) bool {
+				ok, _ := k3d.RegistryExists(ctx, client+"-local-registry")
+				return ok
+			}
+			clusterOwned := func(client string) bool {
+				ok, _ := k3d.ClusterRunning(ctx, client+"-local")
+				return ok
+			}
+			collisions := portCollisions(alloc.Clients, held, regOwned, clusterOwned)
 			if len(collisions) > 0 {
-				return fmt.Errorf("ports already in use: %v — run `flywheel destroy` or stop the holding process",
+				return fmt.Errorf("ports already in use by another process/cluster: %v — free them or set a different port in flywheel.yaml",
 					collisions)
 			}
 			return nil
@@ -152,17 +169,30 @@ func allocatorPortCollisionCheck(homeOverride string) Check {
 	}
 }
 
-func portIsBindable(port int) bool {
-	if netutil.PortIsBindable(port) {
-		return true
+// portCollisions returns "<port> (client <name>)" for every allocated port that
+// `held` reports taken AND that is not owned by the client's own k3d objects
+// (regOwned for registry_port, clusterOwned for http/https). Pure decision core
+// — no docker/k3d shell-outs — so it's unit-tested; the real probes are injected
+// by allocatorPortCollisionCheck. Output is sorted for deterministic messages.
+func portCollisions(clients map[string]allocator.Triple, held func(int) bool, regOwned, clusterOwned func(client string) bool) []string {
+	var collisions []string
+	for client, t := range clients {
+		slots := []struct {
+			port  int
+			owned bool
+		}{
+			{t.RegistryPort, regOwned(client)},
+			{t.HttpPort, clusterOwned(client)},
+			{t.HttpsPort, clusterOwned(client)},
+		}
+		for _, s := range slots {
+			if !s.owned && held(s.port) {
+				collisions = append(collisions, fmt.Sprintf("%d (client %s)", s.port, client))
+			}
+		}
 	}
-	// Already bound — could be the current user's own k3d cluster
-	// legitimately holding it (expected) or another process. For v0.1.0
-	// simplicity treat ANY bind failure as a soft warning: returning true
-	// here means "don't flag". Since we can't easily distinguish "k3d
-	// holds it legitimately" from "another process stole it", be lenient;
-	// a hard collision check belongs in a later pass.
-	return true
+	sort.Strings(collisions)
+	return collisions
 }
 
 func allocationsPath(homeOverride string) string {

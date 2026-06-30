@@ -157,11 +157,9 @@ func Run(ctx context.Context, opts Options) error {
 		return fmt.Errorf("step 5b (host ports): %w", err)
 	}
 
-	// Step 6 — k3d registry create.
-	if err := style.Spin(out,
-		fmt.Sprintf("k3d registry %s:%d", cfg.Cluster.Registry, cfg.Cluster.RegistryPort),
-		func() error { return k3d.CreateRegistry(ctx, cfg.Cluster.Registry, cfg.Cluster.RegistryPort) },
-	); err != nil {
+	// Step 6 — k3d registry create. Wrapped so a port taken between the step-5b
+	// probe and this bind (TOCTOU) self-heals + retries instead of crashing.
+	if err := createRegistryHealOnce(ctx, opts, cfg, out); err != nil {
 		return fmt.Errorf("step 6: %w", err)
 	}
 
@@ -177,21 +175,20 @@ func Run(ctx context.Context, opts Options) error {
 	// missing, so a fresh gitops-repo clone bootstraps in one command.
 	reconcileWorktrees(ctx, opts, cfg, workspacesRoot, out)
 
-	if err := style.Spin(out,
-		fmt.Sprintf("k3d cluster %s", cfg.Cluster.Name),
-		func() error {
-			return k3d.CreateCluster(ctx, k3d.CreateClusterOpts{
-				Name:           cfg.Cluster.Name,
-				K3sImage:       cfg.Cluster.K3sImage,
-				Servers:        cfg.Cluster.Servers,
-				Agents:         cfg.Cluster.Agents,
-				RegistryName:   cfg.Cluster.Registry,
-				HttpPort:       cfg.Cluster.HttpPort,
-				HttpsPort:      cfg.Cluster.HttpsPort,
-				WorkspacesRoot: workspacesRoot,
-			})
-		},
-	); err != nil {
+	// Wrapped so an http/https port taken between the step-5b probe and this bind
+	// self-heals + retries once instead of crashing k3d.
+	if err := createClusterHealOnce(ctx, opts, cfg, func() k3d.CreateClusterOpts {
+		return k3d.CreateClusterOpts{
+			Name:           cfg.Cluster.Name,
+			K3sImage:       cfg.Cluster.K3sImage,
+			Servers:        cfg.Cluster.Servers,
+			Agents:         cfg.Cluster.Agents,
+			RegistryName:   cfg.Cluster.Registry,
+			HttpPort:       cfg.Cluster.HttpPort,
+			HttpsPort:      cfg.Cluster.HttpsPort,
+			WorkspacesRoot: workspacesRoot,
+		}
+	}, out); err != nil {
 		return fmt.Errorf("step 7: %w", err)
 	}
 

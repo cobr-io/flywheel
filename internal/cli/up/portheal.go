@@ -8,8 +8,8 @@ import (
 
 	"github.com/cobr-io/flywheel/internal/cli/allocator"
 	"github.com/cobr-io/flywheel/internal/cli/config"
+	"github.com/cobr-io/flywheel/internal/cli/dockerports"
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
-	"github.com/cobr-io/flywheel/internal/cli/netutil"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 )
@@ -74,7 +74,15 @@ func healHostPorts(ctx context.Context, opts Options, cfg *schema.File, out io.W
 	}
 
 	ledger, ledgerPath := loadLedger(opts.HomeOverride)
-	assignments, err := planPortHeal(slots, ledger, cfg.Client.Name, netutil.PortIsBindableWildcard)
+	// Probe against docker's published-port ledger (not just a host net.Listen),
+	// so a port another k3d cluster/container already publishes is caught even
+	// when docker runs in a VM (colima/Docker Desktop/WSL2) where a host bind
+	// would wrongly succeed. Falls back to host-only if docker is unreachable.
+	probe, derr := dockerports.AvailabilityProbe(ctx)
+	if derr != nil {
+		style.Warn(out, "could not read docker published ports (%v); using host-only port probe", derr)
+	}
+	assignments, err := planPortHeal(slots, ledger, cfg.Client.Name, probe)
 	if err != nil {
 		return err
 	}
