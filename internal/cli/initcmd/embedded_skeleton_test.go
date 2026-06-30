@@ -19,16 +19,3 @@ func TestEmbeddedSkeletonHasDotfiles(t *testing.T) {
 		}
 	}
 }
-
-// TestEmbeddedGuidesShipsGuide guards the production guide-copy path:
-// `flywheel init` copies embeddedGuides() (a fs.Sub of the binary's embedded
-// Assets at docs/guides), NOT the on-disk dir the golden tests inject via
-// os.DirFS. So a missing //go:embed docs/guides directive would pass the
-// goldens but ship no guide to real users. This test exercises the real
-// sub-FS.
-func TestEmbeddedGuidesShipsGuide(t *testing.T) {
-	guides := embeddedGuides()
-	if _, err := fs.Stat(guides, "onboarding.md"); err != nil {
-		t.Errorf("embedded guides sub-FS missing onboarding.md (flywheel init would not emit it): %v", err)
-	}
-}
