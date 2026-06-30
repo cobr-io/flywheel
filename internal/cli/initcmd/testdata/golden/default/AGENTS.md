@@ -82,9 +82,9 @@ See [infra/README.md](infra/README.md).
   `clusters/local/` entrypoint (`flywheel up` owns it). Committing a
   `clusters/<env>/` for promotion is fine.
 * Secrets go in `*.enc.yaml` files, SOPS-encrypted (see `.sops.yaml`).
-  Commit hooks (`.pre-commit-config.yaml`) enforce this: yamllint, gitleaks,
-  and a SOPS-shape guard that rejects unencrypted `*.enc.yaml` and any
-  plaintext `kind: Secret`. Don't bypass them with `--no-verify`.
+  A commit hook (`.pre-commit-config.yaml`) enforces this: a SOPS-shape guard
+  that rejects unencrypted `*.enc.yaml` and any plaintext `kind: Secret`.
+  Don't bypass it with `--no-verify`.
 * Decrypting secrets locally: the age private key lives at
   `~/.config/flywheel/acme/age.key` (host-only, never committed).
   This repo ships an `.envrc` that exports `SOPS_AGE_KEY_FILE` to that path, so

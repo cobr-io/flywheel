@@ -6,10 +6,9 @@
 # integration branch) so they can't be skipped, and adds render + schema
 # validation that pre-commit doesn't cover:
 #
-#   lint            — a full-history gitleaks secret scan, plus
-#                     `pre-commit run --all-files` (yamllint, the SOPS-shape
-#                     guard, and the local-only app guard). This supersedes the
-#                     standalone local-only-guard workflow.
+#   lint            — `pre-commit run --all-files` (the SOPS-shape guard and
+#                     the local-only app guard). This supersedes the standalone
+#                     local-only-guard workflow.
 #   kustomize-build — `kustomize build` on every `*/overlays/<env>` entrypoint;
 #                     catches broken refs, missing files, and bad patches.
 #   kubeconform     — strict schema validation of the rendered manifests,
@@ -29,12 +28,10 @@ permissions:
   contents: read
 
 # One source of truth for the validation tool versions. Bump here and both the
-# kustomize-build and kubeconform jobs pick it up. Keep gitleaks in step with
-# the pin in .pre-commit-config.yaml so CI and local commits scan identically.
+# kustomize-build and kubeconform jobs pick it up.
 env:
   KUSTOMIZE_VERSION: "5.8.1"
   KUBECONFORM_VERSION: "0.8.0"
-  GITLEAKS_VERSION: "8.30.1"
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -44,12 +41,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      # fetch-depth: 0 pulls the full history so the gitleaks scan below can see
-      # every commit, not just the PR's tip — a secret introduced (and later
-      # removed) deeper in history still gets caught.
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.x"
@@ -60,19 +52,6 @@ jobs:
           sudo curl -fsSL -o /usr/local/bin/yq \
             https://github.com/mikefarah/yq/releases/download/v4.44.3/yq_linux_amd64
           sudo chmod +x /usr/local/bin/yq
-      - name: Install gitleaks
-        run: |
-          curl -fsSL -o gitleaks.tar.gz \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
-          tar -xzf gitleaks.tar.gz gitleaks
-          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
-      # The pre-commit gitleaks hook only scans *staged* changes
-      # (`gitleaks git --staged`), which is empty on a server-side run — so it
-      # can't catch a secret buried in history. Scan the whole repo history here
-      # instead. gitleaks auto-discovers .gitleaks.toml (which allowlists the
-      # committed clusters/local/age.key and SOPS ciphertext).
-      - name: Scan full git history for secrets
-        run: gitleaks git --redact --verbose .
       # GITHUB_BASE_REF (a PR's target branch) is set automatically on
       # pull_request events; the local-only guard keys off it to know when to
       # block. No extra wiring needed here.

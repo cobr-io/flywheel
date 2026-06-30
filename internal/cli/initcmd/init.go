@@ -238,7 +238,7 @@ func Run(opts Options) (*Result, error) {
 	// destroy/init; this is the canonical copy `up` reads. Mode 0644: git only
 	// preserves the +x bit and the key is non-secret by design. .gitignore
 	// commits this exact path while ignoring clusters/*/age.key for every other
-	// env, and .gitleaks.toml allowlists it so the SOPS-key scanner stays quiet.
+	// env.
 	localKeyDir := filepath.Join(repoDir, "clusters", "local")
 	if err := os.MkdirAll(localKeyDir, 0o755); err != nil {
 		return nil, fmt.Errorf("mkdir %s: %w", localKeyDir, err)
