@@ -54,31 +54,15 @@ create_sibling_app_repo() {
   log "created sibling app repo at $dir"
 }
 
-# add_sample_app — scaffolds the per-app builder (via `flywheel add app`)
-# and the app workload (by hand, since v0.1 doesn't scaffold those),
-# then commits.
+# add_sample_app — scaffolds the per-app builder AND the app workload via
+# `flywheel add app`, then commits. add app generates both builders/base/<app>/
+# and apps/base/<app>/ (Deployment + Service + Ingress, with the imagepolicy
+# marker and the registry URL derived from flywheel.yaml), and registers the
+# app in the workspace block. We deliberately rely on that output rather than
+# hand-scaffolding the workload, so the scenarios exercise exactly what users
+# get from `add app`.
 add_sample_app() {
-  local registry_url="k3d-${REGISTRY}:5000"
   ( cd "$CLIENT_REPO" && flywheel add app "$APP" )
-
-  # App workload.
-  local adir="$CLIENT_REPO/apps/base/$APP"
-  mkdir -p "$adir"
-  sed "s|k3d-acme-local-registry:5000/acme/sample-app|$registry_url/$CLIENT_NAME/$APP|; s|flux-system:sample-app|flux-system:$APP|" \
-    "$TESTDATA/sample-app/deployment.yaml" >"$adir/deployment.yaml"
-  cat >"$adir/kustomization.yaml" <<EOF
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - ./deployment.yaml
-EOF
-  cat >"$CLIENT_REPO/apps/base/kustomization.yaml" <<EOF
-apiVersion: kustomize.config.k8s.io/v1beta1
-kind: Kustomization
-resources:
-  - ./$APP
-EOF
-
   git_in "$CLIENT_REPO" add -A
   git_in "$CLIENT_REPO" commit -q -m "add $APP builder + workload"
   log "added $APP builder + workload to client repo"
