@@ -40,6 +40,7 @@ const palettes = {
     you:  { accent: '#0BA37F', chipText: '#07795E', chipBg: '#E1F6EF' },
     comp: { accent: '#3D63F5', chipText: '#2B45B8', chipBg: '#E8EDFE' },
     flux: { accent: '#7C5CFF', chipText: '#5A3FCF', chipBg: '#EEEAFE' },
+    cluster: { fill: '#E9EEF7', stroke: '#CFDAE8', chipBg: '#DBE3F0', chipText: '#5A6473' },
     cardShadow: 'flood-color="#0B1220" flood-opacity="0.07"', cardDy: 3, cardBlur: 8,
     panelShadow: true,
   },
@@ -55,6 +56,7 @@ const palettes = {
     you:  { accent: '#2DD4A6', chipText: '#74ECC9', chipBg: '#0E2A24' },
     comp: { accent: '#6A92FF', chipText: '#AAC1FF', chipBg: '#17223A' },
     flux: { accent: '#A78BFA', chipText: '#CBB8FF', chipBg: '#211A3A' },
+    cluster: { fill: '#131A24', stroke: '#283341', chipBg: '#1E2836', chipText: '#8A94A0' },
     cardShadow: 'flood-color="#000000" flood-opacity="0.40"', cardDy: 2, cardBlur: 6,
     panelShadow: false,
   },
@@ -80,7 +82,7 @@ const layout = cards.map((c) => {
   return { ...c, top, h };
 });
 const lastBottom = layout[layout.length - 1].top + layout[layout.length - 1].h;
-const LEGEND_Y = lastBottom + 36;
+const LEGEND_Y = lastBottom + 58;              // extra room for the cluster region's bottom edge
 const PANEL_H = (LEGEND_Y + 26) - PANEL_TOP;
 const TOTAL_H = PANEL_TOP + PANEL_H + 14;
 
@@ -150,8 +152,30 @@ function connectors(p) {
   return out;
 }
 
+// Boundary region around the stages that run inside the local k3d cluster
+// (git-server → builder → Flux → pod). The commit (stage 01) sits outside it
+// on the host; git-auto-sync is the push that crosses into the cluster. Drawn
+// behind the cards as a recessed, neutrally-tinted zone with a corner label.
+function clusterRegion(p) {
+  const r = p.cluster;
+  const inFirst = layout[1];                     // first in-cluster stage
+  const inLast = layout[layout.length - 1];
+  const top = inFirst.top - 2 * NODE_R - 16;     // clear above station 02
+  const bottom = inLast.top + inLast.h + 16;
+  const x = CARD_X - 12;
+  const w = CARD_W + 24;
+  const label = 'LOCAL K3D CLUSTER';
+  const lw = label.length * 7.2 + 22;
+  const cx = x + 16, cy = top + 11;
+  return `<g>
+    <rect x="${x}" y="${top.toFixed(1)}" width="${w}" height="${(bottom - top).toFixed(1)}" rx="18" fill="${r.fill}" stroke="${r.stroke}" stroke-width="1"/>
+    <rect x="${cx}" y="${cy.toFixed(1)}" width="${lw.toFixed(1)}" height="22" rx="8" fill="${r.chipBg}"/>
+    <text x="${(cx + lw / 2).toFixed(1)}" y="${(cy + 15).toFixed(1)}" font-family="${MONO}" font-size="10" font-weight="600" letter-spacing="1.5" fill="${r.chipText}" text-anchor="middle">${label}</text>
+  </g>`;
+}
+
 // The feedback return that makes it a loop, not a chain: from the running
-// pod back up to the next commit, routed up the right gutter as a dotted
+// pod back up to the next commit, routed up the left gutter as a dotted
 // "you" edge (the developer closes the loop by observing + editing again).
 function loopEdge(p) {
   const r = p.you;
@@ -159,23 +183,23 @@ function loopEdge(p) {
   const last = layout[layout.length - 1];
   const y1 = first.top + first.h / 2;
   const y5 = last.top + last.h / 2;
-  const xCard = CARD_X + CARD_W;                 // right edge of the cards
-  const xBus = xCard + 40;                       // vertical return lane
+  const xCard = CARD_X;                           // left edge of the cards
+  const xBus = xCard - 40;                         // vertical return lane (left gutter)
   const R = 18;
   const midY = (y1 + y5) / 2;
   const label = 'you observe the result → make the next change';
   const lw = label.length * 6.9 + 8;
   const d = [
     `M ${xCard} ${y5.toFixed(1)}`,
-    `H ${xBus - R}`,
+    `H ${xBus + R}`,
     `Q ${xBus} ${y5.toFixed(1)} ${xBus} ${(y5 - R).toFixed(1)}`,
     `V ${(y1 + R).toFixed(1)}`,
-    `Q ${xBus} ${y1.toFixed(1)} ${xBus - R} ${y1.toFixed(1)}`,
-    `H ${xCard + 8}`,
+    `Q ${xBus} ${y1.toFixed(1)} ${xBus + R} ${y1.toFixed(1)}`,
+    `H ${xCard - 8}`,
   ].join(' ');
   return `<g>
     <path d="${d}" fill="none" stroke="${r.accent}" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round"/>
-    <path d="M ${xCard + 9} ${(y1 - 5).toFixed(1)} L ${xCard + 1} ${y1.toFixed(1)} L ${xCard + 9} ${(y1 + 5).toFixed(1)}" fill="none" stroke="${r.accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="M ${xCard - 9} ${(y1 - 5).toFixed(1)} L ${xCard - 1} ${y1.toFixed(1)} L ${xCard - 9} ${(y1 + 5).toFixed(1)}" fill="none" stroke="${r.accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
     <g transform="translate(${xBus}, ${midY.toFixed(1)}) rotate(-90)">
       <rect x="${(-lw / 2).toFixed(1)}" y="-11" width="${lw.toFixed(1)}" height="22" rx="11" fill="${p.panel}"/>
       <text x="0" y="4" font-family="${MONO}" font-size="11.5" font-weight="600" fill="${r.chipText}" text-anchor="middle">${esc(label)}</text>
@@ -233,6 +257,7 @@ function build(name) {
   </defs>
   ${panelShadow}
   <rect x="${PANEL_X}" y="${PANEL_TOP}" width="${PANEL_W}" height="${PANEL_H}" rx="22" fill="${p.panel}" stroke="${p.panelStroke}" stroke-width="1"/>
+  ${clusterRegion(p)}
   ${header(p)}
   ${connectors(p)}
   ${layout.map((c) => card(p, c)).join('\n  ')}

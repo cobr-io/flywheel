@@ -64,6 +64,8 @@ here first.
 | muted (body) | `#586172` | `#98A2AF` |
 | faint / eyebrow | `#9AA3B0` / `#7B8493` | `#69727E` / `#7E8896` |
 | connector / arrow | `#CDD4DE` / `#A9B2BE` | `#313A46` / `#4C5663` |
+| boundary region (fill / stroke) | `#E9EEF7` / `#CFDAE8` | `#131A24` / `#283341` |
+| boundary label (bg / text) | `#DBE3F0` / `#5A6473` | `#1E2836` / `#8A94A0` |
 
 ---
 
@@ -98,7 +100,7 @@ gives a quiet rhythm — prose bookends, machinery in the middle.
 
 Canvas is **720px** wide (natural); height is computed from the content. The
 spine is centred at **x=360**; the panel insets 12px each side; cards inset to
-**x=92 (536px wide)**, leaving **80px side gutters** — the right gutter is the
+**x=92 (536px wide)**, leaving **80px side gutters** — the left gutter is the
 return-edge lane.
 
 | Token | Value |
@@ -112,7 +114,8 @@ return-edge lane.
 | station node | `r=15`, 2px ring |
 | accent bar | 4px wide, inset 16px top/bottom, `rx=2` |
 | connector | 2px line + 5px chevron arrowhead |
-| loop edge | 2px **dotted** (`stroke-dasharray="6 7"`), routed at card-right +40, corner `r=18` |
+| loop edge | 2px **dotted** (`stroke-dasharray="6 7"`), routed at card-left −40, corner `r=18` |
+| boundary region | rounded rect (`rx=18`) behind the cards, 12px padding around the grouped stages, hairline stroke, corner label chip |
 
 **Depth is a whisper.** Cards: `feDropShadow` dy 3 / blur 8 / opacity .07
 (light), dy 2 / blur 6 / opacity .40 (dark). Panel shadow light-only (dy 6, blur
@@ -134,10 +137,23 @@ return-edge lane.
 - **Forward flow** = solid connectors down the **centre** spine, each entering a
   numbered station then a card.
 - **Feedback / loop** = a **dotted** edge in a **side gutter** (the dev-loop's
-  return runs up the right gutter, arrow back into the first card, with a
+  return runs up the **left** gutter, arrow back into the first card, with a
   rotated label). Dotted + off-spine is what distinguishes "the loop closes"
   from "another pipeline step." Use it whenever a diagram is a cycle, not a
   chain.
+
+### Boundary regions
+
+When a subset of stages shares an environment (a cluster, a process, a trust
+boundary), group them in a **recessed region** — a rounded rect drawn *behind*
+the cards, filled with a neutral tint a shade off the panel, hairline border,
+and a small uppercase label chip in the top-left corner (e.g. `LOCAL K3D
+CLUSTER`). Stages outside the boundary stay outside it (in the dev-loop the
+commit is on the host, so it sits above the cluster region; `git-auto-sync
+pushes` is the edge that crosses in). Keep the region **neutral** — it's
+structure, not a fourth accent role — and let the white cards float on top of
+the tint. Nest freely: the cluster region lives inside the outer "your machine"
+panel.
 
 ---
 
