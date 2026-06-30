@@ -78,11 +78,22 @@ func New(kubeconfigPath, contextName string) (*Applier, error) {
 // ApplyKustomize builds the kustomization at `dir` and applies every
 // resource with SSA fieldManager=flux-controller.
 func (a *Applier) ApplyKustomize(ctx context.Context, dir string, out io.Writer) error {
+	_, err := a.ApplyKustomizeTracked(ctx, dir, out)
+	return err
+}
+
+// ApplyKustomizeTracked is ApplyKustomize that also returns a ResourceRef for
+// every object it SUCCESSFULLY applied. `flywheel up` uses this to build the
+// "keep set" for its orphan prune (converge.PruneOrphanedMachinery): only a
+// resource that this run actually applied is spared, so a manifest that stops
+// being rendered between versions can be reaped. The error is non-nil if any
+// object failed (the returned refs then cover only the ones that landed).
+func (a *Applier) ApplyKustomizeTracked(ctx context.Context, dir string, out io.Writer) ([]ResourceRef, error) {
 	yamlBytes, err := buildKustomize(dir)
 	if err != nil {
-		return fmt.Errorf("kustomize build %s: %w", dir, err)
+		return nil, fmt.Errorf("kustomize build %s: %w", dir, err)
 	}
-	return a.ApplyYAML(ctx, yamlBytes, out)
+	return a.applyYAML(ctx, yamlBytes, out)
 }
 
 // ResourceRef identifies a single resource (no spec) — used by
@@ -97,7 +108,18 @@ type ResourceRef struct {
 // ApplyYAML applies a (possibly multi-document) YAML blob. Each
 // document becomes one SSA patch.
 func (a *Applier) ApplyYAML(ctx context.Context, raw []byte, out io.Writer) error {
+	_, err := a.applyYAML(ctx, raw, out)
+	return err
+}
+
+// applyYAML is the shared apply engine: it SSA-patches every document and
+// returns a ResourceRef for each one that succeeded (the tracking the
+// orphan prune relies on). On a decode error it returns immediately; per-
+// object apply failures are warned, recorded in the error, and skipped (so
+// they don't enter the keep set).
+func (a *Applier) applyYAML(ctx context.Context, raw []byte, out io.Writer) ([]ResourceRef, error) {
 	dec := yaml.NewYAMLOrJSONDecoder(strings.NewReader(string(raw)), 4096)
+	var applied []ResourceRef
 	var lastErr error
 	for {
 		obj := &unstructured.Unstructured{}
@@ -105,7 +127,7 @@ func (a *Applier) ApplyYAML(ctx context.Context, raw []byte, out io.Writer) erro
 			if err == io.EOF {
 				break
 			}
-			return fmt.Errorf("decode yaml: %w", err)
+			return applied, fmt.Errorf("decode yaml: %w", err)
 		}
 		if obj.Object == nil {
 			continue
@@ -116,9 +138,17 @@ func (a *Applier) ApplyYAML(ctx context.Context, raw []byte, out io.Writer) erro
 				obj.GroupVersionKind().GroupKind().String(),
 				obj.GetNamespace(),
 				obj.GetName(), err)
+			continue
 		}
+		gvk := obj.GroupVersionKind()
+		applied = append(applied, ResourceRef{
+			Group:     gvk.Group,
+			Kind:      gvk.Kind,
+			Namespace: obj.GetNamespace(),
+			Name:      obj.GetName(),
+		})
 	}
-	return lastErr
+	return applied, lastErr
 }
 
 // ApplyObject does one SSA Patch for the given unstructured object.
@@ -232,6 +262,27 @@ func (a *Applier) ListUnstructured(ctx context.Context, gvr schema.GroupVersionR
 		resource = a.dyn.Resource(gvr).Namespace(namespace)
 	}
 	list, err := resource.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// ListByKindLabeled lists every object of the given GroupKind (across all
+// namespaces for a namespaced kind, cluster-wide for a cluster-scoped one)
+// that matches labelSelector. The orphan prune uses it to find flywheel's
+// own applied machinery (label app.kubernetes.io/managed-by=flywheel) without
+// having to enumerate namespaces — the label, not the namespace, bounds the
+// candidate set. The GroupKind is resolved to a resource via the REST mapper,
+// so the caller passes kinds (Deployment, DaemonSet, ...), not GVRs.
+func (a *Applier) ListByKindLabeled(ctx context.Context, gk schema.GroupKind, labelSelector string) ([]unstructured.Unstructured, error) {
+	mapping, err := a.mapper.RESTMapping(gk)
+	if err != nil {
+		return nil, fmt.Errorf("REST mapping %s: %w", gk.String(), err)
+	}
+	// Resource(gvr) with no .Namespace() lists across all namespaces for a
+	// namespaced kind and cluster-wide for a cluster-scoped one.
+	list, err := a.dyn.Resource(mapping.Resource).List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
 	if err != nil {
 		return nil, err
 	}

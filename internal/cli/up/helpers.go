@@ -175,6 +175,16 @@ func ensureMkcert(ctx context.Context, repoDir, domain string, out io.Writer) er
 	return nil
 }
 
+// managedByFlywheel returns the label set every resource `flywheel up` applies
+// imperatively carries (app.kubernetes.io/managed-by=flywheel). On Secrets it's
+// provenance only — the orphan prune denylists Secret — but it keeps the marker
+// uniform across everything `up` creates (issue #27), so future tooling can
+// identify flywheel's own objects by one label. Returned as a fresh map per
+// call since unstructured stores it by reference.
+func managedByFlywheel() map[string]interface{} {
+	return map[string]interface{}{"app.kubernetes.io/managed-by": "flywheel"}
+}
+
 // createAgeSecret creates the `sops-age` Secret in `flux-system`. Flux's
 // SOPS decryption looks for a key named `age.agekey`. Per design § up
 // step 13.
@@ -186,6 +196,7 @@ func createAgeSecret(ctx context.Context, a *applier.Applier, ageContent string,
 			"metadata": map[string]interface{}{
 				"name":      "sops-age",
 				"namespace": "flux-system",
+				"labels":    managedByFlywheel(),
 			},
 			"type": "Opaque",
 			"stringData": map[string]interface{}{
@@ -215,6 +226,7 @@ func createMkcertSecret(ctx context.Context, a *applier.Applier, repoDir string,
 			"metadata": map[string]interface{}{
 				"name":      "local-cert",
 				"namespace": "kube-system",
+				"labels":    managedByFlywheel(),
 			},
 			"type": "kubernetes.io/tls",
 			"stringData": map[string]interface{}{
@@ -269,6 +281,7 @@ func mkcertRootSecret(caPEM string) *unstructured.Unstructured {
 			"metadata": map[string]interface{}{
 				"name":      "mkcert-ca",
 				"namespace": "kube-system",
+				"labels":    managedByFlywheel(),
 			},
 			"type": "Opaque",
 			"stringData": map[string]interface{}{

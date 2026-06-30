@@ -2,10 +2,14 @@
 // function orchestrates; per-step logic lives in the helper packages
 // (k3d, dockermirror, mirror, applier, flux, etc.).
 //
-// Destructive reconciliation is intentionally NOT flywheel's job: Flux
-// owns the git-managed layers (every Flux Kustomization is prune:true)
-// and flywheel applies only recreatable machinery directly, so there is
-// no destructive-set detection or deletion gating in this pipeline.
+// Destructive reconciliation of the git-managed layers is intentionally NOT
+// flywheel's job: Flux owns those (every Flux Kustomization is prune:true).
+// flywheel applies only recreatable machinery directly — and, as of issue #27,
+// reaps its OWN superseded machinery (step 11e): resources labeled
+// app.kubernetes.io/managed-by=flywheel that a version bump stops rendering.
+// That prune is scoped by the label and a kind denylist so it can never delete
+// an app/infra workload (those are unlabeled, Flux-owned) nor a Namespace or
+// Flux Kustomization/GitRepository (whose deletion would cascade).
 package up
 
 import (
@@ -311,8 +315,13 @@ func Run(ctx context.Context, opts Options) error {
 	// memory limit (cfg.git_server.memory_limit). The same limit is rendered
 	// into the flywheel-dev-loop Flux Kustomization (step 11d) so this direct
 	// apply and Flux's reconcile agree.
+	// keepDevLoop + keepBootstrap (captured at 11d) form the keep set the
+	// orphan prune (step 11e) scans against — the resources THIS run applied.
+	var keepDevLoop []applier.ResourceRef
 	if err := style.Spin(out, "bootstrap 11a: dev-loop overlay", func() error {
-		return converge.ApplyDevLoop(ctx, a, devLoopDir, resolvedImages, cfg.GitServerMemoryLimit(), out)
+		var e error
+		keepDevLoop, e = converge.ApplyDevLoop(ctx, a, devLoopDir, resolvedImages, cfg.GitServerMemoryLimit(), out)
+		return e
 	}); err != nil {
 		return fmt.Errorf("step 11a: %w", err)
 	}
@@ -340,11 +349,40 @@ func Run(ctx context.Context, opts Options) error {
 	// into existence here with `spec.images` / `spec.ref.commit` already
 	// matching the resolved refs + cache SHA the rest of `up` is using
 	// — no follow-up refresh needed.
+	var keepBootstrap []applier.ResourceRef
+	bootstrapOK := true
 	if err := style.Spin(out,
 		"bootstrap 11d: applying flux-system (from in-memory bootstrap)",
-		func() error { return a.ApplyKustomize(ctx, bootstrapDir, out) },
+		func() error {
+			var e error
+			keepBootstrap, e = a.ApplyKustomizeTracked(ctx, bootstrapDir, out)
+			return e
+		},
 	); err != nil {
+		bootstrapOK = false
 		style.Warn(out, "step 11d: %v", err)
+	}
+
+	// Step 11e — prune superseded flywheel machinery (issue #27). Only the
+	// resources THIS run re-applied (keepDevLoop ∪ keepBootstrap) are spared;
+	// any other managed-by=flywheel resource of the same kinds is an orphan
+	// from a prior version and gets removed (e.g. the old git-auto-sync-self
+	// Deployment that the deploy-ref migration superseded). Gated on both 11a
+	// and 11d succeeding so a resource that failed to apply isn't mistaken for
+	// an orphan; app/infra workloads (unlabeled, Flux-managed) and state /
+	// cascade kinds (Namespace, PVC, Secret, Flux Kustomization/GitRepository)
+	// are never touched. Best-effort: failures warn, never abort `up`.
+	if bootstrapOK {
+		keep := make([]applier.ResourceRef, 0, len(keepDevLoop)+len(keepBootstrap))
+		keep = append(keep, keepDevLoop...)
+		keep = append(keep, keepBootstrap...)
+		pruned, err := converge.PruneOrphanedMachinery(ctx, a, keep, out)
+		switch {
+		case err != nil:
+			style.Warn(out, "step 11e (prune): %v", err)
+		case pruned > 0:
+			style.Detail(out, "pruned %d superseded resource(s)", pruned)
+		}
 	}
 
 	// Step 13 — create age-key Secret + (mkcert) local-cert + mkcert-ca Secrets.

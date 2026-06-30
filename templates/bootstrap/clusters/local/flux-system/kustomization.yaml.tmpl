@@ -3,6 +3,19 @@ kind: Kustomization
 # Flux entrypoint for the local cluster. Applied by `flywheel up` step
 # 11d after the bootstrap dance brings up git-server. Order in the list
 # below is informational; Flux reconciles based on dependsOn relations.
+#
+# app.kubernetes.io/managed-by: flywheel marks every object `up` applies here
+# (namespaces, GitRepositories, the flywheel-config ConfigMap, the Flux
+# Kustomizations) as flywheel-owned, matching the dev-loop base. `up`'s orphan
+# prune (step 11e) scopes its scan to this label, but it never deletes
+# Namespace or Flux Kustomization/GitRepository (denylisted — deleting those
+# would cascade-tear-down app/infra), so here the label is provenance; the
+# prune actively reaps only the recreatable machinery kinds. includeSelectors:
+# false keeps it off any immutable selectors.
+labels:
+  - pairs:
+      app.kubernetes.io/managed-by: flywheel
+    includeSelectors: false
 resources:
   - ./namespaces.yaml
   - ./flywheel-source.yaml

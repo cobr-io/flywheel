@@ -357,6 +357,20 @@ never tracking it, not from a non-standard namespace.
    next `up`; existing pushed branches are unaffected (and retroactively benefit —
    no new bumps land on them).
 
+> **Follow-up (issue #27): prune the superseded in-cluster machinery.** This plan
+> migrated the *source* model (DEPLOY ref) and removed the `git-auto-sync-self`
+> *template*, but a removed template doesn't delete a Deployment already running
+> from a prior `up` — so the old `git-auto-sync-self` was left Running and kept
+> `git reset --hard`-ing the developer's worktree, re-polluting the very branch
+> this design isolates. Resolved by `up` step 11e (`converge.PruneOrphanedMachinery`):
+> every resource `up` applies imperatively is labelled `app.kubernetes.io/managed-by=flywheel`,
+> and after applying, `up` deletes labelled machinery it did **not** re-apply this
+> run. App/infra workloads (unlabelled, Flux-owned) and cascade/state kinds
+> (Namespace, PVC, Secret, Flux Kustomization/GitRepository) are never touched.
+> See `docs/dev/orphan-prune.md` for the contract. (Caveat: orphans from versions
+> predating the label aren't auto-reaped — they were never labelled — so the live
+> repro cluster's existing `git-auto-sync-self` needs a one-time manual delete.)
+
 ## Test plan
 
 - **Unit (reconciler):** the `DEPLOY = AUTHORED + bumps` invariant across: fresh

@@ -8,10 +8,12 @@ kind: Kustomization
 # fieldManager=flux-controller so ownership transfers silently.
 #
 # app.kubernetes.io/managed-by: flywheel marks every dev-loop resource as
-# flywheel-applied machinery, so `flywheel update --prune` can scope its
-# orphan scan to exactly these resources (never touching Flux-reconciled app
-# workloads). includeSelectors: false keeps it off the immutable Deployment
-# selectors and pod-template labels.
+# flywheel-applied machinery, so `flywheel up`'s orphan prune (step 11e,
+# converge.PruneOrphanedMachinery) can scope its scan to exactly these
+# resources — reaping superseded machinery (e.g. the old git-auto-sync-self
+# Deployment) while never touching Flux-reconciled app/infra workloads, which
+# carry no such label. includeSelectors: false keeps it off the immutable
+# Deployment selectors and pod-template labels.
 labels:
   - pairs:
       app.kubernetes.io/managed-by: flywheel
