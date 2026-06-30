@@ -1,4 +1,5 @@
-// Source-of-truth generator for the README dev-loop diagram.
+// Source-of-truth generator for the README dev-loop diagram, and the reference
+// implementation for the shared diagram style — see ./STYLEGUIDE.md.
 // Regenerate after editing card text / palette:
 //   node docs/assets/devloop-diagram.gen.js docs/assets
 // Emits devloop-light.svg + devloop-dark.svg (embedded in README via <picture>).
