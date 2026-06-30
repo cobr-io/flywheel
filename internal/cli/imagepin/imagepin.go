@@ -1,7 +1,7 @@
-// Package imagepin resolves the three Flywheel container image
-// references (git-server, git-auto-sync, image-builder-controller)
-// from a client's config and makes sure each is reachable by every node
-// in the k3d cluster at `flywheel up` time.
+// Package imagepin resolves the four Flywheel container image references
+// (git-server, git-auto-sync, image-builder-controller, git-deploy-controller —
+// canonically schema.ImageNames) from a client's config and makes sure each is
+// reachable by every node in the k3d cluster at `flywheel up` time.
 //
 // Resolution: `cfg.Flywheel.Images.<name>` if set, else the public
 // default `ghcr.io/cobr-io/<name>:<flywheel.version>`. The natural
@@ -55,8 +55,8 @@ func DefaultRef(name, version string) string {
 	return fmt.Sprintf("ghcr.io/cobr-io/%s:%s", name, version)
 }
 
-// Resolve returns the map of image name → resolved ref for the three known
-// images, honouring `cfg.Flywheel.Images` overrides. A bare `:dogfood`
+// Resolve returns the map of image name → resolved ref for the known images
+// (schema.ImageNames), honouring `cfg.Flywheel.Images` overrides. A bare `:dogfood`
 // override is returned verbatim here; `flywheel up` content-addresses it at
 // deploy time by the local image's digest (`:dogfood-<imageID>`), so a
 // rebuilt image rolls the Deployment without a manual pod recreate.
@@ -106,7 +106,7 @@ func isLocalOnlyOverride(name, version, ref string) bool {
 // MissingDogfood is one dogfood override that's pinned but absent from the host
 // docker store and un-pullable (it names no registry).
 type MissingDogfood struct {
-	Name string // image name: git-server, git-auto-sync, image-builder-controller
+	Name string // image name, one of schema.ImageNames
 	Ref  string // the pinned override ref, e.g. flywheel-dev/git-server:dogfood
 }
 
