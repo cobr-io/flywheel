@@ -43,12 +43,14 @@ machine.
 This repo ships [pre-commit](https://pre-commit.com) hooks that run on every
 commit:
 
-* **yamllint** (`.yamllint`) — YAML style.
-* **gitleaks** (`.gitleaks.toml`) — blocks committed secrets.
 * **SOPS-shape guard** (`scripts/ci/check-sops-shape.sh`) — refuses any
   `*.enc.yaml` that isn't actually SOPS-encrypted, and any plaintext
   `kind: Secret` outside `*.enc.*`. This is the guard that keeps real
   secrets out of git.
+* **local-only app guard** (`scripts/ci/check-local-only.sh`) — blocks
+  committing on the integration branch when an app builds from a worktree
+  flagged `local_only` in `flywheel.yaml` (its source exists only on this
+  machine).
 
 `flywheel init` activates them automatically when `pre-commit` is installed.
 If you cloned this repo fresh, activate them once:
@@ -60,6 +62,11 @@ pre-commit install
 The hooks need `pre-commit` and mikefarah [`yq`](https://github.com/mikefarah/yq)
 on your PATH — `flywheel doctor` checks for both.
 
+Flywheel deliberately doesn't ship general-purpose linting or secret scanning
+(yamllint, gitleaks, …) — bring your own if you want it. If you add a secret
+scanner, see [docs/onboarding.md](docs/onboarding.md): `clusters/local/age.key`
+is committed on purpose and must be allowlisted or it reads as a leaked key.
+
 ## Continuous integration
 
 Local hooks are bypassable (`git commit --no-verify`, or never running
@@ -67,8 +74,8 @@ Local hooks are bypassable (`git commit --no-verify`, or never running
 [`.github/workflows/ci.yaml`](.github/workflows/ci.yaml) on every PR (and on
 pushes to the integration branch):
 
-* **lint** — `pre-commit run --all-files` (yamllint, gitleaks, the SOPS-shape
-  guard, and the local-only app guard).
+* **lint** — `pre-commit run --all-files` (the SOPS-shape guard and the
+  local-only app guard).
 * **kustomize-build** — `kustomize build` on every `*/overlays/<env>`
   entrypoint; catches broken refs, missing files, and bad patches.
 * **kubeconform** — strict schema validation of the rendered manifests.

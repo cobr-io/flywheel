@@ -92,7 +92,7 @@ func nssCertutilCheck() Check {
 // developer can see why hooks aren't firing, but never gate `up`.
 func commitHookChecks() []Check {
 	return []Check{
-		binaryCheck("pre-commit", "activates this repo's commit hooks (yamllint, gitleaks, SOPS-shape)"),
+		binaryCheck("pre-commit", "activates this repo's commit hooks (SOPS-shape, local-only guard)"),
 		yqCheck(),
 	}
 }

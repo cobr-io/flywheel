@@ -1,23 +1,12 @@
 ---
-# Local commit hooks for this Flywheel-managed GitOps repo: yamllint +
-# gitleaks + a SOPS-shape guard. Scaffolded by `flywheel init`.
+# Local commit hooks for this Flywheel-managed GitOps repo: a SOPS-shape
+# guard + a local-only app guard. Scaffolded by `flywheel init`.
 #
 # Activate once per clone:   pre-commit install
-# Requires `pre-commit` and (for the SOPS guard) mikefarah `yq` on PATH —
-# `flywheel doctor` checks for both.
+# Requires `pre-commit` and mikefarah `yq` (both guards' only dependency)
+# on PATH — `flywheel doctor` checks for both.
 
 repos:
-  - repo: https://github.com/adrienverge/yamllint
-    rev: v1.38.0
-    hooks:
-      - id: yamllint
-        args: ["-c", ".yamllint"]
-
-  - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.30.1
-    hooks:
-      - id: gitleaks
-
   - repo: local
     hooks:
       - id: sops-shape

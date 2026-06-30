@@ -1,7 +1,6 @@
-# gitleaks configuration for the Flywheel repository itself.
-#
-# (Separate from the config Flywheel *scaffolds into client repos*, which lives
-# at templates/client-skeleton/.gitleaks.toml.tmpl.)
+# gitleaks configuration for the Flywheel repository itself. Flywheel does not
+# scaffold gitleaks into client repos — secret scanning there is bring-your-own
+# — so this config scans only this Go repo.
 #
 # Run locally with:  gitleaks detect --no-banner
 

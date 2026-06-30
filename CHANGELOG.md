@@ -9,6 +9,23 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+### Removed (2026-06-30, drop generic lint & secret-scanning from the client skeleton)
+
+- **`flywheel init` no longer scaffolds yamllint or gitleaks into client
+  repos.** The skeleton's mandate is the local dev loop plus the GitOps control
+  plane it mirrors; general-purpose linting and secret scanning are repo hygiene
+  any project wants regardless of Flywheel, so they're now bring-your-own.
+  Removed: `.yamllint(.tmpl)` + its pre-commit hook; `.gitleaks.toml(.tmpl)` +
+  its pre-commit hook, the CI full-history gitleaks scan step, `GITLEAKS_VERSION`,
+  and the now-pointless `fetch-depth: 0`. The Flywheel-load-bearing guards
+  (SOPS-shape, local-only) and the GitOps-control-plane CI (kustomize-build,
+  kubeconform) are unchanged.
+  - **Gotcha:** Flywheel commits `clusters/local/age.key` (an `AGE-SECRET-KEY`)
+    on purpose, and the dropped `.gitleaks.toml` was the allowlist that kept a
+    scanner quiet about it. A client's own scanner / GitHub push-protection will
+    now flag it, so `docs/guides/onboarding.md` gains a note to allowlist that
+    path.
+
 ### Added (2026-06-30, flywheel-free bring-up guide)
 
 - **New guide `docs/flywheel-free-bringup.md`** documenting how to bring the same

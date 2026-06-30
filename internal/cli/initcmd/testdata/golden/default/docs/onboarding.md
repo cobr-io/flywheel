@@ -44,14 +44,20 @@ Every **other** environment's key (prod, staging, …) stays out of git —
 in your homedir, never the repo. Promoting to a real cluster is a separate,
 manual flow.
 
+> **Adding a secret scanner?** Flywheel doesn't ship one (no gitleaks, no
+> push-protection config). If you add one — your own gitleaks, or your org runs
+> GitHub secret scanning — allowlist `clusters/local/age.key`. It's an
+> `AGE-SECRET-KEY` committed on purpose (it only ever decrypts `clusters/local/*`
+> dev secrets), so a generic scanner will otherwise flag it as a leaked key.
+
 > **Legacy repos.** If the repo was created before the local key was committed,
 > it won't have `clusters/local/age.key`. In that case `up` falls back to the
 > host key at `~/.config/flywheel/<client>/age.key` (where `<client>` is
 > `client.name` from `flywheel.yaml`) and fails if it's missing — get that key
 > from whoever set the repo up, place it there `chmod 600`, and run `up`. To opt
 > a legacy repo into the no-handoff model, whoever holds the key can copy it to
-> `clusters/local/age.key` and commit it (`.gitignore`/`.gitleaks.toml` already
-> allowlist that one path).
+> `clusters/local/age.key` and commit it (`.gitignore` already commits that one
+> path).
 
 ## Caveat: port collisions
 
