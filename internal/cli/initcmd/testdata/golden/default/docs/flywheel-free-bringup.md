@@ -4,29 +4,123 @@
 how to bring the **same local cluster** up with stock [Flux](https://fluxcd.io)
 and `kubectl`, using **no `flywheel` binary at all**. You give up the fast loop
 (no in-cluster build server, image automation, or branch-following) — in return,
-the repo proves it isn't captive: everything Flux needs is committed YAML you
-own.
+you prove the repo isn't captive: `apps/` and `infra/` are plain Kustomize, and
+everything Flux needs is a handful of stock YAML files you write and own.
 
-This is what makes flywheel a convenience layer rather than a lock-in. If
-flywheel ever went away, this path still brings your apps up.
+This is what makes flywheel a convenience layer rather than a lock-in. The tool
+doesn't ship a committed escape hatch — it doesn't need to. The gitops repo is
+ordinary Kustomize, so a plain Flux entrypoint is something you can author by
+hand in a few minutes, as shown below.
 
-## What's committed
+## What flywheel does (and why there's nothing to "turn off")
 
-`flywheel init` writes a vanilla Flux entrypoint at
-[`clusters/local/flux-system/`](../clusters/local/flux-system/):
+`flywheel up` renders its own Flux entrypoint to a tmpdir at runtime and applies
+it imperatively — it points the cluster at an in-cluster git mirror and wires up
+the dev-loop build server, image automation, and branch-following. None of that
+machinery is committed to your repo, and `flywheel up` never reconciles
+`clusters/`. So going flywheel-free isn't a matter of removing anything: you just
+author a normal Flux entrypoint that points at your **GitHub remote** instead,
+and apply it yourself.
 
-| File | What it is |
-| --- | --- |
-| `source.yaml` | `GitRepository/flux-system` → your GitHub remote, `main` branch |
-| `infra.yaml` | `Kustomization/client-infra` → `infra/overlays/local` |
-| `apps.yaml` | `Kustomization/client-apps` → `apps/overlays/local` (after infra) |
-| `namespaces.yaml` | the `apps` namespace |
-| `kustomization.yaml` | aggregator so the whole thing applies in one `kubectl apply -k` |
+## Author the entrypoint
 
-These are stock Flux objects — no flywheel-specific resources, no in-cluster git
-mirror, no `flywheel/local-deploy` branch. The source is **GitHub on `main`**, so
-the cluster reconciles whatever you've pushed (there's no fast loop reflecting
+Create `clusters/local/flux-system/` with the five files below. These are stock
+Flux objects — no flywheel-specific resources, no in-cluster mirror, no
+`flywheel/local-deploy` branch. The source is **GitHub on `main`**, so the
+cluster reconciles whatever you've pushed (there's no fast loop reflecting
 uncommitted local edits — that's the trade).
+
+`source.yaml` — where the cluster reconciles from. Replace `<org>/<repo>` with
+your real remote:
+
+```yaml
+apiVersion: source.toolkit.fluxcd.io/v1
+kind: GitRepository
+metadata:
+  name: flux-system
+  namespace: flux-system
+spec:
+  interval: 1m            # slow on purpose — no fast loop, don't hammer the remote
+  url: https://github.com/<org>/<repo>.git
+  ref:
+    branch: main          # matches git.integration_branch in flywheel.yaml
+  # Private repo? Create a `flux-system` secret (see step 3) and uncomment:
+  # secretRef:
+  #   name: flux-system
+```
+
+`namespaces.yaml` — the application namespace (matches `namespaces.apps` in
+`flywheel.yaml`):
+
+```yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: apps
+  labels:
+    kubernetes.io/metadata.name: apps
+```
+
+`infra.yaml` — the client infra tier (`infra/overlays/local`):
+
+```yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: client-infra
+  namespace: flux-system
+spec:
+  interval: 1m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./infra/overlays/local
+  decryption:               # decrypts *.enc.yaml with the sops-age key (step 2)
+    provider: sops
+    secretRef:
+      name: sops-age
+```
+
+`apps.yaml` — the client apps tier (`apps/overlays/local`), reconciled after
+infra:
+
+```yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1
+kind: Kustomization
+metadata:
+  name: client-apps
+  namespace: flux-system
+spec:
+  interval: 1m
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+  path: ./apps/overlays/local
+  dependsOn:
+    - name: client-infra
+  decryption:
+    provider: sops
+    secretRef:
+      name: sops-age
+```
+
+`kustomization.yaml` — an aggregator so the whole thing applies in one shot:
+
+```yaml
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ./namespaces.yaml
+  - ./source.yaml
+  - ./infra.yaml
+  - ./apps.yaml
+```
+
+> There's no `flywheel-infra` or `flywheel-system` layer here — those ship
+> flywheel's own dev-loop TLS/traefik wiring from the in-cluster mirror. A
+> vanilla cluster uses whatever ingress its distribution provides.
 
 ## Prerequisites
 
@@ -54,7 +148,7 @@ flux create secret git flux-system \
   --url=https://github.com/<org>/<repo>.git \
   --username=<user> --password=<personal-access-token>
 
-# 4. Apply the entrypoint. Flux takes over and reconciles apps/ + infra/.
+# 4. Apply the entrypoint you authored. Flux takes over and reconciles apps/ + infra/.
 kubectl apply -k clusters/local/flux-system
 ```
 
@@ -64,11 +158,6 @@ Watch it converge:
 flux get kustomizations --watch
 # client-infra and client-apps should reach Ready=True.
 ```
-
-> **Check the remote URL first.** `flywheel init` runs `git init` on a fresh repo
-> with no `origin`, so `source.yaml`'s `url:` is a best-effort guess
-> (`github.com/<org>/<name>`). If your real remote differs, edit that one line —
-> it's your YAML.
 
 ## Images
 
@@ -108,5 +197,6 @@ just applying the other one:
   GitHub).
 
 `flywheel up` never touches `clusters/` — it renders its own entrypoint at
-runtime — so this directory just sits in the repo, harmless, until you ask for
-it.
+runtime — so the directory you authored just sits in the repo, harmless, until
+you ask for it. You can keep it committed as a permanent escape hatch, or delete
+it once you've proven the bring-up; either way the knowledge is yours now.
