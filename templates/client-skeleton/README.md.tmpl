@@ -21,8 +21,9 @@ machine.
 > **Cloning this repo fresh?** Don't run `flywheel init` (that's for creating a
 > new repo) — just `flywheel up`. It reuses the committed config, and the local
 > cluster's age key is committed at `clusters/local/age.key`, so a fresh clone
-> decrypts and comes up with no key handoff. See
-> [docs/onboarding.md](docs/onboarding.md) for the full flow.
+> decrypts and comes up with no key handoff. See the
+> [onboarding guide]({{ .FlywheelRepoURL }}/blob/main/docs/guides/onboarding.md)
+> for the full flow.
 
 ## Layout
 
@@ -64,8 +65,9 @@ on your PATH — `flywheel doctor` checks for both.
 
 Flywheel deliberately doesn't ship general-purpose linting or secret scanning
 (yamllint, gitleaks, …) — bring your own if you want it. If you add a secret
-scanner, see [docs/onboarding.md](docs/onboarding.md): `clusters/local/age.key`
-is committed on purpose and must be allowlisted or it reads as a leaked key.
+scanner, see the [onboarding guide]({{ .FlywheelRepoURL }}/blob/main/docs/guides/onboarding.md):
+`clusters/local/age.key` is committed on purpose and must be allowlisted or it
+reads as a leaked key.
 
 ## Continuous integration
 
@@ -137,8 +139,9 @@ plus the Flux Kustomizations that reconcile `apps/`, `builders/`, and `infra/`.
 
 You're not locked in: `apps/` and `infra/` are plain Kustomize, so you can run
 this cluster with stock Flux and **no `flywheel` binary** by hand-authoring a
-vanilla entrypoint yourself.
-[docs/flywheel-free-bringup.md](docs/flywheel-free-bringup.md) walks through it.
+vanilla entrypoint yourself. The
+[flywheel-free bring-up guide]({{ .FlywheelRepoURL }}/blob/main/docs/guides/flywheel-free-bringup.md)
+walks through it.
 
 ## Bumping Flywheel
 

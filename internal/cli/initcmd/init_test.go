@@ -44,22 +44,6 @@ func skeletonDir(t *testing.T) string {
 	}
 }
 
-func guidesDir(t *testing.T) string {
-	t.Helper()
-	wd, _ := os.Getwd()
-	root := wd
-	for {
-		if _, err := os.Stat(filepath.Join(root, "docs", "guides")); err == nil {
-			return filepath.Join(root, "docs", "guides")
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			t.Fatal("could not locate docs/guides")
-		}
-		root = parent
-	}
-}
-
 func runInitForGolden(t *testing.T, name, version string) string {
 	t.Helper()
 	parent := t.TempDir()
@@ -73,7 +57,6 @@ func runInitForGolden(t *testing.T, name, version string) string {
 		ParentDir:        parent,
 		HomeOverride:     home,
 		SkeletonFS:       os.DirFS(skeletonDir(t)),
-		GuidesFS:         os.DirFS(guidesDir(t)),
 		FlywheelRepoURL:  "https://example.invalid/flywheel",
 		Age:              age.FixedKeypair(age.Keypair{PublicKey: fixedAgePub, PrivateKey: fixedAgePriv}),
 		FlywheelSHA:      fixedSHA,

@@ -16,11 +16,11 @@ import "embed"
 //   - manifests/dev-loop/        — bootstrap-applied + Flux-reconciled.
 //   - manifests/infra/           — local TLS infra (traefik wiring).
 //   - manifests/per-app-template/ — consumed by `flywheel add app`.
-//   - docs/guides/               — client-facing guides `flywheel init`
-//     copies into <repo>/docs/ (single source:
-//     the file lives here, not duplicated).
 //
-//go:embed all:templates all:manifests docs/guides
+// docs/ is intentionally NOT embedded: the guides under docs/guides/ are
+// Flywheel's own reference docs and are no longer copied into client repos.
+//
+//go:embed all:templates all:manifests
 var Assets embed.FS
 
 // BuildVersion labels which Flywheel release a client was scaffolded

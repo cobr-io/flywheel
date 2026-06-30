@@ -31,19 +31,6 @@ func embeddedSkeleton() fs.FS {
 	return sub
 }
 
-// embeddedGuides returns the embedded docs/guides sub-FS — the production
-// default for GuidesFS. These client-facing guides (e.g.
-// onboarding.md) live once in the Flywheel repo's docs/guides/ and
-// are copied verbatim into <repo>/docs/ at init time, so there is a single
-// editable source rather than a skeleton duplicate.
-func embeddedGuides() fs.FS {
-	sub, err := fs.Sub(flywheel.Assets, "docs/guides")
-	if err != nil {
-		panic(fmt.Sprintf("embedded guides missing: %v", err))
-	}
-	return sub
-}
-
 // Options is the full input surface to Run. The CLI front-door
 // (cmd/flywheel/main.go) constructs production deps; tests inject
 // FixedResolver / FixedKeypair / etc.
@@ -73,11 +60,7 @@ type Options struct {
 	// SkeletonFS is the client-skeleton tree to render. Defaults to the
 	// binary's embedded copy (flywheel.Assets sub-FS at
 	// templates/client-skeleton). Tests pass an os.DirFS at a fixture dir.
-	SkeletonFS fs.FS
-	// GuidesFS is the docs/guides tree copied into <repo>/docs/. Defaults
-	// to the binary's embedded copy (flywheel.Assets sub-FS at
-	// docs/guides). Tests pass an os.DirFS at the on-disk dir.
-	GuidesFS          fs.FS
+	SkeletonFS        fs.FS
 	FlywheelRepoURL   string // default https://github.com/cobr-io/flywheel
 	FluxIntervalLocal string // baked into rendered flywheel.yaml; default "10s"
 	Domain            string // baked into flywheel.yaml; default localdev.me
@@ -132,9 +115,6 @@ func Run(opts Options) (*Result, error) {
 	}
 	if opts.SkeletonFS == nil {
 		opts.SkeletonFS = embeddedSkeleton()
-	}
-	if opts.GuidesFS == nil {
-		opts.GuidesFS = embeddedGuides()
 	}
 
 	// Step 1 — resolve target dir + ensure it's safe to initialise into.
@@ -220,16 +200,7 @@ func Run(opts Options) (*Result, error) {
 		return nil, fmt.Errorf("render skeleton: %w", err)
 	}
 
-	// Step 6b — copy client-facing guides (docs/guides/*) into <repo>/docs/.
-	// Single source: the canonical files live in the Flywheel repo's
-	// docs/guides/ and are reused here, not duplicated in the skeleton.
-	// Guides are plain .md (copied verbatim by render.Tree); values is passed
-	// only so a future .tmpl guide would render.
-	if err := render.Tree(opts.GuidesFS, ".", filepath.Join(repoDir, "docs"), values); err != nil {
-		return nil, fmt.Errorf("copy guides: %w", err)
-	}
-
-	// Step 6c — write the committed local age private key. Unlike every other
+	// Step 6b — write the committed local age private key. Unlike every other
 	// environment, the local cluster's key ships IN the repo: it only ever
 	// decrypts clusters/local/* dev secrets on a localhost k3d cluster, so
 	// committing it removes the onboarding key-transport problem (a teammate
