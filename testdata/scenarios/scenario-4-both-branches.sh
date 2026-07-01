@@ -24,11 +24,12 @@ edit_app_and_commit feat/both "hello from both-branches feat"
 edit_gitops_replicas_and_commit experiment/both 2
 flywheel_use experiment/both
 
-# Both should reconcile independently. The per-app GitRepository lives in
-# flywheel-system (apps holds only the workload); the gitops/self source is
-# the flux-system GitRepository.
+# Both should reconcile independently. The per-app GitRepository (spec.ref.branch)
+# lives in flywheel-system and follows the app branch; the gitops selection is
+# recorded in the self GitRepository's deploy-branch annotation (deploy-ref
+# isolation — its spec.ref.branch stays flywheel/local-deploy).
 wait_for_gitrepo_branch flywheel-system "$APP" feat/both 60
-wait_for_gitrepo_branch flux-system flux-system experiment/both 60
+wait_for_deploy_branch experiment/both 60
 wait_for_served_text "hello from both-branches feat" 180
 wait_for_replicas 2 120
 
@@ -36,13 +37,13 @@ wait_for_replicas 2 120
 # checkout on the app side must not affect the gitops deploy).
 switch_app_branch main
 wait_for_gitrepo_branch flywheel-system "$APP" main 60
-wait_for_gitrepo_branch flux-system flux-system experiment/both 30  # unchanged
+wait_for_deploy_branch experiment/both 30  # unchanged
 wait_for_served_text "hello from sample-app v2" 180
 wait_for_replicas 2 60  # gitops still selected on its feature branch → still 2
 
 # Select gitops back to main too.
 flywheel_use main
-wait_for_gitrepo_branch flux-system flux-system main 60
+wait_for_deploy_branch main 60
 wait_for_replicas 1 120
 
 log "scenario 4 PASS"
