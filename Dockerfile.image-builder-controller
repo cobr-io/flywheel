@@ -1,13 +1,18 @@
-FROM golang:1.26-bookworm AS build
-WORKDIR /src
-COPY go.mod go.sum* ./
-RUN go mod download || true
-COPY . ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
-        -o /out/controller ./cmd/image-builder-controller
-
+# Runtime image for the image-builder-controller.
+#
+# No golang build stage: the arm64 variant used to compile the full Go module
+# under QEMU emulation and dominated release wall-clock (issue #46). The binary
+# is now cross-compiled natively on the host (CGO_ENABLED=0, GOOS=linux,
+# per-arch) and passed into the build context, then COPY'd here.
+#   - release:  goreleaser `image-builder-controller` build + docker `ids:` in
+#               .goreleaser.yaml drop the arch-matched binary into the context.
+#   - local/CI: `go build -o <ctx>/image-builder-controller \
+#               ./cmd/image-builder-controller` then `docker build \
+#               -f Dockerfile.image-builder-controller <ctx>`
+#               (see the Makefile `images` target, scripts/e2e.sh, and the CI
+#               workflows).
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /
-COPY --from=build /out/controller /controller
+COPY image-builder-controller /controller
 USER 65532:65532
 ENTRYPOINT ["/controller"]

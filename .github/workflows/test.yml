@@ -109,10 +109,17 @@ jobs:
         # `k3d image import`s them directly into the cluster's containerd
         # — no registry round-trip, no ghcr.io pull.
         run: |
+          # Controller images COPY a host-built binary rather than compiling Go
+          # in-image (issue #46). The runner is linux/amd64, so a native
+          # `go build` (GOOS=linux, host amd64) feeds the arch-matched context.
+          ctx="$(mktemp -d)"
+          for c in image-builder-controller git-deploy-controller; do
+            CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o "$ctx/$c" "./cmd/$c"
+          done
           docker build -t flywheel-dev/git-server:ci -f Dockerfile.git-server .
           docker build -t flywheel-dev/git-auto-sync:ci -f Dockerfile.git-auto-sync .
-          docker build -t flywheel-dev/image-builder-controller:ci -f Dockerfile.image-builder-controller .
-          docker build -t flywheel-dev/git-deploy-controller:ci -f Dockerfile.git-deploy-controller .
+          docker build -t flywheel-dev/image-builder-controller:ci -f Dockerfile.image-builder-controller "$ctx"
+          docker build -t flywheel-dev/git-deploy-controller:ci -f Dockerfile.git-deploy-controller "$ctx"
       - name: Wait for docker daemon to settle
         # The three builds above leave dockerd briefly busy; `flywheel up`'s
         # step-2 prereq check then pings `docker info` and was occasionally

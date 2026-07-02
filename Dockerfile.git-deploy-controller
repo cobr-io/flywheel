@@ -1,11 +1,17 @@
-FROM golang:1.26-bookworm AS build
-WORKDIR /src
-COPY go.mod go.sum* ./
-RUN go mod download || true
-COPY . ./
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" \
-        -o /out/controller ./cmd/git-deploy-controller
-
+# Runtime image for the git-deploy-controller.
+#
+# No golang build stage: the arm64 variant used to compile the full Go module
+# under QEMU emulation and dominated release wall-clock (issue #46). The binary
+# is now cross-compiled natively on the host (CGO_ENABLED=0, GOOS=linux,
+# per-arch) and passed into the build context, then COPY'd here.
+#   - release:  goreleaser `git-deploy-controller` build + docker `ids:` in
+#               .goreleaser.yaml drop the arch-matched binary into the context.
+#   - local/CI: `go build -o <ctx>/git-deploy-controller \
+#               ./cmd/git-deploy-controller` then `docker build \
+#               -f Dockerfile.git-deploy-controller <ctx>`
+#               (see the Makefile `images` target, scripts/e2e.sh, and the CI
+#               workflows).
+#
 # Unlike the other controllers this one shells out to `git` (deploybranch +
 # worktree push), so it can't use distroless/static — base on debian with git.
 # No kubectl: it talks to the API via the in-cluster Go client. Runs as root so
@@ -15,5 +21,5 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends git ca-certificates && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     git config --system --add safe.directory '*'
-COPY --from=build /out/controller /usr/local/bin/git-deploy-controller
+COPY git-deploy-controller /usr/local/bin/git-deploy-controller
 ENTRYPOINT ["/usr/local/bin/git-deploy-controller"]

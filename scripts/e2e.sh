@@ -19,9 +19,22 @@ CLIENT_REPO="$E2E_ROOT/$CLIENT_NAME"
 command -v flywheel >/dev/null || { echo "flywheel not on PATH — run 'make build' first." >&2; exit 1; }
 
 echo "==> [1/4] building runtime images (flywheel-dev/*:$TAG)"
-for img in git-server git-auto-sync image-builder-controller git-deploy-controller; do
-	docker build -q -t "flywheel-dev/$img:$TAG" -f "$REPO_ROOT/Dockerfile.$img" "$REPO_ROOT" >/dev/null
+# The two controller images COPY a host-built binary rather than compiling Go
+# in-image (issue #46). Cross-compile them for GOOS=linux/$(host arch) — the
+# arch docker builds by default here — into a throwaway context dir; the
+# script-only images still build from the repo root.
+CTRL_CTX="$(mktemp -d)"
+for c in image-builder-controller git-deploy-controller; do
+	(cd "$REPO_ROOT" && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o "$CTRL_CTX/$c" "./cmd/$c")
 done
+for img in git-server git-auto-sync image-builder-controller git-deploy-controller; do
+	case "$img" in
+		image-builder-controller|git-deploy-controller) bctx="$CTRL_CTX" ;;
+		*) bctx="$REPO_ROOT" ;;
+	esac
+	docker build -q -t "flywheel-dev/$img:$TAG" -f "$REPO_ROOT/Dockerfile.$img" "$bctx" >/dev/null
+done
+rm -rf "$CTRL_CTX"
 
 echo "==> [2/4] fresh client repo at $CLIENT_REPO (cluster ${CLIENT_NAME}-local)"
 k3d cluster delete "${CLIENT_NAME}-local" >/dev/null 2>&1 || true # clean any leftover
