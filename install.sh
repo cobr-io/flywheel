@@ -16,6 +16,11 @@
 #   USE_SUDO=false   never use sudo                  (default: auto — sudo only
 #                                                     if INSTALL_DIR isn't writable)
 #   FORCE=true       reinstall even when the target version is already present
+#   SKIP_COMPLETIONS=true  don't install shell tab-completions (default: false)
+#
+# Alongside the binary it installs shell tab-completions for your login shell
+# ($SHELL), best-effort — it warns and continues if the completion dir isn't
+# writable, and SKIP_COMPLETIONS=true opts out.
 #
 set -euo pipefail
 
@@ -25,6 +30,7 @@ INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 USE_SUDO="${USE_SUDO:-auto}"
 FORCE="${FORCE:-false}"
 TAG="${TAG:-}"
+SKIP_COMPLETIONS="${SKIP_COMPLETIONS:-false}"
 
 # ---- logging (color only on a TTY) ----------------------------------------
 if [ -t 2 ]; then
@@ -178,9 +184,53 @@ case ":${PATH}:" in
   *) warn "${INSTALL_DIR} is not on your PATH — add it:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
 
+# ---- shell completions (best-effort, non-fatal) ---------------------------
+# The `make install` path runs scripts/install-completions.sh; install.sh is
+# fetched standalone via curl, so it can't source that script — it inlines the
+# same logic here, driving the just-installed binary. Writes a completion
+# script for the detected login shell ($SHELL) to that shell's canonical
+# autoload dir; overwriting with `>` keeps re-runs idempotent. Never fails the
+# install: an unwritable dir warns and continues. Opt out: SKIP_COMPLETIONS=true.
+COMPLETION_HINT=""
+setup_completions() {
+  [ "$SKIP_COMPLETIONS" = "true" ] && return 0
+
+  local shell dir dest
+  shell="$(basename "${SHELL:-}")"
+  case "$shell" in
+    zsh)  dir="${HOME}/.zsh/completions";                         dest="${dir}/_flywheel" ;;
+    bash) dir="${HOME}/.local/share/bash-completion/completions"; dest="${dir}/${BINARY}" ;;
+    fish) dir="${HOME}/.config/fish/completions";                 dest="${dir}/${BINARY}.fish" ;;
+    *)
+      warn "unrecognised shell '${shell:-<unset>}'; skipping completions — set them up with:  ${BINARY} completion <shell>"
+      return 0 ;;
+  esac
+
+  if ! mkdir -p "$dir" 2>/dev/null; then
+    warn "could not create ${dir}; skipping ${shell} completions (SKIP_COMPLETIONS=true to silence)"
+    return 0
+  fi
+  if ! "$DEST" completion "$shell" >"$dest" 2>/dev/null; then
+    rm -f "$dest" 2>/dev/null || true
+    warn "could not write ${dest}; skipping ${shell} completions (SKIP_COMPLETIONS=true to silence)"
+    return 0
+  fi
+  info "${DIM}installed ${shell} completion → ${dest}${RESET}"
+  case "$shell" in
+    zsh)  COMPLETION_HINT="restart your shell — if completion is missing, add to ~/.zshrc once: fpath=(${dir} \$fpath); autoload -Uz compinit && compinit" ;;
+    bash) COMPLETION_HINT="restart your shell (needs bash-completion enabled)" ;;
+    fish) COMPLETION_HINT="restart your shell (fish autoloads it)" ;;
+  esac
+  return 0
+}
+setup_completions
+
 printf '\n' >&2
 printf '%sNext steps%s\n' "$BOLD" "$RESET" >&2
 printf '  %sflywheel doctor%s   check host prerequisites (git, k3d, docker, mkcert)\n' "$BOLD" "$RESET" >&2
 printf '  %sflywheel init%s     scaffold a GitOps repo in the current directory\n' "$BOLD" "$RESET" >&2
 printf '  %sflywheel up%s       bring up the local cluster\n' "$BOLD" "$RESET" >&2
+if [ -n "$COMPLETION_HINT" ]; then
+  printf '\nShell completions installed — %s\n' "$COMPLETION_HINT" >&2
+fi
 printf '\nDocs: https://github.com/%s#readme\n' "$REPO" >&2

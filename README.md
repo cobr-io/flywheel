@@ -107,6 +107,11 @@ already installed. It deliberately does **not** auto-update: Flywheel pins its
 version in `flywheel.yaml` (the source of truth), so the binary should track
 that pin rather than float ahead of it.
 
+It also installs shell tab-completions for your login shell (`$SHELL`) into that
+shell's canonical autoload dir — best-effort, so it warns and continues if the
+dir isn't writable. Restart your shell to pick them up, or set
+`SKIP_COMPLETIONS=true` to skip.
+
 Tune it with environment variables — note these go on the **`bash`** side of the
 pipe, not the `curl` side:
 
@@ -116,6 +121,7 @@ pipe, not the `curl` side:
 | `INSTALL_DIR` | `/usr/local/bin` | Where to put the binary (uses `sudo` only if the dir isn't writable). |
 | `USE_SUDO` | auto | Set `false` to never elevate (pair with a writable `INSTALL_DIR`). |
 | `FORCE` | `false` | Reinstall even when the target version is already present. |
+| `SKIP_COMPLETIONS` | `false` | Set `true` to skip installing shell tab-completions. |
 
 ```sh
 # pin a specific version
