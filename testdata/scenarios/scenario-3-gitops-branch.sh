@@ -19,37 +19,34 @@ log "scenario 3: client-gitops branch selection (opt-in)"
 
 # Raise replicas on a feature branch and commit. In opt-in mode the gitops sync
 # mirrors the branch to the bare repo but does NOT auto-deploy it — Flux still
-# tracks the default branch. Select it explicitly with `flywheel use`.
+# deploys the constant DEPLOY branch. Select the feature branch explicitly with
+# `flywheel use`; git-deploy-controller then feeds it into DEPLOY.
 edit_gitops_replicas_and_commit experiment/raise-replicas 3
 flywheel_use experiment/raise-replicas
-wait_for_gitrepo_branch flux-system flux-system experiment/raise-replicas 60
+wait_for_deploy_branch experiment/raise-replicas 60
+# Deploy-ref isolation: `use` records the selection in an annotation and does
+# NOT repoint the self GitRepository's spec.ref.branch (stays flywheel/local-deploy).
+assert_self_gitrepo_on_deploy_ref
 wait_for_replicas 3 120
 
 # Regression guard (issue #6 + #17): re-running `flywheel up` must NOT clobber
-# the selected branch back to the bootstrap branch. `up` re-applies the
-# self-source manifest with the default branch, but the deploy-branch annotation
-# is the source of truth and git-auto-sync-self re-asserts it — so `up` can't
-# silently move the cluster. The replica bump must survive.
+# the selection back to the default branch. `up` re-applies the self-source
+# manifest, but `flywheel use` writes the deploy-branch annotation under a
+# distinct SSA field manager, so it survives `up`'s apply and git-deploy-controller
+# keeps feeding the selected branch into DEPLOY. The replica bump must survive.
 log "scenario 3: re-running 'flywheel up' must preserve the selected branch"
 ( cd "$CLIENT_REPO" && flywheel up )
-wait_for_gitrepo_branch flux-system flux-system experiment/raise-replicas 60
+wait_for_deploy_branch experiment/raise-replicas 60
 wait_for_replicas 3 120
 
-# Defense-in-depth: even a direct external clobber of spec.ref.branch (no
-# `flywheel up`, no checkout) must self-heal from the deploy-branch annotation
-# within a couple of poll intervals.
-log "scenario 3: external clobber of the gitops source must self-heal"
-clobber_gitrepo_branch flux-system flux-system main
-wait_for_gitrepo_branch flux-system flux-system experiment/raise-replicas 30
-
 # Graceful degradation (issue #17): deleting the selected branch from the gitops
-# repo degrades the deployment back to the default branch (always exists),
-# rather than leaving Flux stuck on a vanished ref. Replicas return to the main
+# repo degrades the deployment back to the default branch — git-deploy-controller
+# falls back when the selected AUTHORED branch no longer exists in the worktree,
+# rather than leaving DEPLOY stuck on a vanished ref. Replicas return to the main
 # value (1). Check out main first — you can't delete the checked-out branch.
 log "scenario 3: deleting the selected branch degrades to the default"
 switch_gitops_branch main
 delete_gitops_branch experiment/raise-replicas
-wait_for_gitrepo_branch flux-system flux-system main 60
 wait_for_replicas 1 120
 
 log "scenario 3 PASS"

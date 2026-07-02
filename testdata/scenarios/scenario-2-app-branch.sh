@@ -14,12 +14,14 @@ log "scenario 2: app-repo branch switch"
 
 # Commit on a feature branch.
 edit_app_and_commit feat/foo "hello from feat/foo"
-wait_for_gitrepo_branch apps "$APP" feat/foo 60
+# The per-app GitRepository (git-auto-sync patches it) lives in
+# flywheel-system, not apps — apps holds only the workload.
+wait_for_gitrepo_branch flywheel-system "$APP" feat/foo 60
 wait_for_served_text "hello from feat/foo" 180
 
 # Switch back to main; should reconcile back to main's content.
 switch_app_branch main
-wait_for_gitrepo_branch apps "$APP" main 60
+wait_for_gitrepo_branch flywheel-system "$APP" main 60
 # main's last content (from scenario 1 steady-state) is "v2".
 wait_for_served_text "hello from sample-app v2" 180
 

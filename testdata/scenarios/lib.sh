@@ -113,8 +113,21 @@ dump_diag() {
   kc -n flywheel-system logs deploy/git-server --tail=25 2>&1 || true
   echo "----- DIAG: git-server /workspaces + /srv/git -----"
   kc -n flywheel-system exec deploy/git-server -- sh -c 'ls -la /workspaces; echo ---bare---; ls -la /srv/git' 2>&1 || true
-  echo "----- DIAG: git-auto-sync-self log (tail) -----"
-  kc -n flywheel-system logs deploy/git-auto-sync-self --tail=20 2>&1 || true
+  echo "----- DIAG: git-deploy-controller log (tail) -----"
+  kc -n flywheel-system logs deploy/git-deploy-controller --tail=25 2>&1 || true
+  # App-image chain (build → ImagePolicy → IUA → DEPLOY branch → live Deployment).
+  # This is the chain scenario-4's app-content revert depends on; capturing it
+  # makes a revert timeout self-diagnosing (which stage is stuck vs. just slow).
+  echo "----- DIAG: app-image chain -----"
+  kc -n flux-system get imagerepository,imagepolicy 2>&1 || true
+  echo "  ImagePolicy latest tag: $(kc -n flux-system get imagepolicy "$APP" -o jsonpath='{.status.latestRef.tag}' 2>/dev/null)"
+  echo "  registry tags (${CLIENT_NAME}/${APP}):"
+  curl -s "http://localhost:${REGISTRY_PORT}/v2/${CLIENT_NAME}/${APP}/tags/list" 2>&1 | head -c 600; echo
+  echo "  live Deployment image: $(kc -n apps get deploy "$APP" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)"
+  echo "  DEPLOY branch deployment.yaml (image/replicas):"
+  kc -n flywheel-system exec deploy/git-server -- sh -c \
+    "git -C /srv/git/${CLIENT_NAME}.git show flywheel/local-deploy:apps/base/${APP}/deployment.yaml 2>/dev/null | grep -iE 'image:|replicas:'" 2>&1 || true
+  echo "  IUA flux-system/flywheel-self:$(kc -n flux-system get imageupdateautomation flywheel-self -o jsonpath='{" suspend="}{.spec.suspend}{" lastRun="}{.status.lastAutomationRunTime}{" lastPush="}{.status.lastPushCommit}' 2>/dev/null)"
   echo "----- DIAG: flywheel-dev-loop status -----"
   kc -n flux-system get kustomization flywheel-dev-loop -o jsonpath='{.status.conditions[*].message}' 2>&1 || true
   echo
@@ -165,15 +178,55 @@ wait_for_gitrepo_branch() {
   return 1
 }
 
-# clobber_gitrepo_branch <namespace> <name> <branch> — directly repoint a Flux
-# GitRepository's spec.ref.branch, simulating an external actor (e.g. a
-# `flywheel up` bootstrap re-apply) that resets the source WITHOUT a worktree
-# branch switch. git-auto-sync's drift-correction should then heal it back.
-clobber_gitrepo_branch() {
-  local ns="$1" name="$2" branch="$3"
-  kc -n "$ns" patch gitrepository "$name" --type=merge \
-    -p "{\"spec\":{\"ref\":{\"branch\":\"$branch\"}}}" >/dev/null
-  log "clobbered GitRepository $ns/$name to branch $branch (simulating external re-apply)"
+# --- deploy-ref isolation (issue #17) --------------------------------------
+# The self/gitops GitRepository is NEVER repointed to the selected branch; it
+# permanently tracks a constant DEPLOY branch that git-deploy-controller rebuilds
+# = the selected AUTHORED branch + the IUA's image bumps. `flywheel use` records
+# the selection in the flywheel.cobr.io/deploy-branch annotation, not in
+# spec.ref.branch — so the gitops scenarios assert the annotation + the deployed
+# content, not the source branch (which no longer moves).
+DEPLOY_BRANCH="${DEPLOY_BRANCH:-flywheel/local-deploy}"
+SELF_GITREPO_NS="${SELF_GITREPO_NS:-flux-system}"
+SELF_GITREPO_NAME="${SELF_GITREPO_NAME:-flux-system}"
+# The deploy-branch annotation key, escaped for kubectl jsonpath (literal dots).
+_deploy_branch_jsonpath='{.metadata.annotations.flywheel\.cobr\.io/deploy-branch}'
+
+# wait_for_deploy_branch <branch> <timeout-s> — assert `flywheel use` recorded
+# <branch> as the selected AUTHORED branch (the flywheel.cobr.io/deploy-branch
+# annotation on the self GitRepository). This is the deploy-ref-isolation
+# replacement for polling spec.ref.branch, which no longer tracks the selection.
+wait_for_deploy_branch() {
+  local want="$1" timeout="${2:-60}"
+  local deadline=$((SECONDS + timeout))
+  local got
+  while (( SECONDS < deadline )); do
+    got=$(kc -n "$SELF_GITREPO_NS" get gitrepository "$SELF_GITREPO_NAME" \
+      -o "jsonpath=$_deploy_branch_jsonpath" 2>/dev/null || true)
+    if [[ "$got" == "$want" ]]; then
+      log "self GitRepository deploy-branch annotation = $want"
+      return 0
+    fi
+    sleep 2
+  done
+  log "TIMEOUT: deploy-branch annotation never became $want (last: ${got:-<none>})"
+  dump_diag
+  return 1
+}
+
+# assert_self_gitrepo_on_deploy_ref — deploy-ref isolation invariant: the self
+# GitRepository's spec.ref.branch is the constant DEPLOY branch and is NOT
+# repointed to the selected branch. Guards against a regression to the old model
+# where `flywheel use` moved spec.ref.branch.
+assert_self_gitrepo_on_deploy_ref() {
+  local got
+  got=$(kc -n "$SELF_GITREPO_NS" get gitrepository "$SELF_GITREPO_NAME" \
+    -o jsonpath='{.spec.ref.branch}' 2>/dev/null || true)
+  if [[ "$got" != "$DEPLOY_BRANCH" ]]; then
+    log "FAIL: self GitRepository spec.ref.branch=$got, want $DEPLOY_BRANCH (deploy-ref isolation)"
+    dump_diag
+    return 1
+  fi
+  log "self GitRepository tracks DEPLOY branch $DEPLOY_BRANCH (source not repointed)"
 }
 
 # edit_gitops_replicas_and_commit <branch> <count> — on the client gitops
