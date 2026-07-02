@@ -1,0 +1,73 @@
+# Auto-label PRs from their conventional-commit title so GitHub's generated
+# release notes (.github/release.yml) sort each PR into the right section.
+# Title-driven (not path-driven); re-runs when the title is edited.
+#
+# Trigger is pull_request_target so the job runs with the base repo's write
+# token and can label PRs opened from forks. This is SAFE because the job only
+# reads the PR title out of the event payload — it never checks out or executes
+# PR code, so the "pwn request" class of attack does not apply. Keep it that
+# way: do NOT add a checkout of the PR head to this workflow.
+name: pr-label
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened]
+
+permissions:
+  pull-requests: write
+
+# One run per PR; a rapid title edit supersedes the in-flight run.
+concurrency:
+  group: pr-label-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            // Conventional-commit type/scope -> release-note label. A `(deps)`
+            // scope always means a dependency bump (Dependabot uses build(deps)
+            // / ci(deps)), so it wins over the type. Types with no release
+            // category (test, chore, refactor, build, perf, style, ...) map to
+            // nothing and fall into the release.yml "*" catch-all
+            // ("Other Changes") — by design.
+            const BY_TYPE = {
+              feat: 'enhancement',
+              fix: 'bug',
+              docs: 'documentation',
+              ci: 'github_actions',
+            };
+            // Labels this workflow owns. It adds the matching one and clears the
+            // others on a retitle, but never touches labels outside this set
+            // (e.g. good first issue, help wanted, manually applied labels).
+            const MANAGED = ['enhancement', 'bug', 'documentation', 'github_actions', 'dependencies'];
+
+            const pr = context.payload.pull_request;
+            const title = pr.title || '';
+            const m = /^(\w+)(?:\(([^)]*)\))?!?:/.exec(title);
+            let desired = null;
+            if (m) {
+              const [, type, scope] = m;
+              const isDeps = scope && scope.split(',').map(s => s.trim())
+                .some(s => s === 'deps' || s === 'deps-dev');
+              desired = isDeps ? 'dependencies' : (BY_TYPE[type] || null);
+            }
+
+            const { owner, repo } = context.repo;
+            const issue_number = pr.number;
+            const current = pr.labels.map(l => l.name);
+
+            // Drop managed labels that no longer match (handles retitles).
+            for (const name of current) {
+              if (MANAGED.includes(name) && name !== desired) {
+                await github.rest.issues.removeLabel({ owner, repo, issue_number, name })
+                  .catch(e => { if (e.status !== 404) throw e; });
+              }
+            }
+            if (desired && !current.includes(desired)) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number, labels: [desired] });
+            }
+            core.info(`title=${JSON.stringify(title)} -> ${desired ?? '(no category; Other Changes)'}`);
