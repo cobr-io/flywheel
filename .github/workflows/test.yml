@@ -97,6 +97,13 @@ jobs:
           sudo chmod +x /usr/local/bin/mkcert
       - name: Build flywheel binary
         run: go build -o /usr/local/bin/flywheel ./cmd/flywheel
+      - name: flywheel doctor coverage
+        # Issue #38: exercise `flywheel doctor` end-to-end — including the
+        # missing-prereq error path no cluster scenario touches. It's
+        # cluster-free (host-prereq probes only) so it runs here, cheaply,
+        # BEFORE the expensive `up`: git/k3d/mkcert/docker are all installed
+        # by now. Seconds, not minutes.
+        run: bash testdata/scenarios/scenario-doctor.sh
       - name: Build runtime images locally
         # `flywheel up` step 9 sees these in the host docker store and
         # `k3d image import`s them directly into the cluster's containerd
