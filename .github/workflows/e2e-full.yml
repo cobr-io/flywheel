@@ -48,6 +48,11 @@ jobs:
           sudo chmod +x /usr/local/bin/mkcert
       - name: Build flywheel binary
         run: go build -o /usr/local/bin/flywheel ./cmd/flywheel
+      - name: flywheel doctor coverage
+        # Issue #38: mirror the per-PR job's `doctor` end-to-end check
+        # (happy path + full run + missing-prereq error path). Cluster-free,
+        # so it runs cheaply before `up`.
+        run: bash testdata/scenarios/scenario-doctor.sh
       - name: Build runtime images locally
         # `flywheel up` step 9 sees these in the host docker store and
         # `k3d image import`s them directly into the cluster's containerd
