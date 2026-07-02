@@ -1,0 +1,36 @@
+# GitHub release-notes configuration. Shapes the notes GitHub auto-generates for
+# a release — both when you click "Generate release notes" in the UI and via
+# goreleaser, which is configured with `changelog.use: github-native`
+# (.goreleaser.yaml) and so calls the same GitHub API at tag time.
+#
+# Categorization is by PR LABEL, not by commit/title prefix: each merged PR is
+# placed in the FIRST category whose labels it carries. Apply a label
+# (enhancement, bug, documentation, dependencies, github_actions) to route a PR
+# into a specific section.
+#
+# The trailing "*" catch-all is load-bearing: without it, PRs that match no
+# category — i.e. UNLABELED ones — are dropped from the notes entirely. With it,
+# they still appear under "Other Changes".
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: Features
+      labels:
+        - enhancement
+    - title: Fixes
+      labels:
+        - bug
+    - title: Documentation
+      labels:
+        - documentation
+    - title: Dependencies
+      labels:
+        - dependencies
+    - title: CI & Tooling
+      labels:
+        - github_actions
+    - title: Other Changes
+      labels:
+        - "*"
