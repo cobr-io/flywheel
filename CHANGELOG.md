@@ -9,6 +9,36 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+### Fixed (2026-07-02, mirror multi-arch released images under Docker's containerd image store)
+
+- **`flywheel up` no longer fails at the image-mirror step on hosts using
+  Docker's containerd image store when the source is a multi-arch released
+  image** (issue #50). The mirror round-tripped every image through the host
+  docker store (`docker pull → tag → push`); under the containerd store a pulled
+  multi-arch reference is kept as an **index**, and `docker push` of that index
+  to the local registry fails with `does not provide any platform`. Flywheel's
+  released images are multi-arch, so the released-image path of `up` was broken
+  on that configuration — the Colima default, and increasingly common on Docker
+  Desktop. (The classic graphdriver store masked it by pulling a single concrete
+  platform; single-arch dogfood images push fine, which is why the dogfood path
+  never hit it.)
+  - **Registry-hosted refs** (the default `ghcr.io/cobr-io/<name>:<version>` ref
+    and any registry-qualified override) are now copied **registry→registry**,
+    scoped to the host platform (`linux/<GOARCH>`), via the go-containerregistry
+    library in-process. This resolves a multi-arch index to the single image the
+    local k3d cluster runs and streams it straight into the local registry —
+    never touching the docker store, so the containerd index-push cannot occur.
+    It also moves the same bytes as today's single-arch pull while skipping the
+    local-store round-trip.
+  - **Local-only dogfood refs** (`flywheel-dev/<name>:dogfood`) keep the docker
+    `tag`+`push` path: they name no registry, exist only in the host docker
+    store, and are single-arch, so the index bug never applied.
+  - Adds one Go module dependency (`github.com/google/go-containerregistry`)
+    compiled into the static binary; **no new OS-level (PATH) dependency** — the
+    `crane` binary is not invoked, and `flywheel doctor`'s host-tool checks are
+    unchanged. Mirror failures now surface the underlying registry error instead
+    of a bare `exit status 1`.
+
 ### Removed (2026-06-30, drop generic lint & secret-scanning from the client skeleton)
 
 - **`flywheel init` no longer scaffolds yamllint or gitleaks into client
