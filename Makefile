@@ -27,7 +27,7 @@ GOBIN := $(shell go env GOPATH)/bin
 endif
 
 .DEFAULT_GOAL := build
-.PHONY: build install images push-local completions completions-all e2e help
+.PHONY: build install uninstall images push-local completions completions-all e2e help
 
 ## build: compile + install the version-stamped binary into GOBIN
 build:
@@ -36,6 +36,15 @@ build:
 
 ## install: build the binary + runtime images, then install shell completions
 install: build images completions
+
+## uninstall: remove the installed binary ($(GOBIN)/flywheel) + shell completions
+# The inverse of `make install`'s binary + completions steps. Delegates to
+# uninstall.sh so the completion paths live in one place; INSTALL_DIR=$(GOBIN)
+# targets the source-install location and USE_SUDO=false keeps it in your own
+# dirs (never touches ~/.config/flywheel or the embed cache — use uninstall.sh
+# --purge / --purge-config for those).
+uninstall:
+	@INSTALL_DIR="$(GOBIN)" USE_SUDO=false bash uninstall.sh
 
 ## images: build the four runtime images as flywheel-dev/<name>:$(IMAGE_TAG)
 images:

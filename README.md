@@ -151,6 +151,45 @@ it on your `$PATH`), builds the four runtime images locally for
 also `go install github.com/cobr-io/flywheel/cmd/flywheel@vX.Y.Z` (stamped
 `v0.0.0-dev`).
 
+### Uninstall
+
+The inverse of installing. By default it removes only the binary and the shell
+completions — **caches and config are left alone**, because
+`~/.config/flywheel` holds age private keys that are recovery-critical (see the
+caution below).
+
+```sh
+# undo the install-script install (mirrors install.sh's INSTALL_DIR / USE_SUDO)
+curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/uninstall.sh | bash
+
+# undo a `make install` (removes $(go env GOBIN)/flywheel + completions)
+make uninstall
+```
+
+It accepts the same `INSTALL_DIR` / `USE_SUDO` overrides as `install.sh` (put
+them on the **`bash`** side of the pipe), plus two opt-in cleanup flags:
+
+| Flag | Effect |
+|---|---|
+| `--purge` | Also remove the embed cache `~/.cache/flywheel` (regenerated on the next `init`/`up`). |
+| `--purge-config` | Also remove `~/.config/flywheel` **entirely**, including age keys and per-cluster state. **Destructive and irreversible** — see the caution. |
+
+```sh
+# binary + completions + embed cache, but keep age keys/config
+curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/uninstall.sh | bash -s -- --purge
+
+# a user-local install lives elsewhere — point INSTALL_DIR at it
+curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/uninstall.sh \
+  | INSTALL_DIR="$HOME/.local/bin" USE_SUDO=false bash
+```
+
+> **Caution — `--purge-config` deletes your age keys.**
+> `~/.config/flywheel/<name>/age.key` is the private key that decrypts your
+> SOPS-encrypted state. Deleting it can make that state **permanently
+> unrecoverable**. A plain uninstall never touches `~/.config/flywheel`; only
+> `--purge-config` does, and it warns loudly first. Back up your keys before
+> using it if you might still need any encrypted secrets.
+
 ## Commands
 
 Run `flywheel --help` or `flywheel <command> --help` for full flag details.
