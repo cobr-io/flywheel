@@ -41,6 +41,41 @@ builds:
       # leaves the gate permanently dormant — matching the Makefile's git-describe.
       - -s -w -X github.com/cobr-io/flywheel.BuildVersion={{.Tag}}
 
+  # Controller binaries, cross-compiled natively on the host (fast) instead of
+  # inside the image under QEMU (issue #46). These are NOT archived (see
+  # archives.ids below) — they exist only to be COPY'd into the controller
+  # runtime images. Flags mirror the old in-image `go build` exactly
+  # (CGO_ENABLED=0, GOOS=linux, -trimpath, -s -w) so runtime behavior is
+  # unchanged; each docker entry selects its binary via `ids:`.
+  - id: image-builder-controller
+    main: ./cmd/image-builder-controller
+    binary: image-builder-controller
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+  - id: git-deploy-controller
+    main: ./cmd/git-deploy-controller
+    binary: git-deploy-controller
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
+
 archives:
   - id: flywheel
     ids:
@@ -120,11 +155,10 @@ dockers:
       - "--label=org.opencontainers.image.source=https://github.com/cobr-io/flywheel"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-    extra_files:
-      - cmd
-      - internal
-      - go.mod
-      - go.sum
+    # COPY the host-built binary (see the image-builder-controller build) into
+    # the context instead of building Go in-image under QEMU (issue #46).
+    ids:
+      - image-builder-controller
   - id: image-builder-controller-arm64
     image_templates:
       - "ghcr.io/cobr-io/image-builder-controller:{{ .Tag }}-arm64"
@@ -136,11 +170,8 @@ dockers:
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     goarch: arm64
-    extra_files:
-      - cmd
-      - internal
-      - go.mod
-      - go.sum
+    ids:
+      - image-builder-controller
   - id: git-deploy-controller-amd64
     image_templates:
       - "ghcr.io/cobr-io/git-deploy-controller:{{ .Tag }}-amd64"
@@ -151,11 +182,10 @@ dockers:
       - "--label=org.opencontainers.image.source=https://github.com/cobr-io/flywheel"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-    extra_files:
-      - cmd
-      - internal
-      - go.mod
-      - go.sum
+    # COPY the host-built binary (see the git-deploy-controller build) into the
+    # context instead of building Go in-image under QEMU (issue #46).
+    ids:
+      - git-deploy-controller
   - id: git-deploy-controller-arm64
     image_templates:
       - "ghcr.io/cobr-io/git-deploy-controller:{{ .Tag }}-arm64"
@@ -167,11 +197,8 @@ dockers:
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     goarch: arm64
-    extra_files:
-      - cmd
-      - internal
-      - go.mod
-      - go.sum
+    ids:
+      - git-deploy-controller
 
 docker_manifests:
   - name_template: "ghcr.io/cobr-io/git-server:{{ .Tag }}"
