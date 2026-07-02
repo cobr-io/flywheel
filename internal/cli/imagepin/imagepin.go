@@ -14,18 +14,30 @@
 // pull-on-demand from every node, so it can't go missing on a node through
 // scheduling, GC eviction, or the add-app-after-up gap (issue #14).
 //
-//   - Default (released) ref `ghcr.io/cobr-io/<name>:<version>`: ensure
-//     the image is in the host docker store (`docker pull` if absent),
-//     then tag+push it into the local registry under the immutable
-//     `:<version>` tag (the version IS the content address for a release).
-//     If the pull fails and no override is set, return option (c) — a
-//     clear error naming the override stanza for `flywheel.yaml.local`.
+// The mirror splits on whether the source ref names a registry:
 //
-//   - Override (dogfood) ref: ensure the image is in the host docker store
-//     (`docker pull` if it's a remote ref), then tag+push it into the
-//     local registry under a content-addressed `:dogfood-<sha>` tag. The
-//     sha suffix forces a re-pull on change, so the bare `IfNotPresent`
-//     pull policy never serves a stale image off a mutable `:dogfood` tag.
+//   - Registry-hosted ref (the default `ghcr.io/cobr-io/<name>:<version>`, or
+//     any registry-qualified override): copied registry→registry with
+//     go-containerregistry, scoped to the host platform (`linux/<GOARCH>`).
+//     This streams a single-arch image straight into the local registry
+//     without a docker-store round-trip. Crucially it never `docker tag`s or
+//     `docker push`es a multi-arch manifest index, which fails under Docker's
+//     containerd image store (`does not provide any platform`, issue #50);
+//     the released images are multi-arch, so that path was broken there.
+//     Tagging: the immutable `:<version>` for the default ref (the version IS
+//     the content address for a release), or a content-addressed
+//     `:dogfood-<sha>` derived from the source image digest for an override.
+//     If reading the default ref fails and no override is set, return
+//     option (c) — a clear error naming the override stanza for
+//     `flywheel.yaml.local`.
+//
+//   - Local-only dogfood ref (`flywheel-dev/<name>:dogfood`, naming no
+//     registry): these exist only in the host docker store (a `make images`
+//     build) and can't be read from a registry, so they keep the docker
+//     `tag`+`push` path. They are single-arch, so the containerd-store index
+//     bug never applies. Tagged `:dogfood-<sha>` from the local image ID; the
+//     sha suffix forces a re-pull on change so a bare `IfNotPresent` node
+//     never serves a stale image off the mutable `:dogfood` tag.
 package imagepin
 
 import (
@@ -33,10 +45,15 @@ import (
 	"fmt"
 	"io"
 	"os/exec"
+	"runtime"
 	"strings"
 
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/google/go-containerregistry/pkg/authn"
+	"github.com/google/go-containerregistry/pkg/name"
+	v1 "github.com/google/go-containerregistry/pkg/v1"
+	"github.com/google/go-containerregistry/pkg/v1/remote"
 )
 
 // inClusterRegistryPort is the port the k3d registry *container* listens
@@ -171,12 +188,70 @@ func EnsureInCluster(ctx context.Context, ref, registryName string, registryPort
 	return mirrorToRegistry(ctx, ref, registryName, registryPort, imageName, version, stdout)
 }
 
-// mirrorToRegistry ensures `ref` is in the host docker store (pull if it's a
-// remote/default ref), then tags+pushes it into the cluster's local registry
-// and returns the in-cluster pull ref. The tag is the immutable `:<version>`
-// for a released ref, or content-addressed `:dogfood-<sha>` for an override.
+// mirrorToRegistry copies `ref` into the cluster's local registry and returns
+// the in-cluster pull ref. A registry-hosted ref is streamed registry→registry
+// scoped to the host platform (containerd-store-safe, issue #50); a local-only
+// dogfood ref is tag+pushed from the host docker store where it was built.
 func mirrorToRegistry(ctx context.Context, ref, registryName string, registryPort int, imageName, version string, stdout io.Writer) (string, error) {
-	if err := ensureLocal(ctx, ref, imageName, version, stdout); err != nil {
+	if hasRegistryHost(ref) {
+		return mirrorRemote(ctx, ref, registryName, registryPort, imageName, version, stdout)
+	}
+	return mirrorLocal(ctx, ref, registryName, registryPort, imageName, version, stdout)
+}
+
+// hostPlatform is the single platform the local k3d cluster runs: `linux` on
+// the flywheel binary's arch. On every supported host the binary arch matches
+// the docker-VM/node arch (arm64 on Apple Silicon, amd64 on Intel), so scoping
+// the copy to it moves only the bytes the cluster can actually run.
+func hostPlatform() v1.Platform {
+	return v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
+}
+
+// mirrorRemote copies a registry-hosted `ref` (the default ghcr ref or a
+// registry-qualified override) into the local registry with go-containerregistry,
+// selecting the host platform out of a multi-arch index and streaming it in
+// without touching the host docker store. This is the containerd-image-store-safe
+// path: it never `docker push`es a manifest index (issue #50).
+func mirrorRemote(ctx context.Context, ref, registryName string, registryPort int, imageName, version string, stdout io.Writer) (string, error) {
+	srcRef, err := name.ParseReference(ref)
+	if err != nil {
+		return "", fmt.Errorf("parse source ref %s: %w", ref, err)
+	}
+	platform := hostPlatform()
+	img, err := remoteImage(ctx, srcRef, platform)
+	if err != nil {
+		// A read failure on the unmodified default ref means no published
+		// release is reachable — surface the option-(c) override guidance.
+		// The underlying cause (auth, 404, no matching platform) rides along
+		// via %w, so the failure stays diagnosable (issue #50 secondary ask).
+		if IsDefault(imageName, version, ref) {
+			return "", optionCError(imageName, version, ref, err)
+		}
+		return "", fmt.Errorf("read %s: %w", ref, err)
+	}
+	tag, err := remoteTag(img, ref, imageName, version)
+	if err != nil {
+		return "", err
+	}
+	pushRef, pullRef := registryRefs(registryName, registryPort, imageName, tag)
+	// name.Insecure lets the copy speak plain HTTP to the k3d registry (it is
+	// also localhost, which go-containerregistry treats as insecure anyway).
+	dstRef, err := name.ParseReference(pushRef, name.Insecure)
+	if err != nil {
+		return "", fmt.Errorf("parse destination ref %s: %w", pushRef, err)
+	}
+	fmt.Fprintf(style.VerboseWriter(stdout), "copy %s → %s (platform %s/%s)\n", ref, pushRef, platform.OS, platform.Architecture)
+	if err := remoteWrite(ctx, dstRef, img); err != nil {
+		return "", fmt.Errorf("push %s: %w", pushRef, err)
+	}
+	return pullRef, nil
+}
+
+// mirrorLocal handles a local-only dogfood ref (naming no registry): it lives
+// only in the host docker store, so it is tag+pushed from there. These builds
+// are single-arch, so the containerd-store index push bug never applies.
+func mirrorLocal(ctx context.Context, ref, registryName string, registryPort int, imageName, version string, stdout io.Writer) (string, error) {
+	if err := ensureLocal(ctx, ref, imageName); err != nil {
 		return "", err
 	}
 	tag, err := registryTag(ctx, ref, imageName, version)
@@ -191,6 +266,48 @@ func mirrorToRegistry(ctx context.Context, ref, registryName string, registryPor
 		return "", fmt.Errorf("push %s: %w", pushRef, err)
 	}
 	return pullRef, nil
+}
+
+// remoteImage reads `ref` from its registry as a single-platform image; when
+// the ref is a multi-arch index, `platform` selects the matching manifest. A
+// package var so tests can stub the network dependency. Auth follows the docker
+// keychain (`docker login`), falling back to anonymous for public images.
+var remoteImage = func(ctx context.Context, ref name.Reference, platform v1.Platform) (v1.Image, error) {
+	return remote.Image(ref,
+		remote.WithContext(ctx),
+		remote.WithPlatform(platform),
+		remote.WithAuthFromKeychain(authn.DefaultKeychain),
+	)
+}
+
+// remoteWrite pushes `img` to `dst` (the local k3d registry). A package var so
+// tests can stub the network dependency.
+var remoteWrite = func(ctx context.Context, dst name.Reference, img v1.Image) error {
+	return remote.Write(dst, img,
+		remote.WithContext(ctx),
+		remote.WithAuthFromKeychain(authn.DefaultKeychain),
+	)
+}
+
+// remoteTag picks the local-registry tag for a registry-hosted image: the
+// immutable `:<version>` for the default ref, or a content-addressed
+// `:dogfood-<sha>` from the source image's digest for an override (the source
+// digest is a stable content address, so the tag rolls when content changes).
+func remoteTag(img digester, ref, imageName, version string) (string, error) {
+	if IsDefault(imageName, version, ref) {
+		return version, nil
+	}
+	d, err := img.Digest()
+	if err != nil {
+		return "", fmt.Errorf("digest %s: %w", ref, err)
+	}
+	return dogfoodTag(d.String()), nil
+}
+
+// digester is the slice of v1.Image remoteTag needs — narrowed to one method so
+// tests can supply a trivial fake instead of a full image.
+type digester interface {
+	Digest() (v1.Hash, error)
 }
 
 // registryTag picks the local-registry tag for an image: the immutable
@@ -222,8 +339,9 @@ func registryRefs(registryName string, registryPort int, imageName, tag string) 
 	return push, pull
 }
 
-// dogfoodTag derives the content-addressed tag from a docker image ID
-// (`sha256:<hex>`): `dogfood-<first-12-hex>`. The sha suffix forces a
+// dogfoodTag derives the content-addressed tag from a content ID
+// (`sha256:<hex>` — a docker image ID for a local build, or a registry digest
+// for a remote override): `dogfood-<first-12-hex>`. The sha suffix forces a
 // re-pull whenever content changes, so an `IfNotPresent` node doesn't serve
 // stale bits.
 func dogfoodTag(contentID string) string {
@@ -234,32 +352,22 @@ func dogfoodTag(contentID string) string {
 	return "dogfood-" + hex
 }
 
-// ensureLocal makes sure `ref` is present in the host docker store, pulling
-// it if absent. A missing local-only dogfood override names no registry, so a
-// pull is doomed — return the build guidance instead of attempting it. On a
-// pull failure for the unmodified default ghcr.io ref it returns the option-(c)
-// override guidance.
-func ensureLocal(ctx context.Context, ref, imageName, version string, stdout io.Writer) error {
+// ensureLocal makes sure a local-only dogfood `ref` is present in the host
+// docker store. Such a ref names no registry (it comes from a `make images`
+// build), so it can't be pulled — if it's absent, return the actionable build
+// guidance. Registry-hosted refs never reach here; they go through mirrorRemote.
+func ensureLocal(ctx context.Context, ref, imageName string) error {
 	if inLocalDocker(ctx, ref) {
 		return nil
 	}
-	if isLocalOnlyOverride(imageName, version, ref) {
-		return MissingDogfoodError([]MissingDogfood{{Name: imageName, Ref: ref}})
-	}
-	if err := dockerPull(ctx, ref, stdout); err != nil {
-		if IsDefault(imageName, version, ref) {
-			return optionCError(imageName, version, ref, err)
-		}
-		return fmt.Errorf("pull %s: %w", ref, err)
-	}
-	return nil
+	return MissingDogfoodError([]MissingDogfood{{Name: imageName, Ref: ref}})
 }
 
 // optionCError formats the design's option-(c) failure: the message
 // names the missing image, the version, and shows the exact override
 // stanza the user needs to add to flywheel.yaml.local.
 func optionCError(name, version, ref string, underlying error) error {
-	return fmt.Errorf(`%s: pull failed for the default ghcr.io ref
+	return fmt.Errorf(`%s: could not fetch the default ghcr.io ref
   ref:   %s
   cause: %w
 
@@ -296,13 +404,6 @@ func imageContentID(ctx context.Context, ref string) (string, error) {
 		return "", fmt.Errorf("docker inspect %s returned empty image ID", ref)
 	}
 	return id, nil
-}
-
-func dockerPull(ctx context.Context, ref string, stdout io.Writer) error {
-	cmd := exec.CommandContext(ctx, "docker", "pull", ref)
-	cmd.Stdout = style.VerboseWriter(stdout)
-	cmd.Stderr = style.VerboseWriter(stdout)
-	return cmd.Run()
 }
 
 func dockerTag(ctx context.Context, src, dst string, stdout io.Writer) error {

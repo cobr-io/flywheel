@@ -209,11 +209,12 @@ func Run(ctx context.Context, opts Options) error {
 	// Step 9 — mirror each Flywheel image into the cluster's LOCAL registry so
 	// every node pulls it on demand — immune to the per-node scheduling/GC gaps
 	// issue #14 fixed. Each image is resolved (cfg.Flywheel.Images
-	// override or default ghcr.io ref); a released ghcr ref is pulled to the
-	// host then pushed under its :<version> tag, a dogfood override under a
-	// content-addressed :dogfood-<sha> tag. EnsureInCluster returns the
-	// in-cluster pull ref, written back so renderBootstrap and applyDevLoop
-	// reference the registry path.
+	// override or default ghcr.io ref); a registry-hosted ref is copied
+	// registry→registry scoped to the host platform (containerd-store-safe,
+	// issue #50) under its :<version> tag, a local-only dogfood build is
+	// tag+pushed from the docker store under a content-addressed :dogfood-<sha>
+	// tag. EnsureInCluster returns the in-cluster pull ref, written back so
+	// renderBootstrap and applyDevLoop reference the registry path.
 	resolvedImages := imagepin.Resolve(cfg)
 	if !opts.SkipImageLoad {
 		// Pre-flight: dogfood overrides that name no registry can only come
