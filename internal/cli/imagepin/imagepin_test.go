@@ -241,6 +241,10 @@ func TestMirrorToRegistry_RegistryRefStreamsToLocalRegistry(t *testing.T) {
 	}
 	var gotPlatform v1.Platform
 	var gotDst string
+	// The copy platform must come from the docker DAEMON arch, not the CLI
+	// binary's GOARCH (issue #54) — stub it to a fixed value and prove it flows
+	// through to the go-containerregistry copy.
+	stub(t, &daemonArch, func(context.Context) (string, error) { return "amd64", nil })
 	stub(t, &remoteImage, func(_ context.Context, ref name.Reference, p v1.Platform) (v1.Image, error) {
 		gotPlatform = p
 		if ref.Name() != "ghcr.io/cobr-io/git-server:v0.1.0" {
@@ -269,8 +273,32 @@ func TestMirrorToRegistry_RegistryRefStreamsToLocalRegistry(t *testing.T) {
 	if gotDst != "localhost:50001/git-server:v0.1.0" {
 		t.Errorf("push dst = %q", gotDst)
 	}
-	if gotPlatform.OS != "linux" || gotPlatform.Architecture == "" {
-		t.Errorf("copy platform = %+v, want linux/<hostarch>", gotPlatform)
+	if gotPlatform.OS != "linux" || gotPlatform.Architecture != "amd64" {
+		t.Errorf("copy platform = %+v, want linux/amd64 (the stubbed daemon arch)", gotPlatform)
+	}
+}
+
+// hostPlatform derives the arch from the docker daemon (the k3d nodes run on it),
+// not the CLI binary's GOARCH — so a cross-arch install mirrors the arch the
+// cluster can actually exec (issue #54).
+func TestHostPlatform_UsesDaemonArch(t *testing.T) {
+	stub(t, &daemonArch, func(context.Context) (string, error) { return "amd64", nil })
+	p := hostPlatform(context.Background())
+	if p.OS != "linux" || p.Architecture != "amd64" {
+		t.Errorf("hostPlatform = %+v, want linux/amd64", p)
+	}
+}
+
+// When the daemon can't be queried (docker down/wedged), hostPlatform falls back
+// to the binary's GOARCH — the pre-#54 behaviour, and harmless since the
+// subsequent registry read fails on a dead daemon anyway.
+func TestHostPlatform_FallsBackToGOARCHOnDaemonError(t *testing.T) {
+	stub(t, &daemonArch, func(context.Context) (string, error) {
+		return "", errors.New("docker daemon not reachable")
+	})
+	p := hostPlatform(context.Background())
+	if p.OS != "linux" || p.Architecture != runtime.GOARCH {
+		t.Errorf("hostPlatform = %+v, want linux/%s (GOARCH fallback)", p, runtime.GOARCH)
 	}
 }
 
@@ -361,6 +389,9 @@ func TestMirrorRemote_ResolvesIndexToSinglePlatformImage(t *testing.T) {
 			Descriptor: v1.Descriptor{Platform: &v1.Platform{OS: "linux", Architecture: arch}},
 		})
 	}
+	// Pin the copy platform to the test's GOARCH so the assertion is
+	// independent of whatever docker daemon (if any) backs the CI runner.
+	stub(t, &daemonArch, func(context.Context) (string, error) { return runtime.GOARCH, nil })
 	wantChild, ok := childByArch[runtime.GOARCH]
 	if !ok {
 		t.Skipf("test host arch %q not represented in the seed index", runtime.GOARCH)

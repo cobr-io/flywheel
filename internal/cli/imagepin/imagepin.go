@@ -18,7 +18,8 @@
 //
 //   - Registry-hosted ref (the default `ghcr.io/cobr-io/<name>:<version>`, or
 //     any registry-qualified override): copied registry→registry with
-//     go-containerregistry, scoped to the host platform (`linux/<GOARCH>`).
+//     go-containerregistry, scoped to the platform the cluster nodes run —
+//     `linux/<docker-daemon-arch>`, NOT the flywheel binary's GOARCH (issue #54).
 //     This streams a single-arch image straight into the local registry
 //     without a docker-store round-trip. Crucially it never `docker tag`s or
 //     `docker push`es a multi-arch manifest index, which fails under Docker's
@@ -199,12 +200,39 @@ func mirrorToRegistry(ctx context.Context, ref, registryName string, registryPor
 	return mirrorLocal(ctx, ref, registryName, registryPort, imageName, version, stdout)
 }
 
-// hostPlatform is the single platform the local k3d cluster runs: `linux` on
-// the flywheel binary's arch. On every supported host the binary arch matches
-// the docker-VM/node arch (arm64 on Apple Silicon, amd64 on Intel), so scoping
-// the copy to it moves only the bytes the cluster can actually run.
-func hostPlatform() v1.Platform {
-	return v1.Platform{OS: "linux", Architecture: runtime.GOARCH}
+// hostPlatform is the single `linux` platform the local k3d cluster runs. Its
+// arch is the DOCKER DAEMON's arch — the k3d nodes are containers on that daemon,
+// so that is the arch that actually execs the mirrored image — NOT the flywheel
+// binary's runtime.GOARCH. On a cross-arch install (e.g. an amd64 binary talking
+// to an arm64 docker VM) scoping the copy to the binary's GOARCH lands a manifest
+// the nodes can't run, and pods fail with `exec format error` (issue #54).
+// Falls back to runtime.GOARCH only when the daemon can't be queried (docker
+// down/wedged) — in which case the subsequent registry read fails anyway, so the
+// fallback never silently mirrors the wrong arch on a healthy daemon.
+func hostPlatform(ctx context.Context) v1.Platform {
+	arch := runtime.GOARCH
+	if a, err := daemonArch(ctx); err == nil {
+		arch = a
+	}
+	return v1.Platform{OS: "linux", Architecture: arch}
+}
+
+// daemonArch reports the CPU architecture of the docker daemon backing the k3d
+// cluster, as GOARCH-style names (arm64, amd64), from
+// `docker version --format '{{.Server.Arch}}'`. That daemon runs the k3d node
+// containers, so it — not the CLI binary — is the authority on which platform to
+// mirror. A package var so tests can stub the docker dependency.
+var daemonArch = func(ctx context.Context) (string, error) {
+	cmd := exec.CommandContext(ctx, "docker", "version", "--format", "{{.Server.Arch}}")
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	arch := strings.TrimSpace(string(out))
+	if arch == "" {
+		return "", fmt.Errorf("docker version returned empty server arch")
+	}
+	return arch, nil
 }
 
 // mirrorRemote copies a registry-hosted `ref` (the default ghcr ref or a
@@ -217,7 +245,7 @@ func mirrorRemote(ctx context.Context, ref, registryName string, registryPort in
 	if err != nil {
 		return "", fmt.Errorf("parse source ref %s: %w", ref, err)
 	}
-	platform := hostPlatform()
+	platform := hostPlatform(ctx)
 	img, err := remoteImage(ctx, srcRef, platform)
 	if err != nil {
 		// A read failure on the unmodified default ref means no published
