@@ -480,3 +480,5 @@ cause was confirmed by per-controller tracing — not inference:
   can't commit to the gitops bare repo mid-switch. All four dev-loop
   scenarios — including scenario 4 (both repos on independent feature
   branches simultaneously) — pass on a clean cluster.
+
+<!-- pr-label smoke test: delete this branch -->
