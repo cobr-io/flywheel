@@ -30,7 +30,12 @@ flywheel_use experiment/both
 # isolation — its spec.ref.branch stays flywheel/local-deploy).
 wait_for_gitrepo_branch flywheel-system "$APP" feat/both 60
 wait_for_deploy_branch experiment/both 60
-wait_for_served_text "hello from both-branches feat" 180
+# App-content changes travel the full image chain (build → ImagePolicy scan →
+# IUA bump → DEPLOY branch → Flux rollout). With the gitops repo concurrently on
+# a feature branch, that chain converges in ~40s locally but is slower on a
+# constrained CI runner; give it a generous window (see dump_diag's app-image
+# chain section if it still times out).
+wait_for_served_text "hello from both-branches feat" 360
 wait_for_replicas 2 120
 
 # Switch the app back to main; the gitops selection is unchanged (a worktree
@@ -38,7 +43,10 @@ wait_for_replicas 2 120
 switch_app_branch main
 wait_for_gitrepo_branch flywheel-system "$APP" main 60
 wait_for_deploy_branch experiment/both 30  # unchanged
-wait_for_served_text "hello from sample-app v2" 180
+# Switching the app back rebuilds main's content into a fresh (newest-tag) image
+# that the IUA bumps onto DEPLOY; same image chain as above, so the same generous
+# window. This is the step that timed out at 180s in CI (converged in ~40s locally).
+wait_for_served_text "hello from sample-app v2" 360
 wait_for_replicas 2 60  # gitops still selected on its feature branch → still 2
 
 # Select gitops back to main too.

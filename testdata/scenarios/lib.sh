@@ -113,8 +113,21 @@ dump_diag() {
   kc -n flywheel-system logs deploy/git-server --tail=25 2>&1 || true
   echo "----- DIAG: git-server /workspaces + /srv/git -----"
   kc -n flywheel-system exec deploy/git-server -- sh -c 'ls -la /workspaces; echo ---bare---; ls -la /srv/git' 2>&1 || true
-  echo "----- DIAG: git-auto-sync-self log (tail) -----"
-  kc -n flywheel-system logs deploy/git-auto-sync-self --tail=20 2>&1 || true
+  echo "----- DIAG: git-deploy-controller log (tail) -----"
+  kc -n flywheel-system logs deploy/git-deploy-controller --tail=25 2>&1 || true
+  # App-image chain (build → ImagePolicy → IUA → DEPLOY branch → live Deployment).
+  # This is the chain scenario-4's app-content revert depends on; capturing it
+  # makes a revert timeout self-diagnosing (which stage is stuck vs. just slow).
+  echo "----- DIAG: app-image chain -----"
+  kc -n flux-system get imagerepository,imagepolicy 2>&1 || true
+  echo "  ImagePolicy latest tag: $(kc -n flux-system get imagepolicy "$APP" -o jsonpath='{.status.latestRef.tag}' 2>/dev/null)"
+  echo "  registry tags (${CLIENT_NAME}/${APP}):"
+  curl -s "http://localhost:${REGISTRY_PORT}/v2/${CLIENT_NAME}/${APP}/tags/list" 2>&1 | head -c 600; echo
+  echo "  live Deployment image: $(kc -n apps get deploy "$APP" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)"
+  echo "  DEPLOY branch deployment.yaml (image/replicas):"
+  kc -n flywheel-system exec deploy/git-server -- sh -c \
+    "git -C /srv/git/${CLIENT_NAME}.git show flywheel/local-deploy:apps/base/${APP}/deployment.yaml 2>/dev/null | grep -iE 'image:|replicas:'" 2>&1 || true
+  echo "  IUA flux-system/flywheel-self:$(kc -n flux-system get imageupdateautomation flywheel-self -o jsonpath='{" suspend="}{.spec.suspend}{" lastRun="}{.status.lastAutomationRunTime}{" lastPush="}{.status.lastPushCommit}' 2>/dev/null)"
   echo "----- DIAG: flywheel-dev-loop status -----"
   kc -n flux-system get kustomization flywheel-dev-loop -o jsonpath='{.status.conditions[*].message}' 2>&1 || true
   echo
