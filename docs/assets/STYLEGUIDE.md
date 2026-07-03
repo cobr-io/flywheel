@@ -64,8 +64,12 @@ here first.
 | muted (body) | `#586172` | `#98A2AF` |
 | faint / eyebrow | `#9AA3B0` / `#7B8493` | `#69727E` / `#7E8896` |
 | connector / arrow | `#CDD4DE` / `#A9B2BE` | `#313A46` / `#4C5663` |
-| boundary region (fill / stroke) | `#E9EEF7` / `#CFDAE8` | `#131A24` / `#283341` |
-| boundary label (bg / text) | `#DBE3F0` / `#5A6473` | `#1E2836` / `#8A94A0` |
+| boundary region (fill / stroke) | `#E9EEF7` / `#CFDAE8` | `#151C27` / `#3D4A5C` |
+| boundary label (bg / text) | `#DBE3F0` / `#5A6473` | `#242F40` / `#9FABBC` |
+
+In dark mode the boundary fill delta vs the panel is inevitably subtle at
+these luminances, so the **stroke carries the edge** — keep it clearly
+visible, not hairline-faint.
 
 ---
 
@@ -83,6 +87,12 @@ human narration.** Component/command names (`image-builder-controller`,
 `git-auto-sync pushes`) are mono; sentences about what *you* do are sans. This
 gives a quiet rhythm — prose bookends, machinery in the middle.
 
+Mono **promises literal**: a mono name must be the exact identifier the reader
+can go and see — the workload name in `kubectl get pods`, the real command —
+never a paraphrase ("Flux image-automation") of one
+(`image-automation-controller`). Qualifiers ("in-cluster", "warm") belong in
+the sans subtitle, not inside the mono name.
+
 | Element | Font | Size | Weight | Notes |
 |---|---|---|---|---|
 | Card title — system identifier | mono | 16.5 | 650 | letter-spacing −0.2 |
@@ -91,7 +101,7 @@ gives a quiet rhythm — prose bookends, machinery in the middle.
 | Header eyebrow | mono | 11 | 600 | UPPERCASE, letter-spacing 2.4, `eyebrow` |
 | Role chip | mono | 10.5 | 600 | UPPERCASE, letter-spacing 0.8 |
 | Station number | mono | 12.5 | 700 | role chip-text |
-| Edge label (pill / loop) | mono | 11.5–12 | 400–600 | |
+| Edge label (pill / loop) | mono | 11.5–12 | 400–600 | pill text takes the acting role's chip color; loop label the `you` chip color |
 | Legend | mono | 12.5 | 400 | `muted` |
 
 ---
@@ -109,12 +119,12 @@ return-edge lane.
 | panel inset / radius | 12px / `rx=22`, 1px stroke (soft shadow, light only) |
 | card x / width / radius | 92 / 536 / `rx=16`, 1px stroke |
 | spine center x | 360 |
-| header height | 100 |
-| gap between cards | 80 |
+| header height | 84 |
+| gap between cards | 52 (78 before a labelled transition pill) |
 | station node | `r=15`, 2px ring |
 | accent bar | 4px wide, inset 16px top/bottom, `rx=2` |
 | connector | 2px line + 5px chevron arrowhead |
-| loop edge | 2px **dotted** (`stroke-dasharray="6 7"`), routed at card-left −40, corner `r=18` |
+| loop edge | 2px **dotted** (`stroke-dasharray="6 7"`), exits the last card's bottom, runs left below the boundary region, up the gutter at card-left −40, corner `r=18` |
 | boundary region | rounded rect (`rx=18`) behind the cards, 12px padding around the grouped stages, hairline stroke, corner label chip |
 
 **Depth is a whisper.** Cards: `feDropShadow` dy 3 / blur 8 / opacity .07
@@ -137,10 +147,11 @@ return-edge lane.
 - **Forward flow** = solid connectors down the **centre** spine, each entering a
   numbered station then a card.
 - **Feedback / loop** = a **dotted** edge in a **side gutter** (the dev-loop's
-  return runs up the **left** gutter, arrow back into the first card, with a
-  rotated label). Dotted + off-spine is what distinguishes "the loop closes"
-  from "another pipeline step." Use it whenever a diagram is a cycle, not a
-  chain.
+  return exits the last card's bottom, runs left below the boundary region,
+  then up the **left** gutter, arrow back into the first card). Its label sits
+  **horizontally** under the bottom segment — never rotate label text.
+  Dotted + off-spine is what distinguishes "the loop closes" from "another
+  pipeline step." Use it whenever a diagram is a cycle, not a chain.
 
 ### Boundary regions
 

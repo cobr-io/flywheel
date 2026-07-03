@@ -30,7 +30,7 @@ machine:
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/devloop-dark.svg">
-  <img alt="The Flywheel dev loop: you commit → git-auto-sync pushes to the in-cluster git-server → image-builder-controller builds an image → Flux image-automation rolls it into the Deployment → your pod runs the new code, all on your machine" src="docs/assets/devloop-light.svg" width="720">
+  <img alt="The Flywheel dev loop: you commit → git-auto-sync pushes to the in-cluster git-server → image-builder-controller builds the image and pushes it to the local registry → image-automation-controller commits the image bump to your gitops repo and Flux rolls out the Deployment → your pod runs the new code, all on your machine" src="docs/assets/devloop-light.svg" width="720">
 </picture>
 
 The cluster converges the same way Flux would converge production from a git
