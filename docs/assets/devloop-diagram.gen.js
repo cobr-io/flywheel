@@ -15,11 +15,14 @@ const SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-ser
 const MONO = "ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace";
 
 // role keys: you | comp | flux
+// Card titles are the LITERAL workload names as seen in `kubectl get pods`
+// (git-server / image-builder-controller in flywheel-system,
+// image-automation-controller in flux-system) — mono promises literal.
 const cards = [
   { n: '01', role: 'you',  font: 'sans', title: 'you save + git commit',            sub: ['in your app’s worktree'] },
-  { n: '02', role: 'comp', font: 'mono', title: 'in-cluster git-server',            sub: ['a bare mirror of the worktree'] },
-  { n: '03', role: 'comp', font: 'mono', title: 'image-builder-controller',         sub: ['builds an image on the new commit', 'Kaniko / BuildKit'] },
-  { n: '04', role: 'flux', font: 'mono', title: 'Flux image-automation',            sub: ['rolls the new image into the Deployment'] },
+  { n: '02', role: 'comp', font: 'mono', title: 'git-server',                       sub: ['a bare in-cluster mirror of your worktree'] },
+  { n: '03', role: 'comp', font: 'mono', title: 'image-builder-controller',         sub: ['runs a build-<app> Job per commit (warm BuildKit)', 'and pushes the image to the local registry'] },
+  { n: '04', role: 'flux', font: 'mono', title: 'image-automation-controller',      sub: ['commits the image bump to your gitops repo;', 'Flux rolls out the Deployment from git'] },
   { n: '05', role: 'you',  font: 'sans', title: 'your pod is running the new code',  sub: ['typically a few seconds · ~30s worst case'] },
 ];
 // transition pill keyed by the index of the card it leads INTO
@@ -56,7 +59,9 @@ const palettes = {
     you:  { accent: '#2DD4A6', chipText: '#74ECC9', chipBg: '#0E2A24' },
     comp: { accent: '#6A92FF', chipText: '#AAC1FF', chipBg: '#17223A' },
     flux: { accent: '#A78BFA', chipText: '#CBB8FF', chipBg: '#211A3A' },
-    cluster: { fill: '#131A24', stroke: '#283341', chipBg: '#1E2836', chipText: '#8A94A0' },
+    // The boundary must survive dark mode: the fill delta vs the panel is
+    // inevitably subtle at these luminances, so the stroke carries the edge.
+    cluster: { fill: '#151C27', stroke: '#3D4A5C', chipBg: '#242F40', chipText: '#9FABBC' },
     cardShadow: 'flood-color="#000000" flood-opacity="0.40"', cardDy: 2, cardBlur: 6,
     panelShadow: false,
   },
@@ -68,21 +73,23 @@ const PANEL_X = 12, PANEL_W = W - 24;          // 12..708
 const CARD_X = 92, CARD_W = 536;               // 92..628, center 360
 const CX = CARD_X + CARD_W / 2;                // spine center = 360
 const PAD_L = 34;                              // text left padding inside card
-const GAP = 80;                                // vertical gap between cards
+const GAP = 52;                                // vertical gap between cards
+const GAP_PILL = 78;                           // wider gap where a transition pill sits
 const NODE_R = 15;
 const PANEL_TOP = 12;
-const HEADER_H = 100;                           // clearance so station 01 clears the header
+const HEADER_H = 84;                            // clearance so station 01 clears the header
 const cardH = (c) => (c.sub.length === 2 ? 112 : 92);
 
 let y = PANEL_TOP + HEADER_H;                   // first card top
-const layout = cards.map((c) => {
+const layout = cards.map((c, i) => {
   const top = y;
   const h = cardH(c);
-  y = top + h + GAP;
+  y = top + h + (pills[i + 1] ? GAP_PILL : GAP);
   return { ...c, top, h };
 });
 const lastBottom = layout[layout.length - 1].top + layout[layout.length - 1].h;
-const LEGEND_Y = lastBottom + 58;              // extra room for the cluster region's bottom edge
+const BUS_Y = lastBottom + 40;                 // loop-return bottom segment, below the cluster edge
+const LEGEND_Y = BUS_Y + 56;                   // clears the return wire + its label row
 const PANEL_H = (LEGEND_Y + 26) - PANEL_TOP;
 const TOTAL_H = PANEL_TOP + PANEL_H + 14;
 
@@ -143,7 +150,7 @@ function connectors(p) {
         const py = prevBottom + ((st.cy - NODE_R) - prevBottom) / 2;
         out += `<g>
           <rect x="${(CX - pw / 2).toFixed(1)}" y="${(py - 12).toFixed(1)}" width="${pw.toFixed(1)}" height="24" rx="12" fill="${p.pillBg}" stroke="${p.pillStroke}"/>
-          <text x="${CX}" y="${(py + 4).toFixed(1)}" font-family="${MONO}" font-size="12" fill="${p.pillText}" text-anchor="middle">${esc(label)}</text>
+          <text x="${CX}" y="${(py + 4).toFixed(1)}" font-family="${MONO}" font-size="12" fill="${p.comp.chipText}" text-anchor="middle">${esc(label)}</text>
         </g>`;
       }
     }
@@ -174,25 +181,28 @@ function clusterRegion(p) {
   </g>`;
 }
 
-// The feedback return that makes it a loop, not a chain: from the running
-// pod back up to the next commit, routed up the left gutter as a dotted
-// "you" edge (the developer closes the loop by observing + editing again).
+// The feedback return that makes it a loop, not a chain: the wire exits the
+// last card's bottom (crossing OUT of the cluster region, as the commit
+// crossed in), runs left below the cluster, then up the left gutter and back
+// into the first card — a dotted "you" edge (the developer closes the loop by
+// observing + editing again). The label sits horizontally under the bottom
+// segment, where it's actually readable.
 function loopEdge(p) {
   const r = p.you;
   const first = layout[0];
   const last = layout[layout.length - 1];
   const y1 = first.top + first.h / 2;
-  const y5 = last.top + last.h / 2;
+  const exitY = last.top + last.h;                // bottom edge of the last card
   const xCard = CARD_X;                           // left edge of the cards
   const xBus = xCard - 40;                         // vertical return lane (left gutter)
   const R = 18;
-  const midY = (y1 + y5) / 2;
   const label = 'you observe the result → make the next change';
-  const lw = label.length * 6.9 + 8;
   const d = [
-    `M ${xCard} ${y5.toFixed(1)}`,
+    `M ${CX} ${exitY}`,
+    `V ${(BUS_Y - R).toFixed(1)}`,
+    `Q ${CX} ${BUS_Y} ${CX - R} ${BUS_Y}`,
     `H ${xBus + R}`,
-    `Q ${xBus} ${y5.toFixed(1)} ${xBus} ${(y5 - R).toFixed(1)}`,
+    `Q ${xBus} ${BUS_Y} ${xBus} ${(BUS_Y - R).toFixed(1)}`,
     `V ${(y1 + R).toFixed(1)}`,
     `Q ${xBus} ${y1.toFixed(1)} ${xBus + R} ${y1.toFixed(1)}`,
     `H ${xCard - 8}`,
@@ -200,10 +210,7 @@ function loopEdge(p) {
   return `<g>
     <path d="${d}" fill="none" stroke="${r.accent}" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round"/>
     <path d="M ${xCard - 9} ${(y1 - 5).toFixed(1)} L ${xCard - 1} ${y1.toFixed(1)} L ${xCard - 9} ${(y1 + 5).toFixed(1)}" fill="none" stroke="${r.accent}" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-    <g transform="translate(${xBus}, ${midY.toFixed(1)}) rotate(-90)">
-      <rect x="${(-lw / 2).toFixed(1)}" y="-11" width="${lw.toFixed(1)}" height="22" rx="11" fill="${p.panel}"/>
-      <text x="0" y="4" font-family="${MONO}" font-size="11.5" font-weight="600" fill="${r.chipText}" text-anchor="middle">${esc(label)}</text>
-    </g>
+    <text x="${((xBus + CX) / 2).toFixed(1)}" y="${(BUS_Y + 22).toFixed(1)}" font-family="${MONO}" font-size="11.5" font-weight="600" fill="${r.chipText}" text-anchor="middle">${esc(label)}</text>
   </g>`;
 }
 
@@ -212,9 +219,8 @@ function header(p) {
   const text = 'EVERYTHING RUNS ON YOUR MACHINE';
   const tx = CX;
   return `<g>
-    <circle cx="${CX - 168}" cy="${cy - 4}" r="4" fill="${p.you.accent}"/>
-    <line x1="${PANEL_X + 28}" y1="${cy - 4}" x2="${CX - 116}" y2="${cy - 4}" stroke="${p.panelStroke}" stroke-width="1"/>
-    <line x1="${CX + 116}" y1="${cy - 4}" x2="${PANEL_X + PANEL_W - 28}" y2="${cy - 4}" stroke="${p.panelStroke}" stroke-width="1"/>
+    <line x1="${PANEL_X + 28}" y1="${cy - 4}" x2="${CX - 160}" y2="${cy - 4}" stroke="${p.panelStroke}" stroke-width="1"/>
+    <line x1="${CX + 160}" y1="${cy - 4}" x2="${PANEL_X + PANEL_W - 28}" y2="${cy - 4}" stroke="${p.panelStroke}" stroke-width="1"/>
     <text x="${tx}" y="${cy}" font-family="${MONO}" font-size="11" font-weight="600" letter-spacing="2.4" fill="${p.eyebrow}" text-anchor="middle">${text}</text>
   </g>`;
 }
