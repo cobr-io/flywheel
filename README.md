@@ -88,7 +88,9 @@ flywheel add app <dir>   # scaffold a builder + workload from a worktree dir
 
 `flywheel up` prints the URL to visit (`https://<app>.<domain>:<https_port>/`);
 reaching it in a browser also needs local name resolution, see the
-[Local DNS guide](docs/guides/local-dns.md).
+[Local DNS guide](docs/guides/local-dns.md). For everything `add app` does —
+and for apps you don't build yourself (Helm charts, prebuilt images) — see the
+[Adding apps guide](docs/guides/add-app.md).
 
 Joining a repo a teammate already created? Don't run `init`. Clone the repo
 and run `flywheel up --clone`: everything local needs is already committed,
@@ -195,6 +197,7 @@ Per-developer overrides go in a gitignored `flywheel.yaml.local`.
 
 * [Installing & uninstalling](docs/guides/install.md) — pinning versions, sudo-less installs, purge flags.
 * [Onboarding](docs/guides/onboarding.md) — join a repo a teammate created (age key, SOPS recipients, port collisions).
+* [Adding apps](docs/guides/add-app.md) — `flywheel add app`, the dev loop that follows, `publish-app`, and off-the-shelf apps (Helm charts, prebuilt images).
 * [Upgrading & the version pin](docs/guides/upgrading.md) — how `up` keeps your binary and `flywheel.version` in sync.
 * [Local DNS](docs/guides/local-dns.md) — resolve `*.<domain>` to your apps in the browser.
 * [Branch following & `flywheel use`](docs/guides/branch-following.md) — opt-in branch deploys.
