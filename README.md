@@ -36,6 +36,19 @@ machine:
 The cluster converges the same way Flux would converge production from a git
 push; only the image build happens in-cluster instead of in your CI.
 
+### The same loop for your manifests
+
+The gitops repo itself iterates the same way: edit `apps/`, `infra/`, or
+`builders/`, commit, and the cluster converges in seconds — deletes included
+(Flux prunes). Image bumps from the app loop land on a machinery-owned deploy
+branch (`flywheel/local-deploy`), never on yours, so your branch history stays
+clean. Details in [The gitops-repo loop](docs/guides/gitops-loop.md).
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/gitopsloop-dark.svg">
+  <img alt="The gitops-repo loop: you edit manifests and commit → git-deploy-controller pushes your branch to the in-cluster git-server and maintains the flywheel/local-deploy branch → kustomize-controller applies your overlays, pruning what the commit removed → the cluster matches your repo seconds later" src="docs/assets/gitopsloop-light.svg" width="720">
+</picture>
+
 ## What matches production
 
 | Concern | Locally (Flywheel) | In production |
@@ -198,6 +211,7 @@ Per-developer overrides go in a gitignored `flywheel.yaml.local`.
 * [Installing & uninstalling](docs/guides/install.md) — pinning versions, sudo-less installs, purge flags.
 * [Onboarding](docs/guides/onboarding.md) — join a repo a teammate created (age key, SOPS recipients, port collisions).
 * [Adding apps](docs/guides/add-app.md) — `flywheel add app`, the dev loop that follows, `publish-app`, and off-the-shelf apps (Helm charts, prebuilt images).
+* [The gitops-repo loop](docs/guides/gitops-loop.md) — iterating on your manifests: commit-to-converged in seconds, and what `flywheel/local-deploy` is.
 * [Upgrading & the version pin](docs/guides/upgrading.md) — how `up` keeps your binary and `flywheel.version` in sync.
 * [Local DNS](docs/guides/local-dns.md) — resolve `*.<domain>` to your apps in the browser.
 * [Branch following & `flywheel use`](docs/guides/branch-following.md) — opt-in branch deploys.
