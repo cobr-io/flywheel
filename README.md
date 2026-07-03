@@ -274,6 +274,32 @@ Per-developer overrides go in a gitignored `flywheel.yaml.local`. Ports and the
 repo path are also tracked in `~/.config/flywheel/allocations.json` so multiple
 local clusters don't collide.
 
+### Workspace layout
+
+flywheel bind-mounts **`workspaces_root`** — the parent directory of your gitops
+repo by default — into the cluster at `/workspaces`, and the in-cluster
+controllers read your checkout from there. Two rules follow:
+
+- **Repos must be siblings.** Your gitops repo and any separate app-source repos
+  (the ones `flywheel add app` wires up) must be **direct children of the same
+  `workspaces_root`** — e.g. `~/src/acme-gitops`, `~/src/acme-api`,
+  `~/src/acme-web`. `up` clones missing declared siblings for you, but it can't
+  reach a repo that lives somewhere else.
+- **Keep it under `$HOME`.** On macOS the cluster runs in a VM that shares your
+  home directory but not temp dirs, so a repo under `/tmp` or `/var/folders`
+  won't bind-mount — `up` and `flywheel doctor` fail fast with guidance. Clone
+  under `~/src/...`.
+
+**Git worktrees.** A *sibling* worktree is supported — e.g.
+`git worktree add ../acme-gitops-feat feat/x` next to `acme-gitops`. `up`
+additionally bind-mounts the worktree's shared git dir so the controllers can
+resolve it ([#62](https://github.com/cobr-io/flywheel/issues/62)). A *nested*
+worktree — one created inside another repo, e.g. under `.claude/worktrees/` —
+is refused, because its parent directory isn't a clean workspace root; use a
+sibling worktree or a full clone instead. (Advanced: set
+`FLYWHEEL_ALLOW_NESTED_WORKTREE=1` to override, only when your apps live in the
+same repo.)
+
 ## Guides
 
 * [Onboarding](docs/guides/onboarding.md) — join a repo a teammate created (age key, SOPS recipients, port collisions).

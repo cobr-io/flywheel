@@ -33,6 +33,25 @@ func WorkspaceVisible(ctx context.Context, clusterName, relPath string) (bool, e
 	return false, err // docker exec itself failed (node name, daemon, …)
 }
 
+// NodePathExists reports whether absPath exists inside the cluster's server
+// node — used to verify a host-absolute bind-mount (e.g. a git worktree's shared
+// git dir, issue #62) actually bridged into k3d. Same probe semantics as
+// WorkspaceVisible: nil error with ok=false means definitively absent; a non-nil
+// error means the probe itself failed (treat as inconclusive).
+func NodePathExists(ctx context.Context, clusterName, absPath string) (bool, error) {
+	node := fmt.Sprintf("k3d-%s-server-0", clusterName)
+	cmd := exec.CommandContext(ctx, "docker", "exec", node, "test", "-e", absPath)
+	err := cmd.Run()
+	if err == nil {
+		return true, nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return false, nil
+	}
+	return false, err
+}
+
 // CreateRegistry creates a k3d-managed image registry on the host. The
 // resulting in-cluster DNS name is `k3d-<name>:<port>`. Idempotent:
 // returns nil if a registry of this name already exists.
@@ -79,6 +98,10 @@ type CreateClusterOpts struct {
 	HttpPort       int    // host port → loadbalancer:80
 	HttpsPort      int    // host port → loadbalancer:443
 	WorkspacesRoot string // mounted at /workspaces on every node
+	// GitCommonDir, when set, bind-mounts a git worktree's shared git dir at its
+	// own absolute host path so the in-cluster git-deploy-controller can resolve
+	// the checkout's objects/refs (issue #62). Empty for a normal clone.
+	GitCommonDir string
 }
 
 // CreateCluster creates a k3d cluster with the design-mandated topology.
@@ -106,6 +129,20 @@ func CreateCluster(ctx context.Context, opts CreateClusterOpts) error {
 		// fall through to a clean create
 	}
 
+	cmd := exec.CommandContext(ctx, "k3d", clusterCreateArgs(opts)...)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("k3d cluster create %s: %w\n%s", opts.Name, err, out)
+	}
+	return nil
+}
+
+// clusterCreateArgs builds the `k3d cluster create` argv. Pure (no shell-out)
+// so the volume/port wiring is unit-testable. A worktree's shared git dir is
+// mounted at its own absolute host path (issue #62) so the in-cluster
+// git-deploy-controller can resolve the checkout — only when GitCommonDir is set
+// (a normal clone leaves it empty and gets no extra mount).
+func clusterCreateArgs(opts CreateClusterOpts) []string {
 	args := []string{
 		"cluster", "create", opts.Name,
 		"--servers", fmt.Sprintf("%d", defaultIfZero(opts.Servers, 1)),
@@ -115,18 +152,18 @@ func CreateCluster(ctx context.Context, opts CreateClusterOpts) error {
 		"--port", fmt.Sprintf("%d:443@loadbalancer", opts.HttpsPort),
 		"--volume", fmt.Sprintf("%s:/workspaces@agent:*", opts.WorkspacesRoot),
 		"--volume", fmt.Sprintf("%s:/workspaces@server:*", opts.WorkspacesRoot),
-		"--kubeconfig-switch-context",
-		"--wait",
 	}
+	if opts.GitCommonDir != "" {
+		args = append(args,
+			"--volume", fmt.Sprintf("%s:%s@agent:*", opts.GitCommonDir, opts.GitCommonDir),
+			"--volume", fmt.Sprintf("%s:%s@server:*", opts.GitCommonDir, opts.GitCommonDir),
+		)
+	}
+	args = append(args, "--kubeconfig-switch-context", "--wait")
 	if opts.K3sImage != "" {
 		args = append(args, "--image", "rancher/k3s:"+opts.K3sImage)
 	}
-	cmd := exec.CommandContext(ctx, "k3d", args...)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("k3d cluster create %s: %w\n%s", opts.Name, err, out)
-	}
-	return nil
+	return args
 }
 
 // DeleteCluster removes the cluster entirely. Idempotent.

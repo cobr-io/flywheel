@@ -31,6 +31,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/doctor"
 	"github.com/cobr-io/flywheel/internal/cli/embedcache"
 	"github.com/cobr-io/flywheel/internal/cli/flux"
+	"github.com/cobr-io/flywheel/internal/cli/gitcheckout"
 	"github.com/cobr-io/flywheel/internal/cli/hostmount"
 	"github.com/cobr-io/flywheel/internal/cli/imagepin"
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
@@ -104,6 +105,25 @@ func Run(ctx context.Context, opts Options) error {
 	if results := doctor.Run(checks); !allOK(results) {
 		printDoctor(out, results)
 		return fmt.Errorf("step 2: host prerequisites missing — fix the issues above and retry")
+	}
+
+	// Step 2b — classify the git checkout. A git linked worktree needs its shared
+	// git dir bind-mounted so the in-cluster git-deploy-controller can read it
+	// (issue #62); a *nested* worktree can't satisfy flywheel's sibling model, so
+	// refuse it here (before any network/cluster work) with remediation.
+	layout, lerr := gitcheckout.Inspect(opts.RepoDir)
+	if lerr != nil {
+		style.Warn(out, "could not classify git checkout (%v); assuming a normal clone", lerr)
+	}
+	if layout.IsWorktree && layout.Nested {
+		if os.Getenv(gitcheckout.AllowNestedEnv) == "" {
+			return fmt.Errorf("step 2: %s", gitcheckout.NestedRemediation(layout))
+		}
+		style.Warn(out, "%s is a nested git worktree; proceeding because %s is set (apps must live in-repo)",
+			layout.Dir, gitcheckout.AllowNestedEnv)
+	}
+	if layout.IsWorktree && layout.CommonDir != "" {
+		style.Detail(out, "git worktree: mounting shared git dir %s", layout.CommonDir)
 	}
 
 	// Step 3 — extract the binary's embedded asset tree to
@@ -187,6 +207,7 @@ func Run(ctx context.Context, opts Options) error {
 			HttpPort:       cfg.Cluster.HttpPort,
 			HttpsPort:      cfg.Cluster.HttpsPort,
 			WorkspacesRoot: workspacesRoot,
+			GitCommonDir:   layout.CommonDir, // "" for a normal clone; a worktree's shared git dir otherwise
 		}
 	}, out); err != nil {
 		return fmt.Errorf("step 7: %w", err)
@@ -202,6 +223,19 @@ func Run(ctx context.Context, opts Options) error {
 	} else if !visible {
 		return fmt.Errorf("the gitops repo is not visible in the cluster at /workspaces/%s — workspaces_root %q did not bind-mount into k3d.\n%s",
 			converge.ResolveRepoBaseName(opts.RepoDir), workspacesRoot, hostmount.Remediation())
+	}
+
+	// Step 7b (worktree) — a git worktree also needs its shared git dir mounted at
+	// its host-absolute path, or the git-deploy-controller can't resolve the
+	// checkout. Verify that mount bridged too (issue #62), so we fail fast here
+	// instead of leaving the client-* Kustomizations stuck on "Source artifact
+	// not found".
+	if layout.IsWorktree && layout.CommonDir != "" {
+		if visible, verr := k3d.NodePathExists(ctx, cfg.Cluster.Name, layout.CommonDir); verr != nil {
+			style.Warn(out, "could not verify the worktree git-dir mount (%v); continuing", verr)
+		} else if !visible {
+			return fmt.Errorf("%s", gitcheckout.UnreachableCommonDirRemediation(layout))
+		}
 	}
 
 	// Step 8 — inotify handled by privileged DaemonSet in step 11a.
