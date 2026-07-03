@@ -103,9 +103,10 @@ The scaffold lands **uncommitted** in your gitops repo. Review it, then:
 git add -A && git commit -m "add acme-api"
 ```
 
-Locally, a commit is all Flux needs — `git-auto-sync` mirrors your gitops
-repo's commits into the in-cluster git-server, which Flux watches. Pushing to
-your real remote is for your teammates, not for the cluster.
+Locally, a commit is all Flux needs — the `git-deploy-controller` pushes your
+gitops repo's commits into the in-cluster git-server, which Flux watches (see
+[The gitops-repo loop](gitops-loop.md)). Pushing to your real remote is for
+your teammates, not for the cluster.
 
 Then, in order:
 

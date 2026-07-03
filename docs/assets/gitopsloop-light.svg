@@ -1,0 +1,86 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="822" viewBox="0 0 720 822" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif">
+  <defs>
+    <filter id="cardShadow" x="-20%" y="-20%" width="140%" height="160%">
+      <feDropShadow dx="0" dy="3" stdDeviation="8" flood-color="#0B1220" flood-opacity="0.07"/>
+    </filter>
+    <filter id="panelShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="6" stdDeviation="20" flood-color="#0B1220" flood-opacity="0.06"/>
+    </filter>
+  </defs>
+  <rect x="12" y="12" width="696" height="796" rx="22" fill="#F4F6F9" filter="url(#panelShadow)"/>
+  <rect x="12" y="12" width="696" height="796" rx="22" fill="#F4F6F9" stroke="#E5E9EF" stroke-width="1"/>
+  <g>
+    <rect x="80" y="220.0" width="560" height="482.0" rx="18" fill="#E9EEF7" stroke="#CFDAE8" stroke-width="1"/>
+    <rect x="96" y="231.0" width="144.4" height="22" rx="8" fill="#DBE3F0"/>
+    <text x="168.2" y="246.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10" font-weight="600" letter-spacing="1.5" fill="#5A6473" text-anchor="middle">LOCAL K3D CLUSTER</text>
+  </g>
+  <g>
+    <line x1="40" y1="42" x2="200" y2="42" stroke="#E5E9EF" stroke-width="1"/>
+    <line x1="520" y1="42" x2="680" y2="42" stroke="#E5E9EF" stroke-width="1"/>
+    <text x="360" y="46" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="11" font-weight="600" letter-spacing="2.4" fill="#7B8493" text-anchor="middle">THE SAME LOOP, MINUS THE BUILD</text>
+  </g>
+  <line x1="360" y1="88.0" x2="360" y2="91.0" stroke="#CDD4DE" stroke-width="2"/><path d="M 355 88.0 L 360 95.0 L 365 88.0" fill="none" stroke="#A9B2BE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><g>
+    <circle cx="360" cy="73.0" r="15" fill="#FFFFFF" stroke="#0BA37F" stroke-width="2"/>
+    <text x="360" y="77.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#07795E" text-anchor="middle">01</text>
+  </g><line x1="360" y1="258.0" x2="360" y2="261.0" stroke="#CDD4DE" stroke-width="2"/><path d="M 355 258.0 L 360 265.0 L 365 258.0" fill="none" stroke="#A9B2BE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="360" y1="188" x2="360" y2="228.0" stroke="#CDD4DE" stroke-width="2"/><g>
+          <rect x="242.0" y="196.0" width="236.0" height="24" rx="12" fill="#FFFFFF" stroke="#DCE2EA"/>
+          <text x="360" y="212.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12" fill="#2B45B8" text-anchor="middle">via the /workspaces bind-mount</text>
+        </g><g>
+    <circle cx="360" cy="243.0" r="15" fill="#FFFFFF" stroke="#3D63F5" stroke-width="2"/>
+    <text x="360" y="247.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#2B45B8" text-anchor="middle">02</text>
+  </g><line x1="360" y1="422.0" x2="360" y2="425.0" stroke="#CDD4DE" stroke-width="2"/><path d="M 355 422.0 L 360 429.0 L 365 422.0" fill="none" stroke="#A9B2BE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="360" y1="378" x2="360" y2="392.0" stroke="#CDD4DE" stroke-width="2"/><g>
+    <circle cx="360" cy="407.0" r="15" fill="#FFFFFF" stroke="#7C5CFF" stroke-width="2"/>
+    <text x="360" y="411.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#5A3FCF" text-anchor="middle">03</text>
+  </g><line x1="360" y1="586.0" x2="360" y2="589.0" stroke="#CDD4DE" stroke-width="2"/><path d="M 355 586.0 L 360 593.0 L 365 586.0" fill="none" stroke="#A9B2BE" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><line x1="360" y1="542" x2="360" y2="556.0" stroke="#CDD4DE" stroke-width="2"/><g>
+    <circle cx="360" cy="571.0" r="15" fill="#FFFFFF" stroke="#0BA37F" stroke-width="2"/>
+    <text x="360" y="575.5" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" font-weight="700" fill="#07795E" text-anchor="middle">04</text>
+  </g>
+  <g>
+    <rect x="92" y="96" width="536" height="92" rx="16" fill="#FFFFFF" stroke="#E7EBF1" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="112" width="4" height="60" rx="2" fill="#0BA37F"/>
+    <g>
+    <rect x="564.2" y="114.0" width="41.8" height="20" rx="10" fill="#E1F6EF"/>
+    <text x="585.1" y="128.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#07795E" text-anchor="middle">YOU</text>
+  </g>
+    <text x="126" y="137.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="17.5" font-weight="650" fill="#10141A" letter-spacing="-0.1">you edit manifests + git commit</text>
+    <text x="126" y="161.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#586172">in your gitops repo — apps/, infra/, builders/</text>
+  </g>
+  <g>
+    <rect x="92" y="266" width="536" height="112" rx="16" fill="#FFFFFF" stroke="#E7EBF1" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="282" width="4" height="80" rx="2" fill="#3D63F5"/>
+    <g>
+    <rect x="531.2" y="284.0" width="74.8" height="20" rx="10" fill="#E8EDFE"/>
+    <text x="568.6" y="298.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#2B45B8" text-anchor="middle">FLYWHEEL</text>
+  </g>
+    <text x="126" y="308.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16.5" font-weight="650" fill="#10141A" letter-spacing="-0.2">git-deploy-controller</text>
+    <text x="126" y="332.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#586172">pushes your branch to the in-cluster git-server;</text>
+    <text x="126" y="351.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#586172">maintains flywheel/local-deploy (+ image bumps)</text>
+  </g>
+  <g>
+    <rect x="92" y="430" width="536" height="112" rx="16" fill="#FFFFFF" stroke="#E7EBF1" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="446" width="4" height="80" rx="2" fill="#7C5CFF"/>
+    <g>
+    <rect x="557.6" y="448.0" width="48.4" height="20" rx="10" fill="#EEEAFE"/>
+    <text x="581.8" y="462.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#5A3FCF" text-anchor="middle">FLUX</text>
+  </g>
+    <text x="126" y="472.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="16.5" font-weight="650" fill="#10141A" letter-spacing="-0.2">kustomize-controller</text>
+    <text x="126" y="496.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#586172">applies your infra/ builders/ apps/ overlays,</text>
+    <text x="126" y="515.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#586172">pruning whatever the commit removed</text>
+  </g>
+  <g>
+    <rect x="92" y="594" width="536" height="92" rx="16" fill="#FFFFFF" stroke="#E7EBF1" filter="url(#cardShadow)"/>
+    <rect x="92.5" y="610" width="4" height="60" rx="2" fill="#0BA37F"/>
+    <g>
+    <rect x="564.2" y="612.0" width="41.8" height="20" rx="10" fill="#E1F6EF"/>
+    <text x="585.1" y="626.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="10.5" font-weight="600" letter-spacing="0.8" fill="#07795E" text-anchor="middle">YOU</text>
+  </g>
+    <text x="126" y="635.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="17.5" font-weight="650" fill="#10141A" letter-spacing="-0.1">the cluster matches your repo</text>
+    <text x="126" y="659.0" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" font-size="13.5" fill="#586172">a few seconds after the commit — no push, no CI</text>
+  </g>
+  <g>
+    <path d="M 360 686 V 708.0 Q 360 726 342 726 H 70 Q 52 726 52 708.0 V 160.0 Q 52 142.0 70 142.0 H 84" fill="none" stroke="#0BA37F" stroke-width="2" stroke-dasharray="6 7" stroke-linecap="round"/>
+    <path d="M 83 137.0 L 91 142.0 L 83 147.0" fill="none" stroke="#0BA37F" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+    <text x="206.0" y="748.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="11.5" font-weight="600" fill="#07795E" text-anchor="middle">you observe the result → make the next change</text>
+  </g>
+  <line x1="40" y1="760" x2="680" y2="760" stroke="#E5E9EF" stroke-width="1"/><circle cx="260.5" cy="778.0" r="4.5" fill="#0BA37F"/><text x="273.0" y="782.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#586172">you</text><circle cx="324.5" cy="778.0" r="4.5" fill="#3D63F5"/><text x="337.0" y="782.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#586172">flywheel</text><circle cx="423.5" cy="778.0" r="4.5" fill="#7C5CFF"/><text x="436.0" y="782.0" font-family="ui-monospace, 'SF Mono', 'JetBrains Mono', Menlo, Consolas, monospace" font-size="12.5" fill="#586172">flux</text>
+</svg>
