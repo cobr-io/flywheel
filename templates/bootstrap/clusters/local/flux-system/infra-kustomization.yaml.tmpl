@@ -18,7 +18,8 @@ spec:
   # routine 10s reconcile blinked Ready=Unknown for ~260ms exactly as the
   # image-bump revision fan-out made client-infra (its dependent) evaluate,
   # so client-infra deferred 30s and client-apps cascaded. 5m makes that
-  # coincidence rare; --requeue-dependency=2s caps the cost if it still hits.
+  # coincidence rare; --requeue-dependency=500ms caps the cost if it still hits
+  # (measured: at the 30s default a caught blink is a ~40s outlier, at 500ms ~0.5s).
   interval: 5m
   prune: true
   sourceRef:

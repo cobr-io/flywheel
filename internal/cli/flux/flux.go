@@ -32,13 +32,23 @@ const Version = "v2.8.7"
 // requeueDependency is the value Flywheel sets for kustomize-controller's
 // --requeue-dependency flag, overriding upstream Flux's 30s default.
 //
-// Why: a dependent Kustomization that evaluates its dependsOn while the
-// target is mid-reconcile (a ~260ms Ready=Unknown blink that happens on
-// every routine interval reconcile) requeues by this constant. At the 30s
-// default that turned a 260ms race into a ~30s commit-to-pod outlier
-// (~1 run in 4, measured). 2s bounds the worst case while the longer
-// mirror-tier intervals make the race rare in the first place.
-const requeueDependency = "2s"
+// This constant governs two costs, both measured live (efq-dashboard loop):
+//
+//  1. Common case, every image bump: the client tiers share a source, so a
+//     bump fans out and client-infra then client-apps each evaluate their
+//     dependsOn while the one ahead is still mid-apply, so each requeues once
+//     by this constant. The actual apply work is ~130ms; the deferrals are
+//     pure requeue granularity. Dropping 2s -> 500ms cut warm commit-to-live
+//     from ~11.9s to ~8.5s median. 250ms gave no further gain (knee at 500ms).
+//
+//  2. Rare worst case: a dependent that evaluates while a cross-source target
+//     (flywheel-infra, sourced from the mirror) is mid-reconcile — a
+//     Ready=Unknown blink — requeues by this constant. Forced-coincidence test:
+//     at the 30s default a single caught blink is a ~40s commit-to-pod outlier
+//     (reproduced exactly; double-cascades to 60s+); at 500ms the same blink
+//     costs ~0.5s. The 5m mirror-tier interval makes the catch rare; this flag
+//     makes it cheap. Both are load-bearing.
+const requeueDependency = "500ms"
 
 // Install applies the embedded Flux manifest (with the requeue-dependency
 // transform) via SSA.
