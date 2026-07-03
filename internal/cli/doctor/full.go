@@ -12,6 +12,7 @@ import (
 
 	"github.com/cobr-io/flywheel/internal/cli/allocator"
 	"github.com/cobr-io/flywheel/internal/cli/dockerports"
+	"github.com/cobr-io/flywheel/internal/cli/gitcheckout"
 	"github.com/cobr-io/flywheel/internal/cli/hostmount"
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	"github.com/cobr-io/flywheel/internal/cli/netutil"
@@ -34,9 +35,38 @@ func FullChecks(homeOverride string) []Check {
 	checks = append(checks, allocatorPortCollisionCheck(homeOverride))
 	if cwd, err := os.Getwd(); err == nil {
 		checks = append(checks, workspaceMountCheck(cwd))
+		checks = append(checks, worktreeCheck(cwd))
 		checks = append(checks, workspaceCheck(cwd))
 	}
 	return checks
+}
+
+// worktreeCheck reports whether the git checkout layout is one `flywheel up`
+// supports. A normal clone or a supported sibling git worktree passes; a nested
+// worktree fails (flywheel's sibling model can't be satisfied), and a sibling
+// worktree whose shared git dir sits on an unshareable macOS temp path fails
+// (the mount wouldn't bridge into k3d). Read-only; a no-op outside a repo.
+func worktreeCheck(repoDir string) Check {
+	return Check{
+		Name:        "worktree",
+		Description: "git checkout is a clone or a supported sibling worktree",
+		Run: func(ctx context.Context) error {
+			layout, err := gitcheckout.Inspect(repoDir)
+			if err != nil || !layout.IsWorktree {
+				return nil // unclassifiable or a normal clone — nothing to report
+			}
+			if layout.Nested {
+				return fmt.Errorf("%s", gitcheckout.NestedRemediation(layout))
+			}
+			if runtime.GOOS == "darwin" {
+				if matched, bad := hostmount.UnshareableTempDir(layout.CommonDir); bad {
+					return fmt.Errorf("the worktree's shared git dir %s is under %s, which Docker Desktop "+
+						"won't bind-mount into k3d; run flywheel from a full clone instead", layout.CommonDir, matched)
+				}
+			}
+			return nil
+		},
+	}
 }
 
 // workspaceMountCheck (macOS) warns when the gitops repo sits on a host path
