@@ -90,8 +90,10 @@ flywheel add app <dir>   # scaffold a builder + workload from a worktree dir
 reaching it in a browser also needs local name resolution, see the
 [Local DNS guide](docs/guides/local-dns.md).
 
-Joining a repo a teammate already created? Don't run `init` — clone the repo
-and run `flywheel up --clone`. See the
+Joining a repo a teammate already created? Don't run `init`. Clone the repo
+and run `flywheel up --clone`: everything local needs is already committed,
+and `--clone` also clones any app repos declared in `flywheel.yaml` that
+aren't on your disk yet (without the flag, `up` asks before cloning). See the
 [Onboarding guide](docs/guides/onboarding.md).
 
 ## Installation
