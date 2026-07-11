@@ -7,11 +7,14 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"io"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 
 	"github.com/go-logr/logr"
 	"github.com/spf13/cobra"
@@ -21,7 +24,18 @@ import (
 )
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
+	// One cancellable root context for the whole run, threaded through every
+	// command via cmd.Context(). Ctrl-C (SIGINT) or SIGTERM cancels it so the
+	// ctx.Done() branches + exec.CommandContext calls already wired through
+	// up/down/clean/use unwind promptly instead of the process hanging until
+	// a multi-minute wait finishes. NotifyContext only intercepts the signal
+	// once: a second Ctrl-C after cancellation falls through to Go's default
+	// disposition (hard kill) — the same "one graceful, two forceful" UX as
+	// ctrl.SetupSignalHandler() in the controllers.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if err := newRootCmd().ExecuteContext(ctx); err != nil {
 		// A blank message means the command already printed everything it
 		// needs (help text, a "not implemented" line) — don't double-print.
 		if err.Error() != "" {

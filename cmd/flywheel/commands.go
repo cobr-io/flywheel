@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -154,7 +153,7 @@ func newUpCmd() *cobra.Command {
 			if cmd.Flags().Changed("wait") {
 				waitPtr = &wait
 			}
-			return up.Run(context.Background(), up.Options{
+			return up.Run(cmd.Context(), up.Options{
 				RepoDir: wd,
 				Wait:    waitPtr,
 				Clone:   clonePtr,
@@ -179,7 +178,7 @@ func newDownCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return down.Down(context.Background(), down.Options{
+			return down.Down(cmd.Context(), down.Options{
 				RepoDir: wd,
 				Yes:     yes,
 			}, os.Stdout)
@@ -207,7 +206,7 @@ func newCleanCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return clean.Run(context.Background(), a, clean.Options{
+			return clean.Run(cmd.Context(), a, clean.Options{
 				FlywheelNamespace: cfg.Namespaces.Flywheel,
 				Orphaned:          orphaned,
 			}, os.Stdout)
@@ -354,7 +353,7 @@ func newUseCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
-			return usecmd.Run(context.Background(), usecmd.Options{
+			return usecmd.Run(cmd.Context(), usecmd.Options{
 				RepoDir: wd,
 				Branch:  args[0],
 				Stdout:  os.Stdout,

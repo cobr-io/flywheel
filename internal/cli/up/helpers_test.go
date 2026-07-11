@@ -1,10 +1,13 @@
 package up
 
 import (
+	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 )
@@ -153,6 +156,42 @@ func newKust(name string, conditions []map[string]any) *unstructured.Unstructure
 		"metadata": map[string]any{"name": name},
 		"status":   map[string]any{"conditions": condIfaces},
 	}}
+}
+
+// waitForFluxKustomizations' CRD-retry branch used to `time.Sleep(2s)`
+// uncancellably (issue: Ctrl-C during `up`'s multi-minute wait hung until the
+// sleep elapsed on its own). waitTick is the extracted, ctx-aware replacement;
+// an already-canceled ctx must return promptly with ctx.Err() rather than
+// block for the full duration.
+func TestWaitTick_CanceledContextReturnsPromptly(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already canceled before waitTick is ever called
+
+	start := time.Now()
+	err := waitTick(ctx, 2*time.Second)
+	elapsed := time.Since(start)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("waitTick(canceled ctx) error = %v, want context.Canceled", err)
+	}
+	if elapsed > 500*time.Millisecond {
+		t.Fatalf("waitTick(canceled ctx) took %v, want a prompt return (<500ms), not the full 2s duration", elapsed)
+	}
+}
+
+// The uncanceled path still waits out the full duration and returns nil —
+// guards against a fix that short-circuits unconditionally.
+func TestWaitTick_ElapsesNormallyWhenNotCanceled(t *testing.T) {
+	start := time.Now()
+	err := waitTick(context.Background(), 20*time.Millisecond)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("waitTick(live ctx) error = %v, want nil", err)
+	}
+	if elapsed < 20*time.Millisecond {
+		t.Fatalf("waitTick(live ctx) returned after %v, want it to wait out the full duration", elapsed)
+	}
 }
 
 func TestMkcertRootSecret(t *testing.T) {
