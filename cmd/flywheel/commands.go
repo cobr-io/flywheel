@@ -149,9 +149,14 @@ func newUpCmd() *cobra.Command {
 				v := clone && !noClone
 				clonePtr = &v
 			}
+			// nil = default (wait); explicit --wait/--wait=false set it.
+			var waitPtr *bool
+			if cmd.Flags().Changed("wait") {
+				waitPtr = &wait
+			}
 			return up.Run(context.Background(), up.Options{
 				RepoDir: wd,
-				Wait:    wait,
+				Wait:    waitPtr,
 				Clone:   clonePtr,
 				Stdout:  os.Stdout,
 				Stdin:   os.Stdin,

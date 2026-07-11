@@ -44,9 +44,14 @@ import (
 // Options are the user-facing knobs for `up`.
 type Options struct {
 	RepoDir string // client repo dir; defaults to cwd
-	Wait    bool   // wait for Flux Kustomizations Ready before returning
 	Stdout  io.Writer
 	Stdin   io.Reader // for the worktree-reconcile confirmation prompt
+
+	// Wait gates waiting for Flux Kustomizations Ready before returning:
+	// true = wait, false = skip, nil = default (wait), matching --wait's
+	// true default. A plain bool can't distinguish "unset" from "explicit
+	// false" (both are the zero value), so this mirrors Clone below.
+	Wait *bool
 
 	// Clone gates the worktree reconcile: true = clone missing worktrees,
 	// false = skip, nil = ask on a TTY (skip otherwise).
@@ -65,13 +70,6 @@ type Options struct {
 func Run(ctx context.Context, opts Options) error {
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout
-	}
-	if opts.Wait == false {
-		// Default Wait=true unless explicitly disabled (zero value means
-		// "user didn't set"). Go's zero-value bool collapses true/false
-		// → pass a sentinel pointer in a real CLI; the simple v0.1.0
-		// dispatcher always opts in.
-		opts.Wait = true
 	}
 	if opts.RepoDir == "" {
 		wd, err := os.Getwd()
@@ -445,7 +443,7 @@ func Run(ctx context.Context, opts Options) error {
 
 	// Step 14 — wait for Flux Kustomizations Ready (best-effort in v0.1.0).
 	// The Waiter inside waitForFluxKustomizations renders its own header.
-	if opts.Wait {
+	if waitEnabled(opts) {
 		if err := waitForFluxKustomizations(ctx, a, 3*time.Minute, out); err != nil {
 			style.Warn(out, "step 14: %v", err)
 		}
@@ -614,6 +612,11 @@ func reconcileWorktrees(ctx context.Context, opts Options, cfg *schema.File, wsR
 	if len(failed) > 0 {
 		style.Warn(out, "could not materialise: %s (clone manually, then re-run)", strings.Join(failed, ", "))
 	}
+}
+
+// waitEnabled resolves Options.Wait's nil-means-default-true sentinel.
+func waitEnabled(opts Options) bool {
+	return opts.Wait == nil || *opts.Wait
 }
 
 func isTTY(r io.Reader) bool {
