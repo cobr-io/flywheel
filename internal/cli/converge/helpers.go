@@ -29,11 +29,18 @@ import (
 // It returns a ResourceRef for every object it applied, so `up` can fold the
 // dev-loop machinery into the keep set its orphan prune
 // (PruneOrphanedMachinery) scans against.
+//
+// The transient overlay's sole resource is `../overlays/local` (this
+// function's `overlayDir` argument), not `../base` directly — so this
+// direct-apply (SSA) path renders the same tree as the Flux path
+// (flywheel-dev-loop Kustomization, whose spec.path also points at
+// manifests/dev-loop/overlays/local). Applying `../base` alone would
+// silently skip anything the overlay adds on top of base.
 func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, refs map[string]string, gitServerMemLimit string, out io.Writer) ([]applier.ResourceRef, error) {
-	// Create the transient overlay as a sibling of `base` inside the
-	// cache tree, so the resource reference is simply `../base` — no
-	// absolute paths (kustomize forbids them) and no `/var`→`/private/var`
-	// symlink hazard from os.TempDir on macOS.
+	// Create the transient overlay as a sibling of `base` and `overlays`
+	// inside the cache tree, so the resource reference is simply
+	// `../overlays/local` — no absolute paths (kustomize forbids them) and
+	// no `/var`→`/private/var` symlink hazard from os.TempDir on macOS.
 	devLoopDir := filepath.Dir(overlayDir)  // .../manifests/dev-loop/overlays
 	devLoopRoot := filepath.Dir(devLoopDir) // .../manifests/dev-loop
 	tmp, err := os.MkdirTemp(devLoopRoot, ".flywheel-tmp-overlay-")
@@ -50,7 +57,12 @@ func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, re
 }
 
 // renderDevLoopKustomization builds the transient overlay's kustomization.yaml:
-// it rewrites each base ghcr.io image ref to the resolved ref, and patches the
+// its sole resource is `../overlays/local` (manifests/dev-loop/overlays/local,
+// which itself pulls in `../../base` — currently a pure passthrough, but this
+// keeps the direct-apply path and the Flux path — spec.path in
+// builders-kustomization.yaml.tmpl — pointed at the exact same tree, so
+// anything the overlay adds later isn't silently dropped here). It then
+// rewrites each base ghcr.io image ref to the resolved ref, and patches the
 // git-server container's memory limit. Pure (no I/O) so it can be unit-tested.
 func renderDevLoopKustomization(refs map[string]string, gitServerMemLimit string) string {
 	var images strings.Builder
@@ -65,7 +77,7 @@ func renderDevLoopKustomization(refs map[string]string, gitServerMemLimit string
 	return fmt.Sprintf(`apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 resources:
-  - ../base
+  - ../overlays/local
 images:
 %s%s`, images.String(), gitServerMemoryPatch(gitServerMemLimit))
 }

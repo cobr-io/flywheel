@@ -34,7 +34,9 @@ spec:
 `
 
 // buildKustomize mirrors applier.buildKustomize: a krusty build with the
-// load-restriction relaxed so the overlay's `../base` reference resolves.
+// load-restriction relaxed so the transient kustomization's
+// `../overlays/local` (and, transitively, its `../../base`) references
+// resolve.
 func buildKustomizeForTest(t *testing.T, dir string) string {
 	t.Helper()
 	opts := krusty.MakeDefaultOptions()
@@ -50,25 +52,52 @@ func buildKustomizeForTest(t *testing.T, dir string) string {
 	return string(b)
 }
 
-// renderDevLoopKustomization's output must be valid kustomize that both
-// rewrites the git-server image AND raises its memory limit — exercised
-// through a real krusty build, the same engine the applier uses.
-func TestRenderDevLoopKustomization_PatchesGitServerMemory(t *testing.T) {
+// devLoopFixture builds a fixture tree mirroring the real
+// manifests/dev-loop/ layout — base/ (populated from baseFiles) and
+// overlays/local/ (populated from overlayFiles, resourced alongside the
+// mandatory `../../base`, same as manifests/dev-loop/overlays/local/
+// kustomization.yaml) — plus a `transient` dir that is a sibling of both,
+// standing in for the dir ApplyDevLoop creates via
+// os.MkdirTemp(devLoopRoot, ...). Returns the transient dir, ready to
+// receive a rendered kustomization.yaml. overlayFiles may be nil/empty,
+// which reproduces the real overlay's current pure-passthrough shape.
+func devLoopFixture(t *testing.T, baseFiles, overlayFiles map[string]string) string {
+	t.Helper()
 	root := t.TempDir()
 	base := filepath.Join(root, "base")
-	overlay := filepath.Join(root, "overlay")
-	for _, d := range []string{base, overlay} {
+	overlayLocal := filepath.Join(root, "overlays", "local")
+	transient := filepath.Join(root, "transient")
+	for _, d := range []string{base, overlayLocal, transient} {
 		if err := os.MkdirAll(d, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := os.WriteFile(filepath.Join(base, "git-server.yaml"), []byte(baseGitServerManifest), 0o644); err != nil {
-		t.Fatal(err)
+
+	writeResources := func(dir string, files map[string]string, extraResourceLines string) {
+		kustomization := "apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n" + extraResourceLines
+		for name, content := range files {
+			if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			kustomization += "  - " + name + "\n"
+		}
+		if err := os.WriteFile(filepath.Join(dir, "kustomization.yaml"), []byte(kustomization), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
-	if err := os.WriteFile(filepath.Join(base, "kustomization.yaml"),
-		[]byte("apiVersion: kustomize.config.k8s.io/v1beta1\nkind: Kustomization\nresources:\n  - git-server.yaml\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
+	writeResources(base, baseFiles, "")
+	writeResources(overlayLocal, overlayFiles, "  - ../../base\n")
+
+	return transient
+}
+
+// renderDevLoopKustomization's output must be valid kustomize that both
+// rewrites the git-server image AND raises its memory limit — exercised
+// through a real krusty build, the same engine the applier uses, and
+// through the overlay indirection (transient -> ../overlays/local ->
+// ../../base) that ApplyDevLoop now goes through.
+func TestRenderDevLoopKustomization_PatchesGitServerMemory(t *testing.T) {
+	transient := devLoopFixture(t, map[string]string{"git-server.yaml": baseGitServerManifest}, nil)
 
 	refs := map[string]string{
 		"git-server":               "k3d-reg:5000/git-server:dogfood-abc",
@@ -76,11 +105,11 @@ func TestRenderDevLoopKustomization_PatchesGitServerMemory(t *testing.T) {
 		"image-builder-controller": "k3d-reg:5000/image-builder-controller:dogfood-abc",
 	}
 	k := renderDevLoopKustomization(refs, "512Mi")
-	if err := os.WriteFile(filepath.Join(overlay, "kustomization.yaml"), []byte(k), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(transient, "kustomization.yaml"), []byte(k), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
-	out := buildKustomizeForTest(t, overlay)
+	out := buildKustomizeForTest(t, transient)
 	if !strings.Contains(out, "memory: 512Mi") {
 		t.Errorf("patched git-server limit (512Mi) not in build output:\n%s", out)
 	}
@@ -110,6 +139,63 @@ func TestRenderDevLoopKustomization_DefaultLimit(t *testing.T) {
 	}
 	if !strings.Contains(k, "name: git-server") {
 		t.Errorf("patch should target git-server:\n%s", k)
+	}
+}
+
+// T16: the transient kustomization must reference the overlay
+// (`../overlays/local`), not `../base` directly, so content the overlay
+// adds on top of base isn't silently dropped on the direct-apply (SSA)
+// path. This fixture makes overlays/local add a *second* marker resource
+// (not a pure `../../base` passthrough like the real overlay is today) —
+// proving overlay-only content flows through, which `../base` would miss.
+func TestApplyDevLoop_OverlayResourcesIncluded(t *testing.T) {
+	const baseMarker = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: marker-base
+data:
+  from: base
+`
+	const overlayMarker = `apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: marker-overlay
+data:
+  from: overlay
+`
+	// The fixture's overlays/local is NOT a pure passthrough here — it adds
+	// marker.yaml on top of ../../base, so a build that silently dropped the
+	// overlay (i.e. resourced ../base directly, the pre-T16 behavior) would
+	// be missing marker-overlay.
+	transient := devLoopFixture(t, map[string]string{
+		"marker.yaml":     baseMarker,
+		"git-server.yaml": baseGitServerManifest, // target for the memory-limit patch below
+	}, map[string]string{
+		"marker.yaml": overlayMarker,
+	})
+
+	refs := map[string]string{
+		"git-server":               "ghcr.io/cobr-io/git-server:v0.1.0",
+		"git-auto-sync":            "ghcr.io/cobr-io/git-auto-sync:v0.1.0",
+		"image-builder-controller": "ghcr.io/cobr-io/image-builder-controller:v0.1.0",
+	}
+	k := renderDevLoopKustomization(refs, "128Mi")
+	if !strings.Contains(k, "- ../overlays/local\n") {
+		t.Fatalf("transient kustomization must reference the overlay (../overlays/local), not base directly:\n%s", k)
+	}
+	if strings.Contains(k, "- ../base\n") {
+		t.Errorf("transient kustomization should no longer reference ../base directly:\n%s", k)
+	}
+	if err := os.WriteFile(filepath.Join(transient, "kustomization.yaml"), []byte(k), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buildKustomizeForTest(t, transient)
+	if !strings.Contains(out, "marker-base") {
+		t.Errorf("base resource missing from render:\n%s", out)
+	}
+	if !strings.Contains(out, "marker-overlay") {
+		t.Errorf("overlay-only resource missing from render — the overlay is being ignored:\n%s", out)
 	}
 }
 
