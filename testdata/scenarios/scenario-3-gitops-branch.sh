@@ -23,11 +23,11 @@ log "scenario 3: client-gitops branch selection (opt-in)"
 # `flywheel use`; git-deploy-controller then feeds it into DEPLOY.
 edit_gitops_replicas_and_commit experiment/raise-replicas 3
 flywheel_use experiment/raise-replicas
-wait_for_deploy_branch experiment/raise-replicas 60
+wait_for_deploy_branch experiment/raise-replicas "$(scaled 60)"
 # Deploy-ref isolation: `use` records the selection in an annotation and does
 # NOT repoint the self GitRepository's spec.ref.branch (stays flywheel/local-deploy).
 assert_self_gitrepo_on_deploy_ref
-wait_for_replicas 3 120
+wait_for_replicas 3 "$(scaled 120)"
 
 # Regression guard (issue #6 + #17): re-running `flywheel up` must NOT clobber
 # the selection back to the default branch. `up` re-applies the self-source
@@ -36,8 +36,8 @@ wait_for_replicas 3 120
 # keeps feeding the selected branch into DEPLOY. The replica bump must survive.
 log "scenario 3: re-running 'flywheel up' must preserve the selected branch"
 ( cd "$CLIENT_REPO" && flywheel up )
-wait_for_deploy_branch experiment/raise-replicas 60
-wait_for_replicas 3 120
+wait_for_deploy_branch experiment/raise-replicas "$(scaled 60)"
+wait_for_replicas 3 "$(scaled 120)"
 
 # Graceful degradation (issue #17): deleting the selected branch from the gitops
 # repo degrades the deployment back to the default branch — git-deploy-controller
@@ -47,6 +47,6 @@ wait_for_replicas 3 120
 log "scenario 3: deleting the selected branch degrades to the default"
 switch_gitops_branch main
 delete_gitops_branch experiment/raise-replicas
-wait_for_replicas 1 120
+wait_for_replicas 1 "$(scaled 120)"
 
 log "scenario 3 PASS"
