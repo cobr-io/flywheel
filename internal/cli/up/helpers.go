@@ -33,7 +33,10 @@ func waitForFluxKustomizations(ctx context.Context, a *applier.Applier, timeout 
 			// CRD may not exist yet; retry (Tick the spinner so the
 			// user sees we're alive).
 			w.Tick()
-			time.Sleep(2 * time.Second)
+			if err := waitTick(ctx, 2*time.Second); err != nil {
+				w.Done("")
+				return err
+			}
 			continue
 		}
 		// On the first list, seed all items so the layout is stable
@@ -54,15 +57,27 @@ func waitForFluxKustomizations(ctx context.Context, a *applier.Applier, timeout 
 			w.Done(fmt.Sprintf("%d Flux Kustomization(s) Ready", len(items)))
 			return nil
 		}
-		select {
-		case <-ctx.Done():
+		if err := waitTick(ctx, 2*time.Second); err != nil {
 			w.Done("")
-			return ctx.Err()
-		case <-time.After(2 * time.Second):
+			return err
 		}
 	}
 	w.Done("")
 	return fmt.Errorf("Flux Kustomizations not all Ready before deadline")
+}
+
+// waitTick pauses for d, or returns ctx.Err() immediately if ctx is canceled
+// first. Shared by both retry branches of waitForFluxKustomizations (the
+// CRD-not-registered-yet path and the steady poll) so Ctrl-C during a
+// multi-minute `up` wait unwinds the loop instead of blocking up to 2s per
+// iteration until the deadline finally trips.
+func waitTick(ctx context.Context, d time.Duration) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-time.After(d):
+		return nil
+	}
 }
 
 // kustomizationDetail returns a short description of the current
