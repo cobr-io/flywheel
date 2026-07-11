@@ -81,8 +81,6 @@ echo "==> [4/4] scenarios 1 + 5"
 export KCTX="k3d-${CLIENT_NAME}-local"
 export CLIENT_REPO
 export WORKSPACES_ROOT="$E2E_ROOT"
-export REGISTRY="${CLIENT_NAME}-local-registry"
-export REGISTRY_PORT=0 # only a presence-guard in lib.sh; the registry is used by name
 export CLIENT_NAME
 bash "$REPO_ROOT/testdata/scenarios/scenario-1-baseline.sh"
 bash "$REPO_ROOT/testdata/scenarios/scenario-5-orphan-job-reaper.sh"
