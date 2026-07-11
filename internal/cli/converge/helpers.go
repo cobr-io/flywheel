@@ -15,6 +15,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/applier"
 	flywheelSchema "github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // ApplyDevLoop renders the dev-loop manifests with image references
@@ -145,7 +146,7 @@ func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelS
 				// Marks this as flywheel-applied machinery so `up`'s orphan
 				// prune (PruneOrphanedMachinery) keeps it in scope.
 				"labels": map[string]interface{}{
-					"app.kubernetes.io/managed-by": "flywheel",
+					naming.ManagedByLabelKey: naming.ManagedByLabelValue,
 				},
 			},
 			"data": data,

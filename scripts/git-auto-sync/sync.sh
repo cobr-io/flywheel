@@ -42,6 +42,11 @@ POLL_INTERVAL="${POLL_INTERVAL:-2}"
 # source with reconcile.fluxcd.io/requestedAt collapses stacked poll latency
 # out of the commit-to-pod loop. Flux treats the annotation value as opaque;
 # it only has to change between triggers.
+#
+# Keep this bash copy in sync with internal/naming (ReconcileRequestAnnotation).
+# Agreement between the Go constants and templates/manifests is enforced Go-side
+# only (see internal/cli/converge/naming_agreement_test.go); this shell literal
+# is not covered by that test, so update both together.
 RECONCILE_ANNOTATION="reconcile.fluxcd.io/requestedAt"
 
 git config --global --add safe.directory "$WORKTREE"

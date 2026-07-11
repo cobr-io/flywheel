@@ -3,8 +3,8 @@
 //
 // Flux's self GitRepository now tracks a constant DEPLOY branch
 // (flywheel/local-deploy); it is never repointed. Instead, `use` records the
-// chosen AUTHORED branch in the flywheel.cobr.io/deploy-branch annotation on the
-// self GitRepository, and git-deploy-controller feeds that branch into DEPLOY
+// chosen AUTHORED branch in the deploy-branch annotation (naming.DeployBranchAnnotation)
+// on the self GitRepository, and git-deploy-controller feeds that branch into DEPLOY
 // (= AUTHORED + the IUA's image bumps). The controller polls the annotation, so
 // no reconcile trigger is needed here — selecting a branch takes effect on the
 // controller's next tick, which rebuilds DEPLOY and pokes Flux.
@@ -31,20 +31,15 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	flywheelSchema "github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // Default identity of the self/gitops GitRepository (matches the
 // self-source.yaml.tmpl manifest and the sync deployment's env).
 const (
 	DefaultGitRepoName      = "flux-system"
-	DefaultGitRepoNamespace = "flux-system"
+	DefaultGitRepoNamespace = naming.FluxNamespace
 )
-
-// DeployBranchAnnotation is the durable record of the AUTHORED branch the
-// operator selected with `flywheel use`. git-deploy-controller reads it each
-// tick to decide which branch to feed into DEPLOY. Kept in sync with
-// selfsync.DeployBranchAnnotation (same string; the controller is the reader).
-const DeployBranchAnnotation = "flywheel.cobr.io/deploy-branch"
 
 // deployFieldManager is a DISTINCT SSA field manager (not applier.FieldManager
 // = "flux-controller"). It must differ so the deploy-branch annotation written
@@ -155,7 +150,7 @@ func BranchPatch(name, namespace, branch string) *unstructured.Unstructured {
 				"name":      name,
 				"namespace": namespace,
 				"annotations": map[string]any{
-					DeployBranchAnnotation: branch,
+					naming.DeployBranchAnnotation: branch,
 				},
 			},
 		},
@@ -197,12 +192,12 @@ func currentBranch(repoDir string) string {
 // per-developer cluster-name override, unlikely but consistent with the other
 // commands). Only cluster.name is needed to resolve the k3d context.
 func readConfig(repoDir string) (*flywheelSchema.File, error) {
-	committed, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml"))
+	committed, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
 	if err != nil {
 		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
 	}
 	var local []byte
-	if data, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml.local")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFileLocal)); err == nil {
 		local = data
 	}
 	merged, err := config.MergeYAML(committed, local)

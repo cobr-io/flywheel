@@ -35,6 +35,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // gitRepositoryGVK identifies Flux source-controller GitRepository objects
@@ -124,7 +126,7 @@ func (r *IUASourcePokeReconciler) pokeGitRepository(ctx context.Context, namespa
 	u.SetName(name)
 	patch := fmt.Appendf(nil,
 		`{"metadata":{"annotations":{%q:%q}}}`,
-		reconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
+		naming.ReconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	if err := r.Patch(ctx, u, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		if apierrors.IsNotFound(err) {

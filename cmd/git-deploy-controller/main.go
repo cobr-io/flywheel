@@ -34,6 +34,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/cobr-io/flywheel/internal/deploybranch"
+	"github.com/cobr-io/flywheel/internal/naming"
 	"github.com/cobr-io/flywheel/internal/selfsync"
 )
 
@@ -48,11 +49,11 @@ func main() {
 	// The dev-loop/base manifest is static (no per-client templating), so the
 	// per-repo paths are derived from REPO_BASE_NAME (sourced from flywheel-config).
 	repoBase := mustEnv("REPO_BASE_NAME")
-	gitServerURL := strings.TrimSuffix(envOr("GIT_SERVER_URL", "http://git-server.flywheel-system.svc.cluster.local:8080"), "/")
+	gitServerURL := strings.TrimSuffix(envOr("GIT_SERVER_URL", naming.GitServerURL(naming.FlywheelNamespace)), "/")
 	worktree := envOr("WORKTREE", filepath.Join(envOr("WORKSPACES_MOUNT", "/workspaces"), repoBase))
 	bareURL := envOr("BARE_REPO_URL", gitServerURL+"/"+repoBase+".git")
 	defaultBranch := envOr("DEFAULT_BRANCH", "main")
-	deployBranch := envOr("DEPLOY_BRANCH", "flywheel/local-deploy")
+	deployBranch := envOr("DEPLOY_BRANCH", naming.DeployBranch)
 	workDir := envOr("DEPLOY_WORKDIR", "/tmp/deploy-clone")
 	poll := envDuration("POLL_INTERVAL", 2*time.Second)
 
@@ -66,11 +67,11 @@ func main() {
 		Flux: &selfsync.K8sFlux{
 			Client:                 cl,
 			GitRepoName:            envOr("GITREPOSITORY_NAME", "flux-system"),
-			GitRepoNamespace:       envOr("GITREPOSITORY_NAMESPACE", "flux-system"),
+			GitRepoNamespace:       envOr("GITREPOSITORY_NAMESPACE", naming.FluxNamespace),
 			IUAName:                envOr("IUA_NAME", "flywheel-self"),
-			IUANamespace:           envOr("IUA_NAMESPACE", "flux-system"),
+			IUANamespace:           envOr("IUA_NAMESPACE", naming.FluxNamespace),
 			KustomizationName:      envOr("KUSTOMIZATION_NAME", "client-apps"),
-			KustomizationNamespace: envOr("KUSTOMIZATION_NAMESPACE", "flux-system"),
+			KustomizationNamespace: envOr("KUSTOMIZATION_NAMESPACE", naming.FluxNamespace),
 		},
 		DefaultBranch: defaultBranch,
 		PollInterval:  poll,

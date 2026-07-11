@@ -11,6 +11,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/config"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/worktree"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // workspaceCheck reports the state of the workspace block (flywheel.yaml) versus
@@ -90,12 +91,12 @@ func isGitRepo(dir string) bool {
 // loadConfigForWorkspace reads flywheel.yaml merged with flywheel.yaml.local and
 // parses it (no Validate — doctor must work on an in-progress config too).
 func loadConfigForWorkspace(repoDir string) (*schema.File, error) {
-	committed, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml"))
+	committed, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
 	if err != nil {
 		return nil, err
 	}
 	var local []byte
-	if data, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml.local")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFileLocal)); err == nil {
 		local = data
 	}
 	merged, err := config.MergeYAML(committed, local)

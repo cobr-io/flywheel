@@ -36,8 +36,8 @@ import (
 // fake it. Mirrors what sync.sh did with kubectl.
 type Flux interface {
 	// ConfiguredAuthored returns the AUTHORED branch the operator selected with
-	// `flywheel use` (the flywheel.cobr.io/deploy-branch annotation on the self
-	// GitRepository), or "" when unset.
+	// `flywheel use` (the deploy-branch annotation, naming.DeployBranchAnnotation,
+	// on the self GitRepository), or "" when unset.
 	ConfiguredAuthored(ctx context.Context) (string, error)
 	// SuspendIUA sets spec.suspend on the ImageUpdateAutomation.
 	SuspendIUA(ctx context.Context, suspend bool) error

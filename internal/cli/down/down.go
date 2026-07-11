@@ -24,6 +24,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // Options captures the user-facing knobs for `down`.
@@ -98,12 +99,12 @@ func confirmDestructive(stdin io.Reader, out io.Writer, clusterName string) erro
 }
 
 func loadConfig(repoDir string) (*schema.File, error) {
-	committed, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml"))
+	committed, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
 	if err != nil {
 		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
 	}
 	var local []byte
-	if data, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml.local")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFileLocal)); err == nil {
 		local = data
 	}
 	merged, err := config.MergeYAML(committed, local)

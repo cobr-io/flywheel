@@ -16,6 +16,7 @@ import (
 
 	"github.com/cobr-io/flywheel/internal/cli/applier"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // waitForFluxKustomizations polls every Flux Kustomization across the
@@ -182,7 +183,7 @@ func ensureMkcert(ctx context.Context, repoDir, domain string, out io.Writer) er
 // identify flywheel's own objects by one label. Returned as a fresh map per
 // call since unstructured stores it by reference.
 func managedByFlywheel() map[string]interface{} {
-	return map[string]interface{}{"app.kubernetes.io/managed-by": "flywheel"}
+	return map[string]interface{}{naming.ManagedByLabelKey: naming.ManagedByLabelValue}
 }
 
 // createAgeSecret creates the `sops-age` Secret in `flux-system`. Flux's
@@ -195,7 +196,7 @@ func createAgeSecret(ctx context.Context, a *applier.Applier, ageContent string,
 			"kind":       "Secret",
 			"metadata": map[string]interface{}{
 				"name":      "sops-age",
-				"namespace": "flux-system",
+				"namespace": naming.FluxNamespace,
 				"labels":    managedByFlywheel(),
 			},
 			"type": "Opaque",

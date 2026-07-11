@@ -8,16 +8,16 @@ import (
 
 	"github.com/cobr-io/flywheel/internal/cli/applier"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
-// ManagedBySelector is the label every resource `flywheel up` applies
-// imperatively carries (the dev-loop machinery via its kustomization, the
-// flywheel-config ConfigMap, the bootstrap flux-system tree, the secrets).
-// It is the membership marker for "flywheel's own applied set": resources
-// Flux reconciles from the gitops repo (app/infra workloads, per-app
-// git-auto-sync sidecars) are deliberately NOT labeled, so a label-scoped
-// scan can never see — let alone delete — them.
-const ManagedBySelector = "app.kubernetes.io/managed-by=flywheel"
+// The membership marker for "flywheel's own applied set" is
+// naming.ManagedBySelector: every resource `flywheel up` applies imperatively
+// (the dev-loop machinery via its kustomization, the flywheel-config ConfigMap,
+// the bootstrap flux-system tree, the secrets) carries it. Resources Flux
+// reconciles from the gitops repo (app/infra workloads, per-app git-auto-sync
+// sidecars) are deliberately NOT labeled, so a label-scoped scan can never
+// see — let alone delete — them.
 
 // pruneDenylist names the GroupKinds the orphan prune must NEVER delete, even
 // when they carry the managed-by label and have dropped out of the applied
@@ -59,7 +59,7 @@ func PruneOrphanedMachinery(ctx context.Context, a *applier.Applier, keep []appl
 
 	pruned := 0
 	for _, gk := range prunableGroupKinds(keep) {
-		items, err := a.ListByKindLabeled(ctx, gk, ManagedBySelector)
+		items, err := a.ListByKindLabeled(ctx, gk, naming.ManagedBySelector)
 		if err != nil {
 			style.Warn(out, "prune: list %s: %v", gk.String(), err)
 			continue

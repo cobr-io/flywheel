@@ -28,6 +28,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // imageUpdateAutomationName is the single cluster-wide IUA installed by the
@@ -118,7 +120,7 @@ func (r *ImagePolicyIUAReconciler) pokeIUA(ctx context.Context, namespace string
 	u.SetName(imageUpdateAutomationName)
 	patch := fmt.Appendf(nil,
 		`{"metadata":{"annotations":{%q:%q}}}`,
-		reconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
+		naming.ReconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	if err := r.Patch(ctx, u, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		if apierrors.IsNotFound(err) {

@@ -12,8 +12,8 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 
 	"github.com/cobr-io/flywheel/internal/cli/applier"
-	"github.com/cobr-io/flywheel/internal/cli/converge"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // Options for `flywheel clean`.
@@ -38,10 +38,10 @@ func Run(ctx context.Context, a *applier.Applier, opts Options, out io.Writer) e
 func cleanOrphanedPVCs(ctx context.Context, a *applier.Applier, ns string, out io.Writer) error {
 	gvr := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
 	// Label-scoped: only PVCs flywheel itself applied carry
-	// converge.ManagedBySelector. Without this scoping, every PVC in the
+	// naming.ManagedBySelector. Without this scoping, every PVC in the
 	// namespace gets listed (and deleted) below, including app PVCs that
 	// Flux/apps created — that was the bug this scoping fixes.
-	items, err := a.ListUnstructuredLabeled(ctx, gvr, ns, converge.ManagedBySelector)
+	items, err := a.ListUnstructuredLabeled(ctx, gvr, ns, naming.ManagedBySelector)
 	if err != nil {
 		return fmt.Errorf("list PVCs: %w", err)
 	}

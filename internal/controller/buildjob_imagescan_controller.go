@@ -42,22 +42,14 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
-)
 
-// fluxNamespace is where the per-app ImageRepository lives (per the per-app
-// template). It is the Flux install namespace and is fixed by convention,
-// independent of the client-configurable flywheel/apps namespaces.
-const fluxNamespace = "flux-system"
+	"github.com/cobr-io/flywheel/internal/naming"
+)
 
 // buildContainerName is the build container in the build Job template whose
 // successful exit means "image pushed". Must match the container `name` in
 // templates/build-job.yaml (guarded by TestRenderJob_BuildKitWiring).
 const buildContainerName = "build"
-
-// reconcileRequestAnnotation is Flux's "reconcile now" trigger. The value is
-// opaque to Flux — it only has to differ from the last handled value — so a
-// fresh nanosecond timestamp guarantees each poke fires a scan.
-const reconcileRequestAnnotation = "reconcile.fluxcd.io/requestedAt"
 
 // imageRepositoryGVK identifies Flux image-reflector ImageRepository objects
 // (served at v1 in the Flux version flywheel pins).
@@ -130,11 +122,11 @@ func (r *BuildJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 func (r *BuildJobReconciler) pokeImageRepository(ctx context.Context, name string) error {
 	u := &unstructured.Unstructured{}
 	u.SetGroupVersionKind(imageRepositoryGVK)
-	u.SetNamespace(fluxNamespace)
+	u.SetNamespace(naming.FluxNamespace)
 	u.SetName(name)
 	patch := fmt.Appendf(nil,
 		`{"metadata":{"annotations":{%q:%q}}}`,
-		reconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
+		naming.ReconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
 	)
 	if err := r.Patch(ctx, u, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		if apierrors.IsNotFound(err) {
