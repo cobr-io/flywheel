@@ -75,6 +75,15 @@ func New(kubeconfigPath, contextName string) (*Applier, error) {
 	return &Applier{dyn: dyn, mapper: mapper}, nil
 }
 
+// NewForTest builds an Applier around an already-constructed dynamic client
+// and REST mapper, bypassing kubeconfig/discovery. Lets tests inject a fake
+// dynamic client (k8s.io/client-go/dynamic/fake) and a mapper backed by a
+// fake discovery client, to exercise a full List+Delete flow without a real
+// cluster. Production code uses New.
+func NewForTest(dyn dynamic.Interface, mapper *restmapper.DeferredDiscoveryRESTMapper) *Applier {
+	return &Applier{dyn: dyn, mapper: mapper}
+}
+
 // ApplyKustomize builds the kustomization at `dir` and applies every
 // resource with SSA fieldManager=flux-controller.
 func (a *Applier) ApplyKustomize(ctx context.Context, dir string, out io.Writer) error {
@@ -261,6 +270,24 @@ func (a *Applier) ListUnstructured(ctx context.Context, gvr schema.GroupVersionR
 		resource = a.dyn.Resource(gvr).Namespace(namespace)
 	}
 	list, err := resource.List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, err
+	}
+	return list.Items, nil
+}
+
+// ListUnstructuredLabeled is ListUnstructured scoped additionally by
+// labelSelector. Used where the caller must not operate on every object of
+// a kind in the namespace — e.g. `flywheel clean`, which must only delete
+// PVCs it applied (managed-by=flywheel), not ones an app or Flux created.
+func (a *Applier) ListUnstructuredLabeled(ctx context.Context, gvr schema.GroupVersionResource, namespace, labelSelector string) ([]unstructured.Unstructured, error) {
+	var resource dynamic.ResourceInterface
+	if namespace == "" {
+		resource = a.dyn.Resource(gvr)
+	} else {
+		resource = a.dyn.Resource(gvr).Namespace(namespace)
+	}
+	list, err := resource.List(ctx, metav1.ListOptions{LabelSelector: labelSelector})
 	if err != nil {
 		return nil, err
 	}
