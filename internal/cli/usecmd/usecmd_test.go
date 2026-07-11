@@ -11,6 +11,8 @@ import (
 	"testing"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 func TestBranchPatch(t *testing.T) {
@@ -27,8 +29,8 @@ func TestBranchPatch(t *testing.T) {
 	}
 	// The deploy branch is now AUTHORED-selection only: it sets the annotation
 	// and must NOT touch spec.ref (Flux tracks the constant DEPLOY branch).
-	if ann := obj.GetAnnotations(); ann[DeployBranchAnnotation] != "feat/x" {
-		t.Errorf("deploy-branch annotation = %q, want feat/x", ann[DeployBranchAnnotation])
+	if ann := obj.GetAnnotations(); ann[naming.DeployBranchAnnotation] != "feat/x" {
+		t.Errorf("deploy-branch annotation = %q, want feat/x", ann[naming.DeployBranchAnnotation])
 	}
 	if _, found, _ := unstructured.NestedMap(obj.Object, "spec"); found {
 		t.Error("BranchPatch must not set spec (Flux ref is constant now)")
@@ -97,7 +99,7 @@ func TestRun_AppliesBranchPatch(t *testing.T) {
 	if captured == nil {
 		t.Fatal("applyObject was not called")
 	}
-	if got := captured.GetAnnotations()[DeployBranchAnnotation]; got != "feat/x" {
+	if got := captured.GetAnnotations()[naming.DeployBranchAnnotation]; got != "feat/x" {
 		t.Errorf("applied deploy-branch annotation = %q, want feat/x", got)
 	}
 }

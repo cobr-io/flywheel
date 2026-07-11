@@ -10,6 +10,7 @@ import (
 	flywheel "github.com/cobr-io/flywheel"
 	"github.com/cobr-io/flywheel/internal/cli/config"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // checkVersionDrift enforces the binary↔pin agreement invariant before `up`
@@ -93,7 +94,7 @@ func promptBumpVersion(out io.Writer, stdin io.Reader, repoDir, pin, build strin
 				"to %s or re-run and accept the update", pin, build, build)
 	}
 
-	path := filepath.Join(repoDir, "flywheel.yaml")
+	path := filepath.Join(repoDir, naming.ConfigFile)
 	if err := config.SetFlywheelVersion(path, build); err != nil {
 		return pin, fmt.Errorf("update flywheel.version: %w", err)
 	}

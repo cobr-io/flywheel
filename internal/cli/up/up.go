@@ -39,6 +39,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	"github.com/cobr-io/flywheel/internal/cli/worktree"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // Options are the user-facing knobs for `up`.
@@ -302,7 +303,7 @@ func Run(ctx context.Context, opts Options) error {
 		// 5-minute budget matches a typical `flux install --timeout 5m0s`.
 		// Cold colima pulls the Flux controller images from ghcr.io on
 		// first run, which can exceed 2 minutes.
-		if err := converge.WaitForDeployments(ctx, a, "flux-system", []string{
+		if err := converge.WaitForDeployments(ctx, a, naming.FluxNamespace, []string{
 			"source-controller",
 			"kustomize-controller",
 		}, 5*time.Minute, out); err != nil {
@@ -373,7 +374,7 @@ func Run(ctx context.Context, opts Options) error {
 	// Step 11b — wait for git-server Ready.
 	// Step 11b: covered by the Waiter inside waitForDeployments — no
 	// step header here, since the Waiter prints its own.
-	if err := converge.WaitForDeployments(ctx, a, "flywheel-system", []string{"git-server"}, 3*time.Minute, out); err != nil {
+	if err := converge.WaitForDeployments(ctx, a, naming.FlywheelNamespace, []string{"git-server"}, 3*time.Minute, out); err != nil {
 		return fmt.Errorf("step 11b: %w", err)
 	}
 
@@ -382,7 +383,7 @@ func Run(ctx context.Context, opts Options) error {
 	// continue: Flux's flywheel-source will be unreconciled, which is
 	// documented as a known gap).
 	if err := style.Spin(out, "bootstrap 11c: pushing cache into in-cluster mirror", func() error {
-		return mirror.Push(ctx, "", kubeContext, "flywheel-system", "git-server",
+		return mirror.Push(ctx, "", kubeContext, naming.FlywheelNamespace, "git-server",
 			"flywheel", cacheDir, sha, out)
 	}); err != nil {
 		style.Warn(out, "step 11c: %v (Flux flywheel-source won't reconcile until this works)", err)

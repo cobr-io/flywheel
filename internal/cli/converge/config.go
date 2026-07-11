@@ -12,10 +12,11 @@ import (
 
 	"github.com/cobr-io/flywheel/internal/cli/config"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 func LoadConfig(repoDir string) (*schema.File, error) {
-	commitedPath := filepath.Join(repoDir, "flywheel.yaml")
+	commitedPath := filepath.Join(repoDir, naming.ConfigFile)
 	committed, err := os.ReadFile(commitedPath)
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", commitedPath, err)
@@ -31,7 +32,7 @@ func LoadConfig(repoDir string) (*schema.File, error) {
 	}
 
 	var local []byte
-	localPath := filepath.Join(repoDir, "flywheel.yaml.local")
+	localPath := filepath.Join(repoDir, naming.ConfigFileLocal)
 	if data, err := os.ReadFile(localPath); err == nil {
 		local = data
 		localFile, err := schema.Parse(local)

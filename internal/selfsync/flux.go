@@ -11,15 +11,9 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
-
-// DeployBranchAnnotation is the durable record of the AUTHORED branch the
-// operator selected with `flywheel use`, stored on the self GitRepository. The
-// controller reads it each tick to decide which branch to feed DEPLOY from.
-const DeployBranchAnnotation = "flywheel.cobr.io/deploy-branch"
-
-// reconcileRequestAnnotation is Flux's "reconcile now" trigger.
-const reconcileRequestAnnotation = "reconcile.fluxcd.io/requestedAt"
 
 var (
 	gitRepoGVK = schema.GroupVersionKind{Group: "source.toolkit.fluxcd.io", Version: "v1", Kind: "GitRepository"}
@@ -57,7 +51,7 @@ func (k *K8sFlux) ConfiguredAuthored(ctx context.Context) (string, error) {
 		}
 		return "", err
 	}
-	return u.GetAnnotations()[DeployBranchAnnotation], nil
+	return u.GetAnnotations()[naming.DeployBranchAnnotation], nil
 }
 
 // SuspendIUA sets spec.suspend on the ImageUpdateAutomation. A missing IUA is
@@ -118,7 +112,7 @@ func (k *K8sFlux) WaitArtifact(ctx context.Context, targetSHA string) error {
 
 func (k *K8sFlux) pokeReconcile(ctx context.Context, gvk schema.GroupVersionKind, ns, name string) error {
 	u := obj(gvk, ns, name)
-	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{%q:%q}}}`, reconcileRequestAnnotation, k.now())
+	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{%q:%q}}}`, naming.ReconcileRequestAnnotation, k.now())
 	return k.patch(ctx, u, patch)
 }
 

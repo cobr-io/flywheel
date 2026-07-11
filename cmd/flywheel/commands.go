@@ -23,6 +23,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/up"
 	"github.com/cobr-io/flywheel/internal/cli/usecmd"
 	"github.com/cobr-io/flywheel/internal/cli/worktree"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 func newVersionCmd() *cobra.Command {
@@ -402,7 +403,7 @@ func completeWorktreeDirs(cmd *cobra.Command, args []string, toComplete string) 
 // readClusterConfig reads + parses flywheel.yaml (no full validation) for
 // commands that just need cluster.name + namespaces.
 func readClusterConfig(repoDir string) (*schema.File, error) {
-	raw, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml"))
+	raw, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
 	if err != nil {
 		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
 	}

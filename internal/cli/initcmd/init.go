@@ -18,6 +18,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/dockerports"
 	"github.com/cobr-io/flywheel/internal/cli/embedcache"
 	"github.com/cobr-io/flywheel/internal/cli/render"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // embeddedSkeleton returns the embedded client-skeleton sub-FS — the
@@ -241,7 +242,7 @@ func Run(opts Options) (*Result, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := os.WriteFile(filepath.Join(repoDir, ".flywheel-state.yaml"), raw, 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, naming.StateFile), raw, 0o644); err != nil {
 		return nil, err
 	}
 
@@ -251,7 +252,7 @@ func Run(opts Options) (*Result, error) {
 	// at /workspaces/<name>-gitops in-cluster).
 	workspacesRoot := filepath.Dir(repoDir)
 	localYaml := fmt.Sprintf("paths:\n  workspaces_root: %s\n", workspacesRoot)
-	if err := os.WriteFile(filepath.Join(repoDir, "flywheel.yaml.local"), []byte(localYaml), 0o644); err != nil {
+	if err := os.WriteFile(filepath.Join(repoDir, naming.ConfigFileLocal), []byte(localYaml), 0o644); err != nil {
 		return nil, err
 	}
 

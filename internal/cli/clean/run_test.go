@@ -17,7 +17,7 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/cobr-io/flywheel/internal/cli/applier"
-	"github.com/cobr-io/flywheel/internal/cli/converge"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // newTestApplier builds an *applier.Applier around a fake dynamic client
@@ -43,12 +43,12 @@ func newTestApplier(objects ...runtime.Object) *applier.Applier {
 }
 
 // pvc builds an unstructured PersistentVolumeClaim fixture. When labeled is
-// true it carries converge.ManagedBySelector, the same label `flywheel up`
+// true it carries naming.ManagedBySelector, the same label `flywheel up`
 // stamps on every PVC it applies.
 func pvc(name, ns string, labeled bool) *unstructured.Unstructured {
 	labels := map[string]interface{}{}
 	if labeled {
-		k, v, _ := strings.Cut(converge.ManagedBySelector, "=")
+		k, v, _ := strings.Cut(naming.ManagedBySelector, "=")
 		labels[k] = v
 	}
 	return &unstructured.Unstructured{Object: map[string]interface{}{
@@ -66,7 +66,7 @@ func pvc(name, ns string, labeled bool) *unstructured.Unstructured {
 // bug where cleanOrphanedPVCs listed PVCs with a bare, unscoped list (no
 // label selector) and deleted every PVC in the namespace — including ones
 // an app or Flux created, not just the ones flywheel itself applied. It
-// must delete only the PVC carrying converge.ManagedBySelector and leave
+// must delete only the PVC carrying naming.ManagedBySelector and leave
 // the unlabeled one (standing in for an app-owned PVC) untouched.
 func TestCleanOrphanedPVCs_OnlyDeletesLabeled(t *testing.T) {
 	const ns = "flywheel-system"

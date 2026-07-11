@@ -27,6 +27,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	wt "github.com/cobr-io/flywheel/internal/cli/worktree"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // Options are the inputs to Run.
@@ -280,7 +281,7 @@ func Run(opts Options) (*Result, error) {
 	}
 
 	repo := schema.WorkspaceRepo{Name: worktree, URL: srcURL, LocalOnly: localOnly, Branch: opts.Branch}
-	if err := config.UpsertWorkspaceRepo(filepath.Join(opts.RepoDir, "flywheel.yaml"), repo); err != nil {
+	if err := config.UpsertWorkspaceRepo(filepath.Join(opts.RepoDir, naming.ConfigFile), repo); err != nil {
 		return nil, fmt.Errorf("record %s in the workspace block: %w", worktree, err)
 	}
 
@@ -340,7 +341,7 @@ func buildValues(opts Options, cfg *schema.File, worktree, gitAutoSyncRef string
 		"AppsNamespace":     opts.Namespace,
 		"ClientName":        cfg.Client.Name,
 		"FluxIntervalLocal": cfg.Flux.IntervalLocal,
-		"GitServerURL":      "http://git-server.flywheel-system.svc.cluster.local:8080",
+		"GitServerURL":      naming.GitServerURL(naming.FlywheelNamespace),
 		"GitAutoSyncImage":  gitAutoSyncRef,
 		"RegistryURL":       fmt.Sprintf("k3d-%s:5000", cfg.Cluster.Registry),
 		"Image":             opts.Image,
@@ -423,12 +424,12 @@ func WorkspaceDirs(repoDir string) ([]string, error) {
 // client-builders Kustomization), so a `.local` override reaches the
 // per-app sidecar through `up`, not through this read.
 func readConfig(repoDir string) (*schema.File, error) {
-	committed, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml"))
+	committed, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
 	if err != nil {
 		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
 	}
 	var local []byte
-	if data, err := os.ReadFile(filepath.Join(repoDir, "flywheel.yaml.local")); err == nil {
+	if data, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFileLocal)); err == nil {
 		local = data
 	}
 	merged, err := config.MergeYAML(committed, local)

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	flywheelSchema "github.com/cobr-io/flywheel/internal/cli/schema"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // TestRenderBootstrap_ResolvesImageRefs renders the bootstrap tree
@@ -82,8 +83,8 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 	// (flywheel/local-deploy), not the worktree's branch — git-deploy-controller
 	// keeps that branch = AUTHORED + image bumps.
 	selfSrc := mustRead(t, filepath.Join(dir, "self-source.yaml"))
-	if !strings.Contains(selfSrc, "branch: flywheel/local-deploy") {
-		t.Errorf("self-source.yaml should track flywheel/local-deploy, got:\n%s", selfSrc)
+	if !strings.Contains(selfSrc, "branch: "+naming.DeployBranch) {
+		t.Errorf("self-source.yaml should track %s, got:\n%s", naming.DeployBranch, selfSrc)
 	}
 
 	// flywheel-config.yaml: the keys git-deploy-controller reads.
@@ -201,7 +202,7 @@ func TestRenderBootstrap_EveryResourceLabeledManagedBy(t *testing.T) {
 			continue
 		}
 		resources++
-		if !strings.Contains(doc, "app.kubernetes.io/managed-by: flywheel") {
+		if !strings.Contains(doc, naming.ManagedByLabelKey+": "+naming.ManagedByLabelValue) {
 			t.Errorf("a bootstrap resource is missing the managed-by label:\n%s", doc)
 		}
 		for _, line := range strings.Split(doc, "\n") {

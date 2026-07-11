@@ -12,6 +12,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // portSlot is one host port subject to up-time collision healing.
@@ -91,7 +92,7 @@ func healHostPorts(ctx context.Context, opts Options, cfg *schema.File, out io.W
 	}
 
 	style.Step(out, "healing host-port collisions")
-	yamlPath := filepath.Join(opts.RepoDir, "flywheel.yaml")
+	yamlPath := filepath.Join(opts.RepoDir, naming.ConfigFile)
 	for _, a := range assignments {
 		if err := config.SetClusterPort(yamlPath, a.slot.key, a.port); err != nil {
 			return fmt.Errorf("persist %s=%d: %w", a.slot.key, a.port, err)
