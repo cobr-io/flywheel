@@ -24,12 +24,14 @@ jobs:
       - name: go test
         run: go test -race ./...
       - name: cross-phase invariant — no :latest tags in image refs
+        # Dockerfiles are globbed (git ls-files), not enumerated by name, so a
+        # fifth Dockerfile.* added later is covered automatically instead of
+        # silently going unscanned.
         run: |
           if grep -rE '(image:|--destination=)[^[:space:]]*:latest($|[^[:alnum:]])' \
               --exclude='*_test.go' --exclude-dir=testdata \
               cmd/ internal/ manifests/ templates/ \
-              Dockerfile.git-server Dockerfile.git-auto-sync \
-              Dockerfile.image-builder-controller Dockerfile.git-deploy-controller 2>/dev/null; then
+              $(git ls-files 'Dockerfile.*') 2>/dev/null; then
             echo "ERROR: :latest tag detected — every published artefact must use :vX.Y.Z"
             exit 1
           fi
@@ -72,6 +74,47 @@ jobs:
             echo "==> building ${target}"
             GOOS="${target%/*}" GOARCH="${target#*/}" go build ./...
           done
+
+  version-stamp:
+    # Guards against a repeat of the incident logged at .goreleaser.yaml:35-41:
+    # the ldflags symbol github.com/cobr-io/flywheel.BuildVersion is spelled
+    # independently in Makefile:11 and .goreleaser.yaml, and `-X` on a
+    # misspelled/missing symbol is a silent no-op — not a build failure — so
+    # this has shipped v0.0.0-dev releases twice. Builds only the `flywheel`
+    # CLI for the runner's host platform via goreleaser snapshot mode (no
+    # docker images, no other GOOS/GOARCH) and asserts the stamped version
+    # isn't the unstamped default. Independent of k3d-e2e so it stays fast.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0   # goreleaser needs tag history to compute a version
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: goreleaser snapshot build (host target, flywheel CLI only)
+        # Mirrors release.yml's setup action + version pin; args differ
+        # (build --snapshot --single-target, not release) so this stays
+        # docker-free and builds only the current host's target.
+        uses: goreleaser/goreleaser-action@v7
+        with:
+          version: latest
+          args: build --snapshot --single-target --id flywheel --clean
+      - name: assert version stamp is not the unstamped default
+        run: |
+          set -euo pipefail
+          bin="$(find dist -type f -name flywheel | head -1)"
+          if [ -z "$bin" ]; then
+            echo "::error::no 'flywheel' binary found under dist/ after goreleaser snapshot build"
+            exit 1
+          fi
+          out="$("$bin" version)"
+          echo "version output: $out"
+          if echo "$out" | grep -q 'v0\.0\.0-dev'; then
+            echo "::error::snapshot binary reports v0.0.0-dev — the -X ldflags symbol (github.com/cobr-io/flywheel.BuildVersion, spelled independently in Makefile and .goreleaser.yaml) is broken"
+            exit 1
+          fi
 
   k3d-e2e:
     # Plan § 1.6 / T1.6-T1.9: `flywheel init` + `up` + scenario 1 on a
