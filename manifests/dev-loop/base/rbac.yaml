@@ -135,14 +135,17 @@ rules:
   - apiGroups: [source.toolkit.fluxcd.io]
     resources: [gitrepositories]
     verbs: [get, patch]
-  # The gitops/self git-auto-sync suspends + resumes the flywheel-self
-  # ImageUpdateAutomation during branch switches (Open Issue #11).
+  # git-deploy-controller (internal/selfsync; the former gitops/self sync.sh
+  # mode moved here) suspends + resumes the flywheel-self ImageUpdateAutomation
+  # around DEPLOY-branch rebuilds (Open Issue #11), reusing this SA (see
+  # git-deploy-controller.yaml).
   - apiGroups: [image.toolkit.fluxcd.io]
     resources: [imageupdateautomations]
     verbs: [get, patch]
   # ...and pokes the apps Kustomization to reconcile immediately after a
-  # head-changing sync (reconcile.fluxcd.io/requestedAt). Only the self sync
-  # sets KUSTOMIZATION_NAME, but the Role is shared, and the apps Kustomization
+  # head-changing sync (reconcile.fluxcd.io/requestedAt). Only
+  # git-deploy-controller does this (sync.sh, used by per-app sidecars, has no
+  # Kustomization poke), but the Role is shared, and the apps Kustomization
   # lives in flux-system.
   - apiGroups: [kustomize.toolkit.fluxcd.io]
     resources: [kustomizations]
