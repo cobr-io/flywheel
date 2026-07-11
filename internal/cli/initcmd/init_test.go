@@ -580,11 +580,12 @@ func compareWithGolden(t *testing.T, renderedRoot, flavour string) {
 	})
 }
 
-// stripStatePathsForGolden rewrites the .flywheel-state.yaml's `files:`
-// map keys are already repo-relative (good), but the unwritten
-// flywheel.yaml.local would be skipped so nothing to strip. This is a
-// no-op stub kept for symmetry; real path scrubbing lives in the
-// renderer.
+// stripStatePathsForGolden is a no-op: .flywheel-state.yaml today holds
+// only `cluster.converged_sha`, which is already deterministic (tests
+// inject a fixed SHA), so there's no host-specific path left to scrub.
+// Kept as a named call site so a future field that reintroduces
+// non-determinism (e.g. an absolute path) has an obvious place to add
+// real scrubbing.
 func stripStatePathsForGolden(_ *testing.T, _, _ string) {}
 
 // Sanity: ensures we're testing against an in-repo template directory,

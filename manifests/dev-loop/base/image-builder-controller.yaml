@@ -18,7 +18,12 @@ spec:
       serviceAccountName: image-builder-controller
       containers:
         - name: controller
-          image: ghcr.io/cobr-io/image-builder-controller:v0.1.0
+          # Tag is a placeholder: both apply paths rewrite this by image
+          # NAME (renderDevLoopKustomization / flywheel-dev-loop Kustomization
+          # spec.images), so a real version should never reach the cluster
+          # here. If it does, the rewrite didn't run — fail loudly instead of
+          # silently running a stale pin.
+          image: ghcr.io/cobr-io/image-builder-controller:rewritten-by-flywheel-up
           imagePullPolicy: IfNotPresent
           # Configuration is injected from the flywheel-config ConfigMap
           # (per design § The `flywheel-config` ConfigMap). Each value is

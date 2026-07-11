@@ -1,6 +1,8 @@
 FROM debian:stable-slim
 
-# Keep kubectl loosely in sync with the K3S_IMAGE in the Makefile.
+# Keep kubectl loosely in sync with the k3s_image pin: the default in
+# internal/cli/schema/schema.go (~:75) and the default emitted into
+# templates/client-skeleton/flywheel.yaml.tmpl.
 ARG KUBECTL_VERSION=v1.34.1
 
 RUN apt-get update && \

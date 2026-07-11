@@ -449,11 +449,6 @@ func buildValues(opts Options, triple allocator.Triple, tag, sha, agePub string)
 	}
 }
 
-// buildState walks repoDir and records per-file SHA256 of every rendered
-// or copied file (relative paths, sorted lexicographically for stable
-// output). The answers snapshot is the same `values` used during render
-// — necessary for `update`'s 3-way merge base to re-render with the
-// original answers (see plan T3.1(f)).
 func gitCmd(cwd string, args ...string) error {
 	cmd := exec.Command("git", args...)
 	cmd.Dir = cwd

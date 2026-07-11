@@ -5,8 +5,15 @@
 //
 // The on-disk directories (templates/, manifests/) are kept *as files*
 // in the repo for dev iteration — you can `kubectl kustomize
-// manifests/dev-loop/base/` directly when hacking. The binary's view of
-// those directories is the embed.FS snapshotted at build time.
+// manifests/dev-loop/base/` directly to inspect the rendered shape when
+// hacking. Note the git-server / image-builder-controller /
+// git-deploy-controller images in that base are the deliberate placeholder
+// tag `:rewritten-by-flywheel-up` — real refs are only substituted by the
+// two apply paths (renderDevLoopKustomization and the flywheel-dev-loop
+// Kustomization's spec.images), so `kubectl apply` of the raw kustomize
+// output will ImagePullBackOff rather than run a stale version. The
+// binary's view of those directories is the embed.FS snapshotted at build
+// time.
 package flywheel
 
 import "embed"

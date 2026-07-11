@@ -202,9 +202,8 @@ func (a *Applier) ApplyObjectAs(ctx context.Context, obj *unstructured.Unstructu
 	return nil
 }
 
-// DeleteResource deletes a single resource by ref (used by `flywheel up`
-// step 12 for approved destructive ops, and by `flywheel clean`). Missing
-// resources are not an error (idempotent).
+// DeleteResource deletes a single resource by ref (used by `flywheel clean`).
+// Missing resources are not an error (idempotent).
 func (a *Applier) DeleteResource(ctx context.Context, ref ResourceRef, out io.Writer) error {
 	mapping, err := a.mapper.RESTMapping(schema.GroupKind{Group: ref.Group, Kind: ref.Kind})
 	if err != nil {

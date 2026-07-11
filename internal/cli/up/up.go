@@ -60,8 +60,13 @@ type Options struct {
 	SkipFluxInstall bool   // tests with Flux already present
 }
 
-// Run is the 15-step pipeline. Returns nil on success; partial failures
-// abort early and return the first error.
+// Run executes the up pipeline, numbered by the in-line step comments below
+// (1-15 plus lettered sub-steps). The numbering is historical and has gaps —
+// steps 4 and 12 were removed by earlier refactors and step 8 is now just a
+// pointer to where its work actually happens (step 11a) — kept as-is here so
+// renumbering stays a dedicated change (see task T19) rather than noise in
+// unrelated diffs. Returns nil on success; partial failures abort early and
+// return the first error.
 func Run(ctx context.Context, opts Options) error {
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout

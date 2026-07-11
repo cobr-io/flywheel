@@ -32,7 +32,12 @@ spec:
     spec:
       containers:
         - name: git-server
-          image: ghcr.io/cobr-io/git-server:v0.1.0
+          # Tag is a placeholder: both apply paths rewrite this by image
+          # NAME (renderDevLoopKustomization / flywheel-dev-loop Kustomization
+          # spec.images), so a real version should never reach the cluster
+          # here. If it does, the rewrite didn't run — fail loudly instead of
+          # silently running a stale pin.
+          image: ghcr.io/cobr-io/git-server:rewritten-by-flywheel-up
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

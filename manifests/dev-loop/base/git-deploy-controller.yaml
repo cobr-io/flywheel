@@ -22,9 +22,13 @@ spec:
       serviceAccountName: git-auto-sync
       containers:
         - name: controller
-          # Rewritten to the per-client local-registry ref by `flywheel up`
-          # (renderDevLoopKustomization, keyed on schema.ImageNames).
-          image: ghcr.io/cobr-io/git-deploy-controller:v0.1.0
+          # Tag is a placeholder: rewritten to the per-client local-registry
+          # ref by `flywheel up` (renderDevLoopKustomization, keyed on
+          # schema.ImageNames) and by the flywheel-dev-loop Kustomization's
+          # spec.images on the Flux path — both match by image NAME, so this
+          # should never reach the cluster. If it does, the rewrite didn't
+          # run — fail loudly instead of silently running a stale pin.
+          image: ghcr.io/cobr-io/git-deploy-controller:rewritten-by-flywheel-up
           imagePullPolicy: IfNotPresent
           env:
             # dev-loop/base is static, so per-repo values arrive via flywheel-config.

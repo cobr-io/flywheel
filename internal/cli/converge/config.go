@@ -1,9 +1,8 @@
-// Package converge holds the cluster-convergence primitives shared by
-// `flywheel up` and future commands (e.g. `update`): reading + merging
-// flywheel.yaml, rendering the bootstrap flux-system tree, and applying
-// the dev-loop overlay / flywheel-config ConfigMap / waiting for
-// Deployments. These are pure move-outs from package `up` — behaviour is
-// unchanged.
+// Package converge holds the cluster-convergence primitives used by
+// `flywheel up`: reading + merging flywheel.yaml, rendering the bootstrap
+// flux-system tree, and applying the dev-loop overlay / flywheel-config
+// ConfigMap / waiting for Deployments. These are pure move-outs from
+// package `up` — behaviour is unchanged.
 package converge
 
 import (

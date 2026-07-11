@@ -10,18 +10,18 @@ metadata:
   namespace: flywheel-system
   labels:
     app: git-auto-sync
-    worktree: {{ .AppName }}
+    worktree: {{ .Worktree }}
 spec:
   replicas: 1
   selector:
     matchLabels:
       app: git-auto-sync
-      worktree: {{ .AppName }}
+      worktree: {{ .Worktree }}
   template:
     metadata:
       labels:
         app: git-auto-sync
-        worktree: {{ .AppName }}
+        worktree: {{ .Worktree }}
     spec:
       serviceAccountName: git-auto-sync
       containers:
