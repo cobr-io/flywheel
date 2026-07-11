@@ -5,8 +5,7 @@
 # the builder and asserts image-builder-controller reaps orphan Jobs.
 # Used by CI (1.6) and manual pre-release validation.
 #
-# Required env (see lib.sh): KCTX, CLIENT_REPO, WORKSPACES_ROOT, REGISTRY,
-# REGISTRY_PORT, CLIENT_NAME.
+# Required env (see lib.sh): KCTX, CLIENT_REPO, WORKSPACES_ROOT, CLIENT_NAME.
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")"
 

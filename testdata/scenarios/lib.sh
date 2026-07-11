@@ -12,8 +12,6 @@ set -euo pipefail
 : "${KCTX:?set KCTX to the kube context, e.g. k3d-acme-local}"
 : "${CLIENT_REPO:?set CLIENT_REPO to the client gitops repo dir}"
 : "${WORKSPACES_ROOT:?set WORKSPACES_ROOT (parent of CLIENT_REPO + sibling app repos)}"
-: "${REGISTRY:?set REGISTRY, e.g. acme-local-registry}"
-: "${REGISTRY_PORT:?set REGISTRY_PORT, e.g. 50001}"
 : "${CLIENT_NAME:?set CLIENT_NAME, e.g. acme}"
 
 APP="${APP:-sample-app}"
@@ -122,7 +120,19 @@ dump_diag() {
   kc -n flux-system get imagerepository,imagepolicy 2>&1 || true
   echo "  ImagePolicy latest tag: $(kc -n flux-system get imagepolicy "$APP" -o jsonpath='{.status.latestRef.tag}' 2>/dev/null)"
   echo "  registry tags (${CLIENT_NAME}/${APP}):"
-  curl -s "http://localhost:${REGISTRY_PORT}/v2/${CLIENT_NAME}/${APP}/tags/list" 2>&1 | head -c 600; echo
+  # The registry's host port is allocated (and possibly healed) by `flywheel
+  # up`, so it can't be hard-coded — read the live value straight out of the
+  # client repo's flywheel.yaml (same awk pattern the CI workflows use for
+  # http_port) rather than requiring an exported REGISTRY_PORT that would
+  # silently go stale whenever init/up reallocate the port.
+  local reg_port
+  reg_port=$(awk '/^[[:space:]]*registry_port:/{gsub(/[^0-9]/,"",$2); print $2; exit}' \
+    "$CLIENT_REPO/flywheel.yaml" 2>/dev/null || true)
+  if [[ -n "$reg_port" ]]; then
+    curl -s "http://localhost:${reg_port}/v2/${CLIENT_NAME}/${APP}/tags/list" 2>&1 | head -c 600; echo
+  else
+    echo "  (skipped: could not read cluster.registry_port from $CLIENT_REPO/flywheel.yaml)"
+  fi
   echo "  live Deployment image: $(kc -n apps get deploy "$APP" -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null)"
   echo "  DEPLOY branch deployment.yaml (image/replicas):"
   kc -n flywheel-system exec deploy/git-server -- sh -c \

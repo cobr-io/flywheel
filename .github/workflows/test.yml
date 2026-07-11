@@ -199,8 +199,6 @@ jobs:
           export KCTX=k3d-acme-local
           export CLIENT_REPO="$HOME/e2e/acme"
           export WORKSPACES_ROOT="$HOME/e2e"
-          export REGISTRY=acme-local-registry
-          export REGISTRY_PORT=50001
           export CLIENT_NAME=acme
           bash testdata/scenarios/scenario-1-baseline.sh
           bash testdata/scenarios/scenario-5-orphan-job-reaper.sh
