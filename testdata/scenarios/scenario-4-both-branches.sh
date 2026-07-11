@@ -28,30 +28,30 @@ flywheel_use experiment/both
 # lives in flywheel-system and follows the app branch; the gitops selection is
 # recorded in the self GitRepository's deploy-branch annotation (deploy-ref
 # isolation — its spec.ref.branch stays flywheel/local-deploy).
-wait_for_gitrepo_branch flywheel-system "$APP" feat/both 60
-wait_for_deploy_branch experiment/both 60
+wait_for_gitrepo_branch flywheel-system "$APP" feat/both "$(scaled 60)"
+wait_for_deploy_branch experiment/both "$(scaled 60)"
 # App-content changes travel the full image chain (build → ImagePolicy scan →
 # IUA bump → DEPLOY branch → Flux rollout). With the gitops repo concurrently on
 # a feature branch, that chain converges in ~40s locally but is slower on a
 # constrained CI runner; give it a generous window (see dump_diag's app-image
 # chain section if it still times out).
-wait_for_served_text "hello from both-branches feat" 360
-wait_for_replicas 2 120
+wait_for_served_text "hello from both-branches feat" "$(scaled 360)"
+wait_for_replicas 2 "$(scaled 120)"
 
 # Switch the app back to main; the gitops selection is unchanged (a worktree
 # checkout on the app side must not affect the gitops deploy).
 switch_app_branch main
-wait_for_gitrepo_branch flywheel-system "$APP" main 60
-wait_for_deploy_branch experiment/both 30  # unchanged
+wait_for_gitrepo_branch flywheel-system "$APP" main "$(scaled 60)"
+wait_for_deploy_branch experiment/both "$(scaled 30)"  # unchanged
 # Switching the app back rebuilds main's content into a fresh (newest-tag) image
 # that the IUA bumps onto DEPLOY; same image chain as above, so the same generous
 # window. This is the step that timed out at 180s in CI (converged in ~40s locally).
-wait_for_served_text "hello from sample-app v2" 360
-wait_for_replicas 2 60  # gitops still selected on its feature branch → still 2
+wait_for_served_text "hello from sample-app v2" "$(scaled 360)"
+wait_for_replicas 2 "$(scaled 60)"  # gitops still selected on its feature branch → still 2
 
 # Select gitops back to main too.
 flywheel_use main
-wait_for_deploy_branch main 60
-wait_for_replicas 1 120
+wait_for_deploy_branch main "$(scaled 60)"
+wait_for_replicas 1 "$(scaled 120)"
 
 log "scenario 4 PASS"

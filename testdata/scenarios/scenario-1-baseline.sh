@@ -17,13 +17,13 @@ add_sample_app
 # (flywheel-dev-loop → client-builders) plus a cold kaniko build + scan +
 # rollout. Allow 480s. The steady-state assertion (150s) is below.
 edit_app_and_commit main "hello from sample-app v1"
-wait_for_served_text "hello from sample-app v1" 480
+wait_for_served_text "hello from sample-app v1" "$(scaled 480)"
 
 # Steady-state: a second commit rolls through a warm-cache build. The
 # image build + Flux scan + IUA + rollout still spans several reconcile
 # cycles, so allow 150s (the design's sub-30s target is the commit→build
 # trigger latency, not the full cold+scan+roll wall time on CI/colima).
 edit_app_and_commit main "hello from sample-app v2"
-wait_for_served_text "hello from sample-app v2" 150
+wait_for_served_text "hello from sample-app v2" "$(scaled 150)"
 
 log "scenario 1 PASS"

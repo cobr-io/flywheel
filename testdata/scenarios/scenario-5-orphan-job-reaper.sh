@@ -49,8 +49,9 @@ git_in "$CLIENT_REPO" commit -q -m "remove $APP builder + workload (reaper test)
 log "committed removal of $APP builder + workload"
 
 # Wait for Flux to prune the GitRepository in the apps namespace.
-log "waiting up to 90s for GitRepository apps/$APP to be pruned"
-deadline=$((SECONDS + 90))
+prune_timeout=$(scaled 90)
+log "waiting up to ${prune_timeout}s for GitRepository apps/$APP to be pruned"
+deadline=$((SECONDS + prune_timeout))
 while (( SECONDS < deadline )); do
   if ! kc -n apps get gitrepository "$APP" >/dev/null 2>&1; then
     log "GitRepository apps/$APP pruned"
@@ -69,8 +70,9 @@ fi
 # Now the controller's Reconcile fires with IsNotFound and reaps every
 # Job labelled app=image-builder,repo=$APP. Allow 30s; that's well
 # above any reasonable Reconcile + delete latency.
-log "waiting up to 30s for build Jobs to be reaped"
-deadline=$((SECONDS + 30))
+reap_timeout=$(scaled 30)
+log "waiting up to ${reap_timeout}s for build Jobs to be reaped"
+deadline=$((SECONDS + reap_timeout))
 while (( SECONDS < deadline )); do
   remaining=$(kc -n flywheel-system get jobs -l app=image-builder,repo="$APP" --no-headers 2>/dev/null | wc -l | tr -d ' ')
   if [[ "$remaining" == "0" ]]; then

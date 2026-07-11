@@ -19,6 +19,14 @@ TESTDATA="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
+# scaled <seconds> — multiply a wait/timeout ceiling by ${TIMEOUT_SCALE:-1}.
+# The per-scenario literals are the LOCAL budget; local runs leave
+# TIMEOUT_SCALE unset (×1, behavior identical) while the CI recipe exports
+# TIMEOUT_SCALE=3, so a slow 2-core runner never trips a ceiling that was
+# tuned on a dev box. A ceiling is the upper bound of a polling loop, not a
+# fixed sleep, so scaling it up costs nothing when the wait succeeds early.
+scaled() { echo "$(( $1 * ${TIMEOUT_SCALE:-1} ))"; }
+
 kc() { kubectl --context="$KCTX" "$@"; }
 
 # git_in <dir> <args...> — run git in a worktree with a deterministic

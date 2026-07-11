@@ -1,17 +1,18 @@
 name: e2e-full
 
-# Nightly / on-demand full dev-loop e2e (issue #38).
+# Nightly / on-demand full dev-loop e2e (issue #38 / plan T17).
 #
 # The per-PR `k3d-e2e` job in test.yml runs only scenarios 1 + 5 to stay
 # inside a ~25-min budget, so the branch scenarios (2 = app branch, 3 =
-# gitops branch, 4 = both branches) are validated LOCALLY but never in CI.
-# This workflow closes that gap: it MIRRORS the per-PR job's known-good
-# setup exactly (same four runtime images, same dogfood image pins, same
-# `flywheel init`/`up`, same env exports + host-port heal probe + node
-# image re-import net) but then runs the FULL `run-all.sh` (scenarios
-# 1-5) instead of just 1 + 5. It is kept out of the per-PR path so the
-# extra wall-clock never taxes contributors; it fires nightly and on
-# manual dispatch.
+# gitops branch, 4 = both branches) are validated LOCALLY but never in the
+# per-PR path. This workflow closes that gap by running the FULL scenario set
+# (run-all.sh, 1-5) — but it no longer copies the per-PR setup. Both callers
+# now delegate to the SAME reusable recipe (e2e-recipe.yml), so the two can
+# never drift; the only differences are the scenario selection ("all" here vs
+# "1 5" per-PR) and a roomier timeout. It fires nightly and on manual dispatch.
+#
+# A red nightly used to page no one, so the `alert` job below opens (or
+# comments on) a stably-titled GitHub issue on failure.
 on:
   schedule:
     - cron: '0 3 * * *'   # 03:00 UTC daily
@@ -22,133 +23,49 @@ permissions:
 
 jobs:
   k3d-e2e-full:
-    # Same recipe as test.yml's `k3d-e2e`, but runs every scenario via
-    # run-all.sh (1-5) rather than the CI subset (1 + 5). The binary
-    # `go:embed`s skeleton + manifests, so CI locally builds the four
-    # runtime images (no v0.1.0 published yet on ghcr.io) and points
-    # `flywheel.yaml.local` at the build tags — same path a dogfooding
-    # dev follows. See design § flywheel.images.
+    # Full nightly gate = run-all.sh (scenarios 1-5): core dev loop (1), the
+    # branch switches skipped per-PR (2 = app branch, 3 = gitops branch, 4 =
+    # both branches), and the orphan-Job reaper (5). (Open Issue #11 also
+    # affects scenario 4.) `up` alone is ~9 min on a 2-core runner and run-all
+    # adds the three branch scenarios plus their Kaniko rebuilds, so give it a
+    # generous budget — no per-PR pressure here.
+    uses: ./.github/workflows/e2e-recipe.yml
+    with:
+      scenarios: "all"
+      timeout-minutes: 90
+
+  alert:
+    # Page someone when the nightly goes red. Opens a stably-titled issue, or
+    # comments on the existing open one instead of spamming a fresh issue each
+    # night. Runs only on failure of the e2e job (a cancel is not a failure).
+    needs: k3d-e2e-full
+    if: failure()
     runs-on: ubuntu-latest
-    # Generous nightly budget: `up` alone is ~9 min on a 2-core runner and
-    # run-all adds the three branch scenarios (2-4) plus their Kaniko
-    # rebuilds on top of 1 + 5. No per-PR pressure here, so leave headroom.
-    timeout-minutes: 90
+    permissions:
+      contents: read
+      issues: write
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache: true
-      - name: Install k3d + mkcert
-        run: |
-          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
-          sudo apt-get update && sudo apt-get install -y libnss3-tools
-          curl -fsSL -o /usr/local/bin/mkcert \
-            "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
-          sudo chmod +x /usr/local/bin/mkcert
-      - name: Build flywheel binary
-        run: go build -o /usr/local/bin/flywheel ./cmd/flywheel
-      - name: flywheel doctor coverage
-        # Issue #38: mirror the per-PR job's `doctor` end-to-end check
-        # (happy path + full run + missing-prereq error path). Cluster-free,
-        # so it runs cheaply before `up`.
-        run: bash testdata/scenarios/scenario-doctor.sh
-      - name: Build runtime images locally
-        # `flywheel up` step 9 sees these in the host docker store and
-        # `k3d image import`s them directly into the cluster's containerd
-        # — no registry round-trip, no ghcr.io pull.
-        run: |
-          # Controller images COPY a host-built binary rather than compiling Go
-          # in-image (issue #46). The runner is linux/amd64, so a native
-          # `go build` (GOOS=linux, host amd64) feeds the arch-matched context.
-          ctx="$(mktemp -d)"
-          for c in image-builder-controller git-deploy-controller; do
-            CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o "$ctx/$c" "./cmd/$c"
-          done
-          docker build -t flywheel-dev/git-server:ci -f Dockerfile.git-server .
-          docker build -t flywheel-dev/git-auto-sync:ci -f Dockerfile.git-auto-sync .
-          docker build -t flywheel-dev/image-builder-controller:ci -f Dockerfile.image-builder-controller "$ctx"
-          docker build -t flywheel-dev/git-deploy-controller:ci -f Dockerfile.git-deploy-controller "$ctx"
-      - name: Wait for docker daemon to settle
-        # The three builds above leave dockerd briefly busy; `flywheel up`'s
-        # step-2 prereq check then pings `docker info` and was occasionally
-        # tripping a transient slow response (run 27508841693). `up` now
-        # retries that ping, but warm the daemon here too so the job starts
-        # from a known-ready state.
-        run: |
-          for i in $(seq 1 30); do
-            if docker info >/dev/null 2>&1; then echo "docker ready"; exit 0; fi
-            echo "waiting for docker daemon… ($i)"; sleep 2
-          done
-          echo "::error::docker daemon not ready after 60s"; exit 1
-      - name: flywheel init + up + ALL scenarios
+      - name: Open or comment on the nightly-failure issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TITLE: nightly e2e failure
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
-          mkdir -p "$HOME/e2e/acme" && cd "$HOME/e2e/acme"
-          flywheel init --org=cobr-io
-          # Dogfood-mode override: point at the locally-built images.
-          cat >> flywheel.yaml.local <<'EOF'
-          flywheel:
-            images:
-              git-server: flywheel-dev/git-server:ci
-              git-auto-sync: flywheel-dev/git-auto-sync:ci
-              image-builder-controller: flywheel-dev/image-builder-controller:ci
-              git-deploy-controller: flywheel-dev/git-deploy-controller:ci
-          EOF
-          # Issue #1: prove `up` heals a host-port collision instead of
-          # crashing k3d. Squat the just-allocated http_port so step 5b must
-          # reallocate it; the scenarios below then prove the cluster still
-          # came up healthy on the new port.
-          INIT_HTTP_PORT=$(awk '/^[[:space:]]*http_port:/{gsub(/[^0-9]/,"",$2); print $2; exit}' flywheel.yaml)
-          echo "squatting http_port $INIT_HTTP_PORT (0.0.0.0) before up"
-          python3 -m http.server "$INIT_HTTP_PORT" --bind 0.0.0.0 >/dev/null 2>&1 &
-          SQUAT_PID=$!
-          for i in $(seq 1 20); do
-            if (exec 3<>/dev/tcp/127.0.0.1/$INIT_HTTP_PORT) 2>/dev/null; then exec 3>&- 3<&-; break; fi
-            sleep 0.25
-          done
-          flywheel up
-          kill "$SQUAT_PID" 2>/dev/null || true
-          HEALED_HTTP_PORT=$(awk '/^[[:space:]]*http_port:/{gsub(/[^0-9]/,"",$2); print $2; exit}' flywheel.yaml)
-          if [ "$HEALED_HTTP_PORT" = "$INIT_HTTP_PORT" ]; then
-            echo "::error::http_port $INIT_HTTP_PORT was squatted but up did not heal it (still $HEALED_HTTP_PORT)"; exit 1
+          # Find an existing OPEN issue with this exact title (search is fuzzy,
+          # so re-filter on an exact title match to avoid matching a lookalike).
+          existing=$(gh issue list --state open --search "\"$TITLE\" in:title" \
+            --json number,title --jq "map(select(.title == \"$TITLE\")) | .[0].number // empty")
+          body="The nightly full e2e run (scenarios: all) failed.
+
+          Run: $RUN_URL
+
+          Triage the failing scenario in that run's logs (dump_diag output is captured there). This issue is comment-appended on each subsequent red nightly; close it once the nightly is green again."
+          if [ -n "$existing" ]; then
+            echo "commenting on existing issue #$existing"
+            gh issue comment "$existing" --body "$body"
+          else
+            echo "opening a new nightly-failure issue"
+            gh issue create --title "$TITLE" --body "$body"
           fi
-          echo "host-port heal OK: http_port $INIT_HTTP_PORT (squatted) → $HEALED_HTTP_PORT"
-          # Harden against the multi-node k3d image-import race: `k3d
-          # image import` (up step 9) occasionally fails to land an image
-          # on one of the two agents yet still returns success, so a pod
-          # scheduled there sits in ImagePullBackOff under
-          # imagePullPolicy: IfNotPresent and the dev loop never completes
-          # (run 27069530246: image-builder-controller stuck → no build
-          # Job → scenario 1 timeout). Verify each runtime image is on
-          # every node and re-import (idempotent, all-nodes) if missing.
-          # crictl is preconfigured in k3s nodes; if the check itself
-          # can't list images it grep-misses and we re-import anyway — the
-          # safe direction.
-          nodes=$(k3d node list --no-headers | awk '$2=="server"||$2=="agent"{print $1}')
-          for img in flywheel-dev/git-server:ci \
-                     flywheel-dev/git-auto-sync:ci \
-                     flywheel-dev/image-builder-controller:ci \
-                     flywheel-dev/git-deploy-controller:ci; do
-            for node in $nodes; do
-              if ! docker exec "$node" crictl images 2>/dev/null | grep -q "${img%:*}"; then
-                echo "::warning::$img missing on $node — re-importing into all nodes"
-                k3d image import "$img" -c acme-local
-                break
-              fi
-            done
-          done
-          cd "$GITHUB_WORKSPACE"
-          # Full nightly gate = run-all.sh (scenarios 1-5): core dev loop
-          # (1), the branch switches skipped per-PR (2 = app branch, 3 =
-          # gitops branch, 4 = both branches), and the orphan-Job reaper
-          # (5). (Open Issue #11 also affects scenario 4.)
-          export KCTX=k3d-acme-local
-          export CLIENT_REPO="$HOME/e2e/acme"
-          export WORKSPACES_ROOT="$HOME/e2e"
-          export CLIENT_NAME=acme
-          bash testdata/scenarios/run-all.sh
-      - name: Teardown
-        if: always()
-        run: |
-          cd "$HOME/e2e/acme" 2>/dev/null && flywheel down --yes || true
