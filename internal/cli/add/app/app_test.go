@@ -40,7 +40,6 @@ namespaces:
 flux:
   interval_local: 10s
 local:
-  profile: mkcert
   domain: localdev.me
 `
 
@@ -617,7 +616,7 @@ func TestAddApp_RejectsInvalidNameOverride(t *testing.T) {
 func TestAddApp_ErrorsOnMissingLocalDomain(t *testing.T) {
 	repo := setupRepo(t)
 	withoutDomain := strings.Replace(fixtureFlywheelYAML,
-		"local:\n  profile: mkcert\n  domain: localdev.me\n", "", 1)
+		"local:\n  domain: localdev.me\n", "", 1)
 	if err := os.WriteFile(filepath.Join(repo, "flywheel.yaml"), []byte(withoutDomain), 0o644); err != nil {
 		t.Fatal(err)
 	}

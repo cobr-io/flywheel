@@ -212,9 +212,15 @@ var memoryQuantityRe = regexp.MustCompile(`^[0-9]+(\.[0-9]+)?(Ei|Pi|Ti|Gi|Mi|Ki|
 // Parse unmarshals YAML into a File without semantic validation. Callers
 // run Validate (or ValidateLocal) afterwards depending on whether the
 // document is the committed file or `.local` overlay.
+//
+// Unmarshaling is strict (unknown fields rejected): a typo'd key (e.g.
+// `gitserver:` instead of `git_server:`) would otherwise silently parse as
+// all-defaults instead of failing loud — the exact failure class
+// Validate's git.integration_branch comment below warns about ("a typo here
+// would silently disable the local-only guard").
 func Parse(raw []byte) (*File, error) {
 	var f File
-	if err := yaml.Unmarshal(raw, &f); err != nil {
+	if err := yaml.UnmarshalStrict(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse flywheel.yaml: %w", err)
 	}
 	return &f, nil

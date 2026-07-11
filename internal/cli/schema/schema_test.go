@@ -49,6 +49,45 @@ func TestParse_ValidYAML(t *testing.T) {
 	}
 }
 
+// TestParse_RejectsUnknownKey locks in T02: strict parsing so a typo'd key
+// (e.g. `gitserver:` instead of `git_server:`) fails loud instead of
+// silently parsing as all-defaults — the exact failure class the
+// git.integration_branch validation comment warns about.
+func TestParse_RejectsUnknownKey(t *testing.T) {
+	cases := []struct {
+		name string
+		yaml string
+	}{
+		{
+			name: "unknown top-level key",
+			yaml: `
+schema: v1alpha1
+gitserver:
+  memory_limit: 512Mi
+`,
+		},
+		{
+			name: "unknown nested key",
+			yaml: `
+schema: v1alpha1
+cluster:
+  nmae: acme-local
+`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := Parse([]byte(tc.yaml))
+			if err == nil {
+				t.Fatal("Parse: expected an error for the unknown key, got nil")
+			}
+			if !strings.Contains(err.Error(), "unknown field") {
+				t.Errorf("Parse error = %q, want it to name the unknown field", err.Error())
+			}
+		})
+	}
+}
+
 func TestValidate_FullyPopulated(t *testing.T) {
 	f, err := Parse([]byte(validYAML))
 	if err != nil {
