@@ -14,6 +14,9 @@
 # flywheel.yaml (git.integration_branch), default "main".
 #
 # Depends on mikefarah's yq (https://github.com/mikefarah/yq).
+#
+# Bash 3.2 compatible (no associative arrays, no mapfile) — this runs as a
+# pre-commit hook and in CI, and stock macOS ships /bin/bash 3.2.
 
 set -euo pipefail
 
@@ -32,13 +35,21 @@ if [ -z "$target" ]; then
   target="$(git rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")"
 fi
 
-# Worktrees the workspace block flags local_only.
-declare -A local_only_wt=()
+# Worktrees the workspace block flags local_only, as a newline-delimited
+# list. Bash 3.2 has no associative arrays, so membership below is checked
+# with `grep -Fx` instead of a hash lookup.
+local_only_wt=""
 if [ -f flywheel.yaml ]; then
   while IFS= read -r name; do
-    [ -n "$name" ] && [ "$name" != "null" ] && local_only_wt["$name"]=1
+    [ -n "$name" ] && [ "$name" != "null" ] || continue
+    local_only_wt="${local_only_wt}${name}
+"
   done < <(yq '.workspace.repos[] | select(.local_only == true) | .name' flywheel.yaml 2>/dev/null || true)
 fi
+
+is_local_only_wt() {
+  [ -n "$1" ] && printf '%s' "$local_only_wt" | grep -Fxq "$1"
+}
 
 # Apps (builders) whose worktree — the basename of spec.url minus .git — is
 # flagged local_only.
@@ -49,7 +60,7 @@ for f in builders/base/*/gitrepository.yaml; do
   [ -n "$url" ] && [ "$url" != "null" ] || continue
   wt="$(basename "$url")"
   wt="${wt%.git}"
-  if [ -n "${local_only_wt[$wt]:-}" ]; then
+  if is_local_only_wt "$wt"; then
     local_only+=("$(basename "$(dirname "$f")") (worktree $wt)")
   fi
 done
