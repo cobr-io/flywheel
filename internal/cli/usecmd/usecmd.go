@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"slices"
 	"strings"
 
@@ -30,6 +29,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	flywheelSchema "github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
+	"github.com/cobr-io/flywheel/internal/execx"
 	"github.com/cobr-io/flywheel/internal/naming"
 )
 
@@ -162,13 +162,14 @@ func BranchPatch(name, namespace, branch string) *unstructured.Unstructured {
 // shell completion of the <branch> argument and the not-a-local-branch warning.
 // Best-effort: callers treat an error as "no candidates".
 func LocalBranches(repoDir string) ([]string, error) {
-	cmd := exec.Command("git", "-C", repoDir, "for-each-ref", "--format=%(refname:short)", "refs/heads")
-	out, err := cmd.Output()
+	// TODO: thread a context once callers carry one; this is a best-effort
+	// completion helper whose callers don't have a ctx in hand.
+	out, err := execx.Git(context.Background(), repoDir, "for-each-ref", "--format=%(refname:short)", "refs/heads")
 	if err != nil {
 		return nil, err
 	}
 	var branches []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if line != "" {
 			branches = append(branches, line)
 		}
@@ -180,11 +181,12 @@ func LocalBranches(repoDir string) ([]string, error) {
 // be determined (detached HEAD, unborn branch, git error) — in which case the
 // AUTHORED/worktree-mismatch warning is skipped.
 func currentBranch(repoDir string) string {
-	out, err := exec.Command("git", "-C", repoDir, "symbolic-ref", "--quiet", "--short", "HEAD").Output()
+	// TODO: thread a context once callers carry one.
+	out, err := execx.Git(context.Background(), repoDir, "symbolic-ref", "--quiet", "--short", "HEAD")
 	if err != nil {
 		return ""
 	}
-	return strings.TrimSpace(string(out))
+	return strings.TrimSpace(out)
 }
 
 // readConfig parses flywheel.yaml merged with flywheel.yaml.local (for a

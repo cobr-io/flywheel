@@ -3,34 +3,24 @@ package doctor
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-)
 
-func gitCmd(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(),
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
+	"github.com/cobr-io/flywheel/internal/testgit"
+)
 
 func initRepo(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	gitCmd(t, dir, "init", "-q", "-b", "main")
+	testgit.Git(t, dir, "init", "-q", "-b", "main")
 	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	gitCmd(t, dir, "add", "-A")
-	gitCmd(t, dir, "commit", "-q", "-m", "init")
+	testgit.Git(t, dir, "add", "-A")
+	testgit.Git(t, dir, "commit", "-q", "-m", "init")
 }
 
 func TestWorktreeCheck_NormalClonePasses(t *testing.T) {
@@ -46,7 +36,7 @@ func TestWorktreeCheck_NestedWorktreeFails(t *testing.T) {
 	repo := filepath.Join(root, "repo")
 	initRepo(t, repo)
 	nested := filepath.Join(repo, ".claude", "worktrees", "agent-x")
-	gitCmd(t, repo, "worktree", "add", "-q", "-b", "feat", nested)
+	testgit.Git(t, repo, "worktree", "add", "-q", "-b", "feat", nested)
 
 	err := worktreeCheck(nested).Run(context.Background())
 	if err == nil {

@@ -3,11 +3,12 @@ package deploybranch
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
+
+	"github.com/cobr-io/flywheel/internal/testgit"
 )
 
 // A realistic manifest: the image setter line is buried deep, so an edit to
@@ -29,24 +30,6 @@ spec:
             - containerPort: 8080
 `
 
-func git(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
-
-func gitOut(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
-	if err != nil {
-		t.Fatalf("git %v: %v", args, err)
-	}
-	return strings.TrimSpace(string(out))
-}
-
 // bareRepo builds a bare "remote" with one commit on main carrying manifest.
 func bareRepo(t *testing.T) string {
 	t.Helper()
@@ -54,15 +37,15 @@ func bareRepo(t *testing.T) string {
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	git(t, work, "init", "-q", "-b", "main")
-	git(t, work, "config", "user.email", "t@t")
-	git(t, work, "config", "user.name", "t")
+	testgit.Git(t, work, "init", "-q", "-b", "main")
+	testgit.Git(t, work, "config", "user.email", "t@t")
+	testgit.Git(t, work, "config", "user.name", "t")
 	writeManifest(t, work, manifest)
-	git(t, work, "add", "-A")
-	git(t, work, "commit", "-q", "-m", "A: authored")
+	testgit.Git(t, work, "add", "-A")
+	testgit.Git(t, work, "commit", "-q", "-m", "A: authored")
 
 	bare := filepath.Join(t.TempDir(), "remote.git")
-	git(t, work, "clone", "-q", "--bare", work, bare)
+	testgit.Git(t, work, "clone", "-q", "--bare", work, bare)
 	return bare
 }
 
@@ -76,15 +59,15 @@ func writeManifest(t *testing.T, dir, content string) {
 func cloneTemp(t *testing.T, bare string) string {
 	t.Helper()
 	dir := filepath.Join(t.TempDir(), "clone")
-	git(t, filepath.Dir(dir), "clone", "-q", bare, dir)
-	git(t, dir, "config", "user.email", "t@t")
-	git(t, dir, "config", "user.name", "t")
+	testgit.Git(t, filepath.Dir(dir), "clone", "-q", bare, dir)
+	testgit.Git(t, dir, "config", "user.email", "t@t")
+	testgit.Git(t, dir, "config", "user.name", "t")
 	return dir
 }
 
 func remoteHasBranch(t *testing.T, dir, branch string) bool {
 	t.Helper()
-	return gitOut(t, dir, "ls-remote", "--heads", "origin", branch) != ""
+	return testgit.Out(t, dir, "ls-remote", "--heads", "origin", branch) != ""
 }
 
 var imageRe = regexp.MustCompile(`app:\S+`)
@@ -111,20 +94,20 @@ func simulateIUABump(t *testing.T, bare, deploy, tag string) {
 	if remoteHasBranch(t, c, deploy) {
 		from = "origin/" + deploy
 	}
-	git(t, c, "checkout", "-q", "-B", "b", from)
+	testgit.Git(t, c, "checkout", "-q", "-B", "b", from)
 	setImage(t, c, tag)
-	git(t, c, "commit", "-q", "-am", "chore: bump images "+tag)
-	git(t, c, "push", "-q", "origin", "b:refs/heads/"+deploy)
+	testgit.Git(t, c, "commit", "-q", "-am", "chore: bump images "+tag)
+	testgit.Git(t, c, "push", "-q", "origin", "b:refs/heads/"+deploy)
 }
 
 // advanceAuthored applies editFn to the manifest and pushes a new main commit.
 func advanceAuthored(t *testing.T, bare, msg string, editFn func(path string)) {
 	t.Helper()
 	c := cloneTemp(t, bare)
-	git(t, c, "checkout", "-q", "-B", "m", "origin/main")
+	testgit.Git(t, c, "checkout", "-q", "-B", "m", "origin/main")
 	editFn(filepath.Join(c, "deployment.yaml"))
-	git(t, c, "commit", "-q", "-am", msg)
-	git(t, c, "push", "-q", "origin", "m:refs/heads/main")
+	testgit.Git(t, c, "commit", "-q", "-am", msg)
+	testgit.Git(t, c, "push", "-q", "origin", "m:refs/heads/main")
 }
 
 func replace(t *testing.T, path, old, new string) {
@@ -145,7 +128,7 @@ func replace(t *testing.T, path, old, new string) {
 // showDeploy returns deployment.yaml as it stands on the deploy branch in bare.
 func showDeploy(t *testing.T, bare, deploy string) string {
 	t.Helper()
-	return gitOut(t, ".", "--git-dir="+bare, "show", "refs/heads/"+deploy+":deployment.yaml")
+	return testgit.Out(t, ".", "--git-dir="+bare, "show", "refs/heads/"+deploy+":deployment.yaml")
 }
 
 func newMaintainer(t *testing.T, bare string) *Maintainer {
@@ -162,7 +145,7 @@ func newMaintainer(t *testing.T, bare string) *Maintainer {
 func pushBranch(t *testing.T, bare, branch, marker string) {
 	t.Helper()
 	c := cloneTemp(t, bare)
-	git(t, c, "checkout", "-q", "-B", branch, "origin/main")
+	testgit.Git(t, c, "checkout", "-q", "-B", branch, "origin/main")
 	p := filepath.Join(c, "deployment.yaml")
 	b, err := os.ReadFile(p)
 	if err != nil {
@@ -171,8 +154,8 @@ func pushBranch(t *testing.T, bare, branch, marker string) {
 	if err := os.WriteFile(p, append(b, []byte("\n# "+marker+"\n")...), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, c, "commit", "-q", "-am", "on "+branch)
-	git(t, c, "push", "-q", "origin", branch+":refs/heads/"+branch)
+	testgit.Git(t, c, "commit", "-q", "-am", "on "+branch)
+	testgit.Git(t, c, "push", "-q", "origin", branch+":refs/heads/"+branch)
 }
 
 // A `flywheel use` branch switch must reset DEPLOY to the new branch, discarding
@@ -210,8 +193,8 @@ func TestResetToAuthored_DiscardsOtherBranchCommitsAndBumps(t *testing.T) {
 		t.Errorf("DEPLOY kept the old branch's bump (1-aaa):\n%s", got)
 	}
 	// DEPLOY tip == feat-y tip, with no bump layer.
-	deployTip := gitOut(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/flywheel/local-deploy")
-	featY := gitOut(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/feat-y")
+	deployTip := testgit.Out(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/flywheel/local-deploy")
+	featY := testgit.Out(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/feat-y")
 	if deployTip != featY {
 		t.Errorf("DEPLOY tip %s != feat-y tip %s", deployTip, featY)
 	}
@@ -243,7 +226,7 @@ func TestReconcile_NoopWhenAuthoredUnchanged(t *testing.T) {
 		t.Fatal(err)
 	}
 	simulateIUABump(t, bare, "flywheel/local-deploy", "1-aaa")
-	before := gitOut(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/flywheel/local-deploy")
+	before := testgit.Out(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/flywheel/local-deploy")
 
 	res, err := m.Reconcile(context.Background())
 	if err != nil {
@@ -252,7 +235,7 @@ func TestReconcile_NoopWhenAuthoredUnchanged(t *testing.T) {
 	if res.Changed {
 		t.Errorf("expected no change (deploy already sits on authored), got %+v", res)
 	}
-	after := gitOut(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/flywheel/local-deploy")
+	after := testgit.Out(t, ".", "--git-dir="+bare, "rev-parse", "refs/heads/flywheel/local-deploy")
 	if before != after {
 		t.Errorf("deploy tip moved on a no-op: %s -> %s", before, after)
 	}
@@ -332,7 +315,7 @@ func TestReconcile_CarriesMultipleBumpsForward(t *testing.T) {
 		t.Errorf("deploy should be authored + latest bump (replicas:2, app:2-bbb):\n%s", got)
 	}
 	// The bump layer on top of authored is exactly the two replayed bumps.
-	layer := gitOut(t, ".", "--git-dir="+bare, "rev-list", "--count", "refs/heads/main..refs/heads/flywheel/local-deploy")
+	layer := testgit.Out(t, ".", "--git-dir="+bare, "rev-list", "--count", "refs/heads/main..refs/heads/flywheel/local-deploy")
 	if layer != "2" {
 		t.Errorf("expected 2 bump commits on top of authored, got %s", layer)
 	}

@@ -18,6 +18,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/dockerports"
 	"github.com/cobr-io/flywheel/internal/cli/embedcache"
 	"github.com/cobr-io/flywheel/internal/cli/render"
+	"github.com/cobr-io/flywheel/internal/execx"
 	"github.com/cobr-io/flywheel/internal/naming"
 )
 
@@ -450,11 +451,14 @@ func buildValues(opts Options, triple allocator.Triple, tag, sha, agePub string)
 	}
 }
 
+// gitCmd runs a git subcommand in cwd, inheriting the developer's git config
+// and credentials. It returns execx's error unchanged so it wraps the
+// underlying *exec.ExitError with %w — errors.Is / errors.As keep working
+// through init's `git init: %w` / `git commit: %w` wrappers (the old `%v`
+// format broke that chain).
 func gitCmd(cwd string, args ...string) error {
-	cmd := exec.Command("git", args...)
-	cmd.Dir = cwd
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%v: %v\n%s", args, err, out)
-	}
-	return nil
+	// TODO: thread a context once Run takes one; initcmd.Run has no ctx
+	// parameter today and adding it would cascade to the cmd layer.
+	_, err := execx.Git(context.Background(), cwd, args...)
+	return err
 }

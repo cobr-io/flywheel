@@ -18,11 +18,13 @@
 package gitcheckout
 
 import (
+	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/cobr-io/flywheel/internal/execx"
 )
 
 // AllowNestedEnv, when set to a non-empty value, bypasses the nested-worktree
@@ -163,7 +165,7 @@ func mainWorktree(dir string) (string, error) {
 }
 
 func gitOutput(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	out, err := cmd.Output()
-	return string(out), err
+	// TODO: thread a context once Inspect takes one (it is called from `up`'s
+	// preflight, which would cascade the signature change beyond this package).
+	return execx.Git(context.Background(), dir, args...)
 }
