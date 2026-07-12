@@ -16,14 +16,14 @@ cluster bring-up.
 |------|----------|-------|
 | Warm edit→served cycle (steady state) | **7–13 s** | includes the in-cluster image rebuild; THE number to protect |
 | First deploy after `add app` (cold) | 11–28 s | first build has no layer cache; includes first-scan machinery |
-| Any single warm leg (early bumps) | 7–13 s (was 7–41 s bimodal) | fixed: [#107](https://github.com/cobr-io/flywheel/issues/107) was a per-node cold pull of the buildkit client image from Docker Hub; `up` now pre-seeds it into the local registry |
+| Any single warm leg (early bumps) | 7–13 s (was 7–41 s bimodal) | fixed: [#107](https://github.com/cobr-io/flywheel/issues/107) had two causes — a per-node cold pull of the buildkit client image (now pre-seeded into the local registry by `up`) and the e2e probe reading the old Terminating pod for its 30 s grace period (harness artifact; real traffic was never affected) |
 | Gitops-repo edit → converged | ~2–12 s | git-deploy-controller tick 2 s + source fetch (poked) + apply (event-driven) |
 | `flywheel up` (fresh cluster) | ~2–4 min local, ~9 min CI | cluster create + Flux install + bootstrap + image mirror |
 
-Because #107 is a per-leg coin flip, judge loop health by the **fastest of
-two consecutive warm bumps** (that's also how the CI gate works). If BOTH of
-two consecutive warm cycles exceed ~20 s, treat it as a defect: either a poke
-stopped firing (chain below) or a Flux object is in error/backoff.
+Every warm cycle should land in the 7–13 s band (the CI gate holds each
+scenario-1 warm leg under an unscaled 30 s). Any single warm cycle above
+~20 s is a defect: either a poke stopped firing (chain below) or a Flux
+object is in error/backoff.
 
 ## The warm-cycle budget, hop by hop
 
@@ -66,13 +66,14 @@ A loop that "works but feels slow" is almost always one or more dead pokes.
 
 ## Known deviations
 
-- **[#107](https://github.com/cobr-io/flywheel/issues/107)** — early warm
-  legs used to lose 15-30 s ~50% of the time: the build Job's thin buildkit
-  CLIENT image was cold-pulled from Docker Hub once per NODE, and Jobs
-  schedule on arbitrary nodes. Fixed by `up`'s mirror-buildkit-client step
-  (LAN-registry pre-seed; Hub fallback when offline). Watch the CYCLE lines
-  confirm the distribution collapses, then tighten the scenario-1 gate from
-  min-of-two-legs to every-leg.
+- **[#107](https://github.com/cobr-io/flywheel/issues/107)** — CLOSED. Early
+  warm legs used to lose ~15-30 s ~50% of the time, from two stacked causes:
+  a per-node Docker Hub cold pull of the buildkit client image (fixed by
+  `up`'s mirror-buildkit-client step; Hub fallback when offline) and the e2e
+  probe reading the old Terminating pod through its 30 s grace period (fixed
+  in wait_for_served_text — measurement only; Service/ingress traffic always
+  cut over immediately). Post-fix CI: cold 13 s, warm 7 s/7 s. The scenario-1
+  gate now holds every warm leg under 30 s.
 - **macOS + colima**: host-port forwarding can lag or wedge after rapid
   cluster create/delete cycles — `curl` against `*.localdev.me:<port>` failing
   while the pod is Running is a forwarding artifact, not a loop stall. Also
