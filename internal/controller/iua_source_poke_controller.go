@@ -23,27 +23,19 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
-	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	"github.com/cobr-io/flywheel/internal/naming"
+	"github.com/cobr-io/flywheel/internal/fluxpoke"
 )
-
-// gitRepositoryGVK identifies Flux source-controller GitRepository objects
-// (served at v1). Patched as unstructured to avoid a typed dependency here.
-var gitRepositoryGVK = schema.GroupVersionKind{
-	Group: "source.toolkit.fluxcd.io", Version: "v1", Kind: "GitRepository",
-}
 
 // IUASourcePokeReconciler pokes an IUA's source GitRepository whenever the IUA
 // pushes a new commit.
@@ -52,18 +44,19 @@ type IUASourcePokeReconciler struct {
 }
 
 func (r *IUASourcePokeReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Preflight: skip (don't crash-loop) if we can't list ImageUpdateAutomation.
-	if ok, err := canList(mgr.GetConfig(), imageUpdateAutomationGVK); !ok {
-		mgr.GetLogger().WithName("iua-source-poke").Info(
-			"disabled: cannot list ImageUpdateAutomation (RBAC or CRD absent); source falls back to poll", "error", err)
-		return nil
-	}
-	iua := &unstructured.Unstructured{}
-	iua.SetGroupVersionKind(imageUpdateAutomationGVK)
-	return ctrl.NewControllerManagedBy(mgr).
-		Named("iua-source-poke").
-		For(iua, builder.WithPredicates(lastPushCommitChanged())).
-		Complete(r)
+	// Preflight: gate on being able to list ImageUpdateAutomation. Registering
+	// a watch for an unlistable kind crash-loops the manager; setupWhenListable
+	// re-probes on a slow ticker and enables this watch when the permission
+	// appears, so a transient RBAC race recovers without a pod restart. Until
+	// then the source falls back to its poll interval.
+	return setupWhenListable(mgr, "iua-source-poke", imageUpdateAutomationGVK, func() error {
+		iua := &unstructured.Unstructured{}
+		iua.SetGroupVersionKind(imageUpdateAutomationGVK)
+		return ctrl.NewControllerManagedBy(mgr).
+			Named("iua-source-poke").
+			For(iua, builder.WithPredicates(lastPushCommitChanged())).
+			Complete(r)
+	})
 }
 
 // lastPushCommitChanged fires only when status.lastPushCommit actually moves,
@@ -117,22 +110,13 @@ func (r *IUASourcePokeReconciler) Reconcile(ctx context.Context, req ctrl.Reques
 }
 
 // pokeGitRepository bumps the reconcile-request annotation on the named
-// GitRepository via a JSON merge patch (same rationale as the other pokes:
-// avoids racing source-controller's own status writes). NotFound is ignored.
+// GitRepository so source-controller fetches now. GitRepository is vendored
+// (sourcev1), so the poke targets the typed object rather than a re-declared
+// unstructured GVK; NotFound is tolerated — see fluxpoke for the shared
+// merge-patch rationale.
 func (r *IUASourcePokeReconciler) pokeGitRepository(ctx context.Context, namespace, name string) error {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(gitRepositoryGVK)
-	u.SetNamespace(namespace)
-	u.SetName(name)
-	patch := fmt.Appendf(nil,
-		`{"metadata":{"annotations":{%q:%q}}}`,
-		naming.ReconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
-	)
-	if err := r.Patch(ctx, u, client.RawPatch(types.MergePatchType, patch)); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return err
+	gr := &sourcev1.GitRepository{
+		ObjectMeta: metav1.ObjectMeta{Namespace: namespace, Name: name},
 	}
-	return nil
+	return fluxpoke.Poke(ctx, r.Client, gr, time.Now())
 }

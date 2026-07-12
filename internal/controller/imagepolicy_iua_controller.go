@@ -16,20 +16,17 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"time"
 
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/event"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
-	"github.com/cobr-io/flywheel/internal/naming"
+	"github.com/cobr-io/flywheel/internal/fluxpoke"
 )
 
 // imageUpdateAutomationName is the single cluster-wide IUA installed by the
@@ -54,20 +51,20 @@ type ImagePolicyIUAReconciler struct {
 }
 
 func (r *ImagePolicyIUAReconciler) SetupWithManager(mgr ctrl.Manager) error {
-	// Preflight: if we can't list ImagePolicy (RBAC reverted or CRD absent),
-	// skip registering rather than crash-looping the manager on cache sync.
-	// The IUA then just falls back to its own poll interval.
-	if ok, err := canList(mgr.GetConfig(), imagePolicyGVK); !ok {
-		mgr.GetLogger().WithName("imagepolicy-iua").Info(
-			"disabled: cannot list ImagePolicy (RBAC or CRD absent); IUA falls back to poll", "error", err)
-		return nil
-	}
-	ip := &unstructured.Unstructured{}
-	ip.SetGroupVersionKind(imagePolicyGVK)
-	return ctrl.NewControllerManagedBy(mgr).
-		Named("imagepolicy-iua").
-		For(ip, builder.WithPredicates(latestTagChanged())).
-		Complete(r)
+	// Preflight: registering a watch for a kind we can't list makes the
+	// manager's cache sync time out and crash-loops the whole pod. Gate on
+	// canList; if ImagePolicy isn't listable yet (RBAC not landed, CRD absent),
+	// register later — setupWhenListable re-probes on a slow ticker and enables
+	// this watch when the permission appears, so a transient RBAC race no longer
+	// needs a pod restart. Until then the IUA falls back to its own poll.
+	return setupWhenListable(mgr, "imagepolicy-iua", imagePolicyGVK, func() error {
+		ip := &unstructured.Unstructured{}
+		ip.SetGroupVersionKind(imagePolicyGVK)
+		return ctrl.NewControllerManagedBy(mgr).
+			Named("imagepolicy-iua").
+			For(ip, builder.WithPredicates(latestTagChanged())).
+			Complete(r)
+	})
 }
 
 // latestTagChanged fires only when status.latestRef.tag actually moves, so a
@@ -108,25 +105,12 @@ func (r *ImagePolicyIUAReconciler) Reconcile(ctx context.Context, req ctrl.Reque
 	return ctrl.Result{}, nil
 }
 
-// pokeIUA bumps the reconcile-request annotation on the IUA, using a JSON merge
-// patch (same rationale as the ImageRepository poke: a get-then-update races
-// the image-automation controller's own status writes). NotFound is ignored:
-// if the IUA isn't installed under the expected name the bump simply waits out
-// the poll interval.
+// pokeIUA bumps the reconcile-request annotation on the IUA so it runs its
+// commit cycle now. If the IUA isn't installed under the expected name the
+// NotFound just waits out the poll interval — see fluxpoke for the shared
+// merge-patch rationale.
 func (r *ImagePolicyIUAReconciler) pokeIUA(ctx context.Context, namespace string) error {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(imageUpdateAutomationGVK)
-	u.SetNamespace(namespace)
-	u.SetName(imageUpdateAutomationName)
-	patch := fmt.Appendf(nil,
-		`{"metadata":{"annotations":{%q:%q}}}`,
-		naming.ReconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
-	)
-	if err := r.Patch(ctx, u, client.RawPatch(types.MergePatchType, patch)); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return fluxpoke.Poke(ctx, r.Client,
+		fluxpoke.Unstructured(imageUpdateAutomationGVK, namespace, imageUpdateAutomationName),
+		time.Now())
 }
