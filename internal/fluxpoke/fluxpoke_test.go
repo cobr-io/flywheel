@@ -2,8 +2,11 @@ package fluxpoke
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/go-logr/logr/funcr"
 
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -12,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cobr-io/flywheel/internal/naming"
 )
@@ -93,5 +97,31 @@ func TestPoke_NotFoundTolerated(t *testing.T) {
 	}
 	if err := Poke(context.Background(), c, ref, fixedNow); err != nil {
 		t.Errorf("Poke on absent object should be nil (NotFound tolerated), got %v", err)
+	}
+}
+
+// The e2e latency guard (testdata/scenarios/lib.sh assert_dev_loop_pokes)
+// greps controller logs for this exact message — a mistargeted poke must
+// surface there, not vanish into the NotFound-is-success path. Pin the
+// string so a reword updates both sides deliberately.
+func TestPoke_NotFoundLogsTarget(t *testing.T) {
+	var msgs []string
+	sink := funcr.New(func(prefix, args string) { msgs = append(msgs, args) }, funcr.Options{})
+	ctx := logf.IntoContext(context.Background(), sink)
+
+	c := fake.NewClientBuilder().Build() // empty cluster: every patch is NotFound
+	obj := Unstructured(schema.GroupVersionKind{
+		Group: "image.toolkit.fluxcd.io", Version: "v1", Kind: "ImageRepository",
+	}, "flux-system", "does-not-exist")
+
+	if err := Poke(ctx, c, obj, time.Unix(1752300000, 0)); err != nil {
+		t.Fatalf("Poke on NotFound: %v", err)
+	}
+	joined := strings.Join(msgs, "\n")
+	if !strings.Contains(joined, "poke target not found") {
+		t.Fatalf("NotFound poke did not log the guard string; got logs: %q", joined)
+	}
+	if !strings.Contains(joined, "does-not-exist") {
+		t.Fatalf("log line does not name the target; got: %q", joined)
 	}
 }
