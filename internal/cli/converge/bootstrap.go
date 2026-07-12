@@ -146,7 +146,14 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		// client-configurable. The bootstrap templates (namespaces, sources,
 		// flywheel-config, builders-kustomization) reference it as a placeholder
 		// so the literal lives in ONE place (task T14).
-		"FlywheelNamespace":    naming.FlywheelNamespace,
+		"FlywheelNamespace": naming.FlywheelNamespace,
+		// AppsNamespace is the CONFIGURED default apps namespace
+		// (namespaces.apps — a real client knob, unlike the fixed flywheel one).
+		// namespaces.yaml.tmpl creates this namespace so the bootstrap honours a
+		// non-"apps" default; `add app` scaffolds workloads into the same value.
+		// cfg is always loader-defaulted (config.Load → applyLoadDefaults) by the
+		// time up reaches RenderBootstrap, so this is never empty in production.
+		"AppsNamespace":        cfg.Namespaces.Apps,
 		"ClientName":           cfg.Client.Name,
 		"RepoBaseName":         repoBaseName,
 		"Domain":               cfg.Local.Domain,
