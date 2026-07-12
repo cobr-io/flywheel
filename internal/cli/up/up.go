@@ -37,6 +37,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	"github.com/cobr-io/flywheel/internal/cli/mirror"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
+	"github.com/cobr-io/flywheel/internal/cli/sourcemode"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	"github.com/cobr-io/flywheel/internal/cli/worktree"
 	"github.com/cobr-io/flywheel/internal/naming"
@@ -676,7 +677,6 @@ func loadAgeKey(repoDir, clientName, homeOverride string) (content, path string,
 // asking, --no-clone skips, and with neither it prompts on a TTY (and skips,
 // with a hint, when there's no TTY).
 func reconcileWorktrees(ctx context.Context, opts Options, cfg *schema.File, wsRoot string, out io.Writer) {
-	declared := make(map[string]bool, len(cfg.Workspace.Repos))
 	var clonable []schema.WorkspaceRepo
 	type presentRepo struct {
 		name, path           string
@@ -684,7 +684,6 @@ func reconcileWorktrees(ctx context.Context, opts Options, cfg *schema.File, wsR
 	}
 	var present []presentRepo
 	for _, r := range cfg.Workspace.Repos {
-		declared[r.Name] = true
 		dir := filepath.Join(wsRoot, r.Name)
 		if _, err := os.Stat(dir); err == nil {
 			// A present worktree is left on whatever branch it's on —
@@ -725,11 +724,10 @@ func reconcileWorktrees(ctx context.Context, opts Options, cfg *schema.File, wsR
 	}
 
 	// Apps whose worktree is neither present nor declared cannot be materialised.
-	if apps, err := worktree.DeclaredApps(opts.RepoDir); err == nil {
+	// The undeclared-app join lives in sourcemode; up adds the on-disk check
+	// (only warn when the worktree is also missing).
+	if apps, err := sourcemode.Undeclared(opts.RepoDir, cfg); err == nil {
 		for _, a := range apps {
-			if a.Worktree == "" || declared[a.Worktree] {
-				continue
-			}
 			if _, err := os.Stat(filepath.Join(wsRoot, a.Worktree)); err == nil {
 				continue
 			}

@@ -25,6 +25,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/imagepin"
 	"github.com/cobr-io/flywheel/internal/cli/render"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
+	"github.com/cobr-io/flywheel/internal/cli/sourcemode"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	wt "github.com/cobr-io/flywheel/internal/cli/worktree"
 	"github.com/cobr-io/flywheel/internal/naming"
@@ -314,7 +315,7 @@ func Run(opts Options) (*Result, error) {
 	// branch; on a feature branch proceed with a publish reminder.
 	if localOnly {
 		integ := cfg.IntegrationBranch()
-		if converge.CurrentBranch(opts.RepoDir) == integ {
+		if sourcemode.OnIntegrationBranch(converge.CurrentBranch(opts.RepoDir), integ) {
 			return nil, fmt.Errorf("refuse to register a local-only app on %q: its source exists only on your machine and must not reach %s. Switch to a feature branch (git checkout -b <branch>) and re-run", integ, integ)
 		}
 		style.Warn(opts.Stdout, "'%s' has no external git remote — its source exists only on this machine. Before this branch merges to %s, push the worktree to a remote and run 'flywheel publish-app %s'", opts.Name, integ, opts.Name)

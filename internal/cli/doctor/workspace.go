@@ -9,7 +9,7 @@ import (
 
 	"github.com/cobr-io/flywheel/internal/cli/config"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
-	"github.com/cobr-io/flywheel/internal/cli/worktree"
+	"github.com/cobr-io/flywheel/internal/cli/sourcemode"
 )
 
 // workspaceCheck reports the state of the workspace block (flywheel.yaml) versus
@@ -31,10 +31,8 @@ func workspaceCheck(repoDir string) Check {
 				wsRoot = filepath.Dir(repoDir)
 			}
 
-			declared := make(map[string]bool, len(cfg.Workspace.Repos))
 			var missingRemote, missingLocal, occupied []string
 			for _, r := range cfg.Workspace.Repos {
-				declared[r.Name] = true
 				p := filepath.Join(wsRoot, r.Name)
 				info, statErr := os.Stat(p)
 				switch {
@@ -49,12 +47,12 @@ func workspaceCheck(repoDir string) Check {
 				}
 			}
 
+			// Apps referencing a worktree the workspace block doesn't declare
+			// (the app↔worktree↔workspace join lives in sourcemode).
 			var undeclared []string
-			if apps, aerr := worktree.DeclaredApps(repoDir); aerr == nil {
+			if apps, aerr := sourcemode.Undeclared(repoDir, cfg); aerr == nil {
 				for _, a := range apps {
-					if a.Worktree != "" && !declared[a.Worktree] {
-						undeclared = append(undeclared, fmt.Sprintf("%s→%s", a.Name, a.Worktree))
-					}
+					undeclared = append(undeclared, fmt.Sprintf("%s→%s", a.Name, a.Worktree))
 				}
 			}
 
