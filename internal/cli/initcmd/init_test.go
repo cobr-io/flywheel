@@ -1,7 +1,9 @@
 package initcmd
 
 import (
+	"errors"
 	"flag"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -13,6 +15,27 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/age"
 	"github.com/cobr-io/flywheel/internal/cli/converge"
 )
+
+// TestGitCmd_ErrorUnwrapsToExitError proves gitCmd's error preserves the
+// errors.Is/As chain through init's `git <step>: %w` wrappers. The old
+// `%v: %v` wrap flattened the underlying *exec.ExitError to a string and would
+// fail this test; execx wraps with %w so it survives.
+func TestGitCmd_ErrorUnwrapsToExitError(t *testing.T) {
+	// A non-repo dir makes `git rev-parse --git-dir` exit non-zero.
+	err := gitCmd(t.TempDir(), "rev-parse", "--git-dir")
+	if err == nil {
+		t.Fatal("expected git to fail in a non-repo directory")
+	}
+	// Wrap it exactly as init.Run does on its git steps.
+	wrapped := fmt.Errorf("git init: %w", err)
+	var ee *exec.ExitError
+	if !errors.As(wrapped, &ee) {
+		t.Fatalf("errors.As could not reach *exec.ExitError through %q", wrapped)
+	}
+	if !errors.Is(wrapped, err) {
+		t.Fatalf("errors.Is(wrapped, err) = false; the %%w chain is broken")
+	}
+}
 
 // T1.1 — `flywheel init` golden-file test: generated tree
 // matches checked-in golden for a representative (name, org) pair,

@@ -23,12 +23,11 @@ package selfsync
 import (
 	"context"
 	"fmt"
-	"os"
-	"os/exec"
 	"strings"
 	"time"
 
 	"github.com/cobr-io/flywheel/internal/deploybranch"
+	"github.com/cobr-io/flywheel/internal/execx"
 )
 
 // Flux abstracts the Kubernetes-side operations the loop needs. The production
@@ -265,22 +264,10 @@ func (w *Worktree) remoteHead(ctx context.Context, branch string) string {
 }
 
 func (w *Worktree) run(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", w.Dir}, args...)...)
-	cmd.Env = gitEnv()
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return nil
+	_, err := execx.GitAuto(ctx, w.Dir, args...)
+	return err
 }
 
 func (w *Worktree) output(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", w.Dir}, args...)...)
-	cmd.Env = gitEnv()
-	out, err := cmd.Output()
-	return string(out), err
-}
-
-// gitEnv disables interactive prompts (the bare repo is unauthenticated http).
-func gitEnv() []string {
-	return append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return execx.GitAuto(ctx, w.Dir, args...)
 }

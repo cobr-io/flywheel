@@ -3,13 +3,13 @@ package selfsync
 import (
 	"context"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/cobr-io/flywheel/internal/deploybranch"
+	"github.com/cobr-io/flywheel/internal/testgit"
 )
 
 const manifest = `apiVersion: apps/v1
@@ -49,49 +49,31 @@ func (f *fakeFlux) PokeKustomization(context.Context) error { f.pokeKust++; retu
 
 // --- git helpers -------------------------------------------------------------
 
-func git(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(), "GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t", "GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
-
-func gitOut(t *testing.T, dir string, args ...string) string {
-	t.Helper()
-	out, err := exec.Command("git", append([]string{"-C", dir}, args...)...).Output()
-	if err != nil {
-		t.Fatalf("git %v: %v", args, err)
-	}
-	return strings.TrimSpace(string(out))
-}
-
 func bareRepo(t *testing.T) string {
 	t.Helper()
 	work := filepath.Join(t.TempDir(), "seed")
 	if err := os.MkdirAll(work, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	git(t, work, "init", "-q", "-b", "main")
-	git(t, work, "config", "user.email", "t@t")
-	git(t, work, "config", "user.name", "t")
+	testgit.Git(t, work, "init", "-q", "-b", "main")
+	testgit.Git(t, work, "config", "user.email", "t@t")
+	testgit.Git(t, work, "config", "user.name", "t")
 	if err := os.WriteFile(filepath.Join(work, "deployment.yaml"), []byte(manifest), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, work, "add", "-A")
-	git(t, work, "commit", "-q", "-m", "A: authored")
+	testgit.Git(t, work, "add", "-A")
+	testgit.Git(t, work, "commit", "-q", "-m", "A: authored")
 	bare := filepath.Join(t.TempDir(), "remote.git")
-	git(t, work, "clone", "-q", "--bare", work, bare)
+	testgit.Git(t, work, "clone", "-q", "--bare", work, bare)
 	return bare
 }
 
 func cloneWorktree(t *testing.T, bare string) string {
 	t.Helper()
 	wt := filepath.Join(t.TempDir(), "worktree")
-	git(t, filepath.Dir(wt), "clone", "-q", bare, wt)
-	git(t, wt, "config", "user.email", "dev@dev")
-	git(t, wt, "config", "user.name", "dev")
+	testgit.Git(t, filepath.Dir(wt), "clone", "-q", bare, wt)
+	testgit.Git(t, wt, "config", "user.email", "dev@dev")
+	testgit.Git(t, wt, "config", "user.name", "dev")
 	return wt
 }
 
@@ -111,21 +93,21 @@ func commitWorktree(t *testing.T, wt, old, new, msg string) {
 	if err := os.WriteFile(p, []byte(strings.ReplaceAll(s, old, new)), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, wt, "commit", "-q", "-am", msg)
+	testgit.Git(t, wt, "commit", "-q", "-am", msg)
 }
 
 // simulateIUABump pushes a bump commit onto the deploy branch in the bare repo.
 func simulateIUABump(t *testing.T, bare, deploy, tag string) {
 	t.Helper()
 	c := filepath.Join(t.TempDir(), "iua")
-	git(t, filepath.Dir(c), "clone", "-q", bare, c)
-	git(t, c, "config", "user.email", "t@t")
-	git(t, c, "config", "user.name", "t")
+	testgit.Git(t, filepath.Dir(c), "clone", "-q", bare, c)
+	testgit.Git(t, c, "config", "user.email", "t@t")
+	testgit.Git(t, c, "config", "user.name", "t")
 	from := "origin/main"
-	if gitOut(t, c, "ls-remote", "--heads", "origin", deploy) != "" {
+	if testgit.Out(t, c, "ls-remote", "--heads", "origin", deploy) != "" {
 		from = "origin/" + deploy
 	}
-	git(t, c, "checkout", "-q", "-B", "b", from)
+	testgit.Git(t, c, "checkout", "-q", "-B", "b", from)
 	p := filepath.Join(c, "deployment.yaml")
 	b, _ := os.ReadFile(p)
 	out := strings.ReplaceAll(string(b), "app:0-placeholder", "app:"+tag)
@@ -133,13 +115,13 @@ func simulateIUABump(t *testing.T, bare, deploy, tag string) {
 	if err := os.WriteFile(p, []byte(out), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, c, "commit", "-q", "-am", "chore: bump images "+tag)
-	git(t, c, "push", "-q", "origin", "b:refs/heads/"+deploy)
+	testgit.Git(t, c, "commit", "-q", "-am", "chore: bump images "+tag)
+	testgit.Git(t, c, "push", "-q", "origin", "b:refs/heads/"+deploy)
 }
 
 func showDeploy(t *testing.T, bare, deploy string) string {
 	t.Helper()
-	return gitOut(t, ".", "--git-dir="+bare, "show", "refs/heads/"+deploy+":deployment.yaml")
+	return testgit.Out(t, ".", "--git-dir="+bare, "show", "refs/heads/"+deploy+":deployment.yaml")
 }
 
 const deployBranch = "flywheel/local-deploy"
@@ -174,7 +156,7 @@ func TestTick_SeedsAndPokes(t *testing.T) {
 	if res.Authored != "main" {
 		t.Errorf("AUTHORED fallback = %q, want the default %q", res.Authored, "main")
 	}
-	if gitOut(t, ".", "--git-dir="+bare, "rev-parse", "--verify", "--quiet", "refs/heads/"+deployBranch) == "" {
+	if testgit.Out(t, ".", "--git-dir="+bare, "rev-parse", "--verify", "--quiet", "refs/heads/"+deployBranch) == "" {
 		t.Fatal("deploy branch not created")
 	}
 	if len(flux.suspends) != 2 || flux.suspends[0] != true || flux.suspends[1] != false {
@@ -270,7 +252,7 @@ func TestTick_CarriesIUABumpForward(t *testing.T) {
 		t.Errorf("deploy should be authored + carried bump (replicas:2, app:1-aaa):\n%s", got)
 	}
 	// The worktree's authored branch never received the bump.
-	if wtManifest := gitOut(t, ".", "--git-dir="+filepath.Join(wt, ".git"), "show", "refs/heads/main:deployment.yaml"); strings.Contains(wtManifest, "app:1-aaa") {
+	if wtManifest := testgit.Out(t, ".", "--git-dir="+filepath.Join(wt, ".git"), "show", "refs/heads/main:deployment.yaml"); strings.Contains(wtManifest, "app:1-aaa") {
 		t.Errorf("authored branch was polluted with a bump:\n%s", wtManifest)
 	}
 }
@@ -290,9 +272,9 @@ func TestTick_BranchSwitchResetsDeploy(t *testing.T) {
 	simulateIUABump(t, bare, deployBranch, "1-aaa") // DEPLOY = main + bump
 
 	// Developer creates feat-y and pushes it, so it is ALREADY in sync with bare.
-	git(t, wt, "switch", "-q", "-c", "feat-y")
+	testgit.Git(t, wt, "switch", "-q", "-c", "feat-y")
 	commitWorktree(t, wt, "replicas: 1", "replicas: 9", "feat-y change")
-	git(t, wt, "push", "-q", bare, "feat-y:feat-y")
+	testgit.Git(t, wt, "push", "-q", bare, "feat-y:feat-y")
 
 	// flywheel use feat-y.
 	flux.configured = "feat-y"

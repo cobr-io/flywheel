@@ -18,9 +18,10 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
+
+	"github.com/cobr-io/flywheel/internal/execx"
 )
 
 // Maintainer keeps Deploy = Authored + bumps in the bare repo at RemoteURL,
@@ -41,14 +42,6 @@ type Result struct {
 	Changed        bool   // the Deploy tip moved as a result
 	DeploySHA      string // the resulting Deploy tip
 }
-
-// committer identity used for rebased bump commits. Mirrors the IUA's author so
-// the deploy branch reads as machine-generated. Only the committer is rewritten
-// on rebase; original bump authorship is preserved.
-const (
-	committerName  = "flywheel-deploy"
-	committerEmail = "image-automation@dev.local"
-)
 
 // Reconcile brings Deploy into the invariant Deploy = Authored + bumps:
 //   - seeds Deploy = Authored when Deploy does not exist yet;
@@ -176,10 +169,10 @@ func (m *Maintainer) ensureClone(ctx context.Context) error {
 	if err := m.runGit(ctx, "", "clone", m.RemoteURL, m.WorkDir); err != nil {
 		return fmt.Errorf("clone %s: %w", m.RemoteURL, err)
 	}
-	if err := m.git(ctx, "config", "user.name", committerName); err != nil {
+	if err := m.git(ctx, "config", "user.name", execx.CommitterName); err != nil {
 		return err
 	}
-	return m.git(ctx, "config", "user.email", committerEmail)
+	return m.git(ctx, "config", "user.email", execx.CommitterEmail)
 }
 
 // pushDeploy force-updates the Deploy branch on origin to sha.
@@ -220,49 +213,28 @@ func (m *Maintainer) originRef(branch string) string { return "refs/remotes/orig
 
 // --- git plumbing -----------------------------------------------------------
 
-// git runs a git subcommand in WorkDir, surfacing combined output on failure.
+// git runs a git subcommand in WorkDir with the automation identity, surfacing
+// trimmed stderr on failure.
 func (m *Maintainer) git(ctx context.Context, args ...string) error {
 	return m.runGit(ctx, m.WorkDir, args...)
 }
 
-// gitQuiet runs a git subcommand in WorkDir and returns only the error, without
-// wrapping the (expected, e.g. rebase-conflict) output into it.
+// gitQuiet runs a git subcommand in WorkDir and returns only whether it
+// succeeded; callers use it for the (expected, e.g. rebase-conflict) failures
+// whose message they discard.
 func (m *Maintainer) gitQuiet(ctx context.Context, args ...string) error {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", m.WorkDir}, args...)...)
-	cmd.Env = gitEnv()
-	return cmd.Run()
+	_, err := execx.GitAuto(ctx, m.WorkDir, args...)
+	return err
 }
 
 // gitOutput runs a git subcommand in WorkDir and returns its stdout.
 func (m *Maintainer) gitOutput(ctx context.Context, args ...string) (string, error) {
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", m.WorkDir}, args...)...)
-	cmd.Env = gitEnv()
-	out, err := cmd.Output()
-	return string(out), err
+	return execx.GitAuto(ctx, m.WorkDir, args...)
 }
 
-// runGit runs a git subcommand in dir (empty = process cwd), surfacing combined
-// output on failure.
+// runGit runs a git subcommand in dir (empty = process cwd) with the automation
+// identity, surfacing trimmed stderr on failure.
 func (m *Maintainer) runGit(ctx context.Context, dir string, args ...string) error {
-	full := args
-	if dir != "" {
-		full = append([]string{"-C", dir}, args...)
-	}
-	cmd := exec.CommandContext(ctx, "git", full...)
-	cmd.Env = gitEnv()
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("git %s: %w: %s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
-	}
-	return nil
-}
-
-// gitEnv disables interactive prompts (the in-cluster bare repo is unauthent-
-// icated http) and pins a committer identity so rebases never fail on a missing
-// ident in a bare container.
-func gitEnv() []string {
-	return append(os.Environ(),
-		"GIT_TERMINAL_PROMPT=0",
-		"GIT_COMMITTER_NAME="+committerName,
-		"GIT_COMMITTER_EMAIL="+committerEmail,
-	)
+	_, err := execx.GitAuto(ctx, dir, args...)
+	return err
 }

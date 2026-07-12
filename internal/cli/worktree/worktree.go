@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/cobr-io/flywheel/internal/execx"
 	"sigs.k8s.io/yaml"
 )
 
@@ -31,12 +32,13 @@ import (
 // so it inherits the developer's git configuration; see the design's
 // "Clone mechanism" note on the host-git-vs-go-git choice.
 func GitRemoteURL(dir string) (string, bool) {
-	cmd := exec.Command("git", "-C", dir, "remote", "get-url", "origin")
-	out, err := cmd.Output()
+	// TODO: thread a context once callers (add-app, publish-app) carry one;
+	// adding the parameter here would cascade beyond the git-owning packages.
+	out, err := execx.Git(context.Background(), dir, "remote", "get-url", "origin")
 	if err != nil {
 		return "", false
 	}
-	url := strings.TrimSpace(string(out))
+	url := strings.TrimSpace(out)
 	if url == "" {
 		return "", false
 	}
@@ -129,7 +131,9 @@ func DeclaredApps(repoDir string) ([]App, error) {
 // OriginReachable reports whether `git ls-remote origin` succeeds in dir — i.e.
 // the origin remote exists and is reachable with the developer's credentials.
 func OriginReachable(dir string) bool {
-	return exec.Command("git", "-C", dir, "ls-remote", "origin").Run() == nil
+	// TODO: thread a context once callers (publish-app) carry one.
+	_, err := execx.Git(context.Background(), dir, "ls-remote", "origin")
+	return err == nil
 }
 
 // BranchPushed reports whether the worktree's current-branch HEAD commit is
@@ -140,19 +144,21 @@ func OriginReachable(dir string) bool {
 // while unpushed local commits do not. A branch absent from origin counts as
 // not pushed.
 func BranchPushed(dir string) (bool, error) {
-	branch, err := exec.Command("git", "-C", dir, "rev-parse", "--abbrev-ref", "HEAD").Output()
+	// TODO: thread a context once callers (publish-app) carry one.
+	ctx := context.Background()
+	branch, err := execx.Git(ctx, dir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return false, fmt.Errorf("resolve current branch: %w", err)
 	}
-	b := strings.TrimSpace(string(branch))
+	b := strings.TrimSpace(branch)
 	// Fetch the remote tip into FETCH_HEAD. A failure here is almost always
 	// "branch not on origin" → not pushed (origin reachability is checked
 	// separately by the caller before this).
-	if err := exec.Command("git", "-C", dir, "fetch", "-q", "origin", b).Run(); err != nil {
+	if _, err := execx.Git(ctx, dir, "fetch", "-q", "origin", b); err != nil {
 		return false, nil
 	}
 	// HEAD is pushed iff it is an ancestor of (or equal to) the fetched tip.
-	err = exec.Command("git", "-C", dir, "merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD").Run()
+	_, err = execx.Git(ctx, dir, "merge-base", "--is-ancestor", "HEAD", "FETCH_HEAD")
 	if err == nil {
 		return true, nil
 	}
@@ -172,9 +178,8 @@ func BranchPushed(dir string) (bool, error) {
 // (rather than `git clone --branch`) precisely so a missing branch degrades to
 // the default instead of failing the clone and materialising no worktree.
 func Clone(ctx context.Context, url, dest, branch string) (gotBranch bool, err error) {
-	cmd := exec.CommandContext(ctx, "git", "clone", url, dest)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return false, fmt.Errorf("git clone %s: %w\n%s", url, err, out)
+	if _, err := execx.Git(ctx, "", "clone", url, dest); err != nil {
+		return false, fmt.Errorf("git clone %s: %w", url, err)
 	}
 	if branch == "" {
 		return true, nil
@@ -182,7 +187,7 @@ func Clone(ctx context.Context, url, dest, branch string) (gotBranch bool, err e
 	// `git checkout <branch>` creates a local branch tracking origin/<branch>
 	// when one exists (git's DWIM), and is a no-op when the default already is
 	// branch. A failure means the remote has no such branch → stay on default.
-	if err := exec.CommandContext(ctx, "git", "-C", dest, "checkout", branch).Run(); err != nil {
+	if _, err := execx.Git(ctx, dest, "checkout", branch); err != nil {
 		return false, nil
 	}
 	return true, nil

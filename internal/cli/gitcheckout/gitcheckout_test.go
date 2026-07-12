@@ -2,22 +2,12 @@ package gitcheckout
 
 import (
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
-)
 
-func git(t *testing.T, dir string, args ...string) {
-	t.Helper()
-	cmd := exec.Command("git", append([]string{"-C", dir}, args...)...)
-	cmd.Env = append(os.Environ(),
-		"GIT_COMMITTER_NAME=t", "GIT_COMMITTER_EMAIL=t@t",
-		"GIT_AUTHOR_NAME=t", "GIT_AUTHOR_EMAIL=t@t")
-	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("git %v: %v\n%s", args, err, out)
-	}
-}
+	"github.com/cobr-io/flywheel/internal/testgit"
+)
 
 // mainRepo creates a committed repo at <root>/<name> and returns its path.
 func mainRepo(t *testing.T, root, name string) string {
@@ -26,12 +16,12 @@ func mainRepo(t *testing.T, root, name string) string {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	git(t, dir, "init", "-q", "-b", "main")
+	testgit.Git(t, dir, "init", "-q", "-b", "main")
 	if err := os.WriteFile(filepath.Join(dir, "README"), []byte("hi\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	git(t, dir, "add", "-A")
-	git(t, dir, "commit", "-q", "-m", "init")
+	testgit.Git(t, dir, "add", "-A")
+	testgit.Git(t, dir, "commit", "-q", "-m", "init")
 	return dir
 }
 
@@ -56,7 +46,7 @@ func TestInspect_SiblingWorktree(t *testing.T) {
 	repo := mainRepo(t, root, "repo")
 	// A sibling worktree: <root>/repo-feat, next to <root>/repo.
 	wt := filepath.Join(root, "repo-feat")
-	git(t, repo, "worktree", "add", "-q", "-b", "feat", wt)
+	testgit.Git(t, repo, "worktree", "add", "-q", "-b", "feat", wt)
 
 	got, err := Inspect(wt)
 	if err != nil {
@@ -86,7 +76,7 @@ func TestInspect_NestedWorktree(t *testing.T) {
 	repo := mainRepo(t, root, "repo")
 	// A nested worktree: inside the main repo (mirrors .claude/worktrees/<id>).
 	wt := filepath.Join(repo, "sub", "nested")
-	git(t, repo, "worktree", "add", "-q", "-b", "nested", wt)
+	testgit.Git(t, repo, "worktree", "add", "-q", "-b", "nested", wt)
 
 	got, err := Inspect(wt)
 	if err != nil {

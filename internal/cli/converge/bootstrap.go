@@ -1,16 +1,17 @@
 package converge
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 
 	flywheel "github.com/cobr-io/flywheel"
 	"github.com/cobr-io/flywheel/internal/cli/render"
 	flywheelSchema "github.com/cobr-io/flywheel/internal/cli/schema"
+	"github.com/cobr-io/flywheel/internal/execx"
 )
 
 // RenderBootstrap materialises the in-cluster Flux entrypoint
@@ -173,12 +174,13 @@ func ResolveRepoBaseName(repoDir string) string {
 // with no commits, git absent): the safe default that matches the
 // pre-existing behaviour.
 func CurrentBranch(repoDir string) string {
-	cmd := exec.Command("git", "-C", repoDir, "rev-parse", "--abbrev-ref", "HEAD")
-	out, err := cmd.Output()
+	// TODO: thread a context once callers (add-app, up) carry one; adding the
+	// parameter here would cascade beyond the git-owning packages.
+	out, err := execx.Git(context.Background(), repoDir, "rev-parse", "--abbrev-ref", "HEAD")
 	if err != nil {
 		return "main"
 	}
-	branch := strings.TrimSpace(string(out))
+	branch := strings.TrimSpace(out)
 	if branch == "" || branch == "HEAD" { // empty or detached HEAD
 		return "main"
 	}
