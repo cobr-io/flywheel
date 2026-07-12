@@ -109,19 +109,13 @@ func (c Config) Validate() error {
 	return nil
 }
 
-// InClusterRegistryPort is the port the k3d registry *container* listens
-// on. It is always 5000 regardless of the host-side port mapping
-// (cluster.registry_port, e.g. 50001). In-cluster clients — the build
-// container's push, Flux's ImageRepository scan, pod image pulls — must use this
-// port; the host port is only for the `docker push` mirror step in
-// `flywheel up` step 9. (k3d's registries.yaml mirrors both ports for
-// containerd pulls, but a direct push/scan from a pod hits the container
-// port, so we standardise on 5000 everywhere in-cluster.)
-const InClusterRegistryPort = "5000"
-
 // RegistryURL is the in-cluster destination host:port the build container pushes to,
 // e.g. `k3d-acme-local-registry:5000`. The `k3d-` prefix is the DNS name
-// k3d advertises its registries under inside the cluster network.
+// k3d advertises its registries under inside the cluster network. The port is
+// naming.InClusterRegistryPort — always 5000 regardless of the host-side port
+// mapping (cluster.registry_port, e.g. 50001); see that constant's doc for why
+// in-cluster clients standardise on it (task T28: this used to be its own
+// InClusterRegistryPort constant, duplicated again in internal/cli/imagepin).
 func (c Config) RegistryURL() string {
-	return fmt.Sprintf("k3d-%s:%s", c.Registry, InClusterRegistryPort)
+	return fmt.Sprintf("k3d-%s:%s", c.Registry, naming.InClusterRegistryPort)
 }

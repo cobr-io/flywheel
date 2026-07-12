@@ -76,6 +76,21 @@ const (
 	StateFile = ".flywheel-state.yaml"
 )
 
+// ImageOrg is the public container registry org every default Flywheel image
+// reference resolves under: `ghcr.io/cobr-io/<name>:<version>`. Read by
+// imagepin.DefaultRef; `<name>` is one of schema.ImageNames.
+const ImageOrg = "ghcr.io/cobr-io"
+
+// InClusterRegistryPort is the port the k3d registry *container* listens on
+// inside the cluster network — always 5000, regardless of the host-side
+// published port (`cluster.registry_port`). In-cluster pulls, the build
+// container's push, and Flux's ImageRepository scan all hit this port; the
+// host port is only for the `docker push` mirror step run from the
+// developer's machine. Canonical definition for what used to be duplicated as
+// internal/controller.Config's InClusterRegistryPort and imagepin's own copy
+// (task T28).
+const InClusterRegistryPort = "5000"
+
 // ManagedByLabels returns the managed-by label set as a fresh map (a new map
 // per call, since callers that hand it to unstructured objects store it by
 // reference).
