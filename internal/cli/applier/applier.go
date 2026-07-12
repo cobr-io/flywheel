@@ -8,6 +8,7 @@ package applier
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -124,12 +125,15 @@ func (a *Applier) ApplyYAML(ctx context.Context, raw []byte, out io.Writer) erro
 // applyYAML is the shared apply engine: it SSA-patches every document and
 // returns a ResourceRef for each one that succeeded (the tracking the
 // orphan prune relies on). On a decode error it returns immediately; per-
-// object apply failures are warned, recorded in the error, and skipped (so
-// they don't enter the keep set).
+// object apply failures are warned and skipped (so they don't enter the keep
+// set), and every one is aggregated into the returned error via errors.Join
+// — so a multi-doc apply that fails on more than one object reports all of
+// them by name, not just the last. Each joined error wraps the underlying
+// apply error with %w, so callers' errors.Is/As still reach it.
 func (a *Applier) applyYAML(ctx context.Context, raw []byte, out io.Writer) ([]ResourceRef, error) {
 	dec := yaml.NewYAMLOrJSONDecoder(strings.NewReader(string(raw)), 4096)
 	var applied []ResourceRef
-	var lastErr error
+	var applyErrs []error
 	for {
 		obj := &unstructured.Unstructured{}
 		if err := dec.Decode(obj); err != nil {
@@ -142,11 +146,12 @@ func (a *Applier) applyYAML(ctx context.Context, raw []byte, out io.Writer) ([]R
 			continue
 		}
 		if err := a.ApplyObject(ctx, obj, out); err != nil {
-			lastErr = err
-			style.Warn(out, "apply %s/%s %s: %v",
+			ident := fmt.Sprintf("%s %s/%s",
 				obj.GroupVersionKind().GroupKind().String(),
 				obj.GetNamespace(),
-				obj.GetName(), err)
+				obj.GetName())
+			style.Warn(out, "apply %s: %v", ident, err)
+			applyErrs = append(applyErrs, fmt.Errorf("apply %s: %w", ident, err))
 			continue
 		}
 		gvk := obj.GroupVersionKind()
@@ -157,7 +162,7 @@ func (a *Applier) applyYAML(ctx context.Context, raw []byte, out io.Writer) ([]R
 			Name:      obj.GetName(),
 		})
 	}
-	return applied, lastErr
+	return applied, errors.Join(applyErrs...)
 }
 
 // ApplyObject does one SSA Patch for the given unstructured object.
