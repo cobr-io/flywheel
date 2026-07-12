@@ -27,23 +27,18 @@ spec:
   # version). These values are rendered fresh by `flywheel up` on every
   # invocation — this file is bootstrap-only, never committed to the
   # gitops repo, so .local edits flow through on the next `up`.
-  # git-server, image-builder-controller, and git-deploy-controller have
-  # Deployments under this dev-loop overlay, so their refs are rewritten here to
-  # match the step-11a direct apply (renderDevLoopKustomization) — otherwise Flux
-  # would re-apply the base ghcr.io ref and the pod would ErrImagePull.
-  # git-auto-sync is NOT rewritten here — its Deployments are the per-app builders
-  # (rewritten by the client-builders Kustomization's spec.images), so a
-  # flywheel.images override reaches git-auto-sync through that path, not this one.
+  # This is the dev-loop Kustomization's subset of the image rewrites — the
+  # images whose Deployments live under this overlay. Which images belong here
+  # vs. the client-builders Kustomization (and why) is decided by the
+  # bootstrapImageOwners table in internal/cli/converge/bootstrap.go; this
+  # template just ranges over the .DevLoopImages slice that table produces
+  # (empty-safe — Go renders zero iterations).
   images:
-    - name: ghcr.io/cobr-io/git-server
-      newName: {{ .GitServerImageName }}
-      newTag: {{ .GitServerImageTag }}
-    - name: ghcr.io/cobr-io/image-builder-controller
-      newName: {{ .ImageBuilderControllerImageName }}
-      newTag: {{ .ImageBuilderControllerImageTag }}
-    - name: ghcr.io/cobr-io/git-deploy-controller
-      newName: {{ .GitDeployControllerImageName }}
-      newTag: {{ .GitDeployControllerImageTag }}
+{{- range .DevLoopImages }}
+    - name: ghcr.io/cobr-io/{{ .Name }}
+      newName: {{ .ImageName }}
+      newTag: {{ .ImageTag }}
+{{- end }}
   # git-server memory limit (cfg.git_server.memory_limit, default 128Mi). The
   # base manifest bakes in 128Mi; this patch lets a client raise it for large
   # repos whose git-upload-pack would otherwise OOMKill the pod (issue #4).

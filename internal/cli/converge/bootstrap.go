@@ -51,20 +51,60 @@ func RenderBootstrap(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 	return tmp, nil
 }
 
-// bootstrapValues maps cfg + resolved image refs onto the value names
-// the embedded templates expect. Resolved refs are split into
-// (name, tag) pairs for builders-kustomization.yaml's `spec.images`
-// block, and surfaced verbatim for self-git-auto-sync.yaml's
-// container `image:` field.
-func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName string) (map[string]any, error) {
-	gsName, gsTag := splitImageRef(refs["git-server"])
-	// git-auto-sync is split into name/tag, which the client-builders
-	// Kustomization uses to rewrite the per-app sidecars' canonical ghcr.io ref
-	// to whatever `up` mirrored into the local registry.
-	gasName, gasTag := splitImageRef(refs["git-auto-sync"])
-	ibcName, ibcTag := splitImageRef(refs["image-builder-controller"])
-	gdcName, gdcTag := splitImageRef(refs["git-deploy-controller"])
+// bootstrapImage is one resolved runtime image, split into a kustomize
+// spec.images entry: Name is the schema image key (schema.ImageNames) used to
+// build the `ghcr.io/cobr-io/<Name>` match, ImageName/ImageTag are the resolved
+// newName/newTag `flywheel up` mirrored into the cluster. The two bootstrap
+// *builders-kustomization.yaml.tmpl templates range over slices of these.
+type bootstrapImage struct {
+	Name      string
+	ImageName string
+	ImageTag  string
+}
 
+// The two Flux Kustomizations that rewrite runtime image refs on the bootstrap
+// path. bootstrapImageOwners assigns each schema.ImageNames entry to exactly
+// one of them.
+const (
+	imgOwnerDevLoop        = "dev-loop"        // flywheel-dev-loop Kustomization (builders-kustomization.yaml)
+	imgOwnerClientBuilders = "client-builders" // client-builders Kustomization (client-builders-kustomization.yaml)
+)
+
+// bootstrapImageOwners is the single source of truth for the 3/1 split between
+// the two bootstrap Kustomizations' `images:` blocks — the split rationale that
+// used to be duplicated as prose in both templates lives here instead.
+//
+// The two Kustomizations reconcile different trees, so an image's ref must be
+// rewritten in whichever one owns its Deployment:
+//   - imgOwnerDevLoop: the flywheel-dev-loop Kustomization reconciles
+//     manifests/dev-loop/overlays/local. git-server, image-builder-controller
+//     and git-deploy-controller have Deployments under that overlay, so their
+//     refs are rewritten there to match the step-11a direct apply
+//     (renderDevLoopKustomization) — otherwise Flux re-applies the base ghcr.io
+//     ref and the pod ErrImagePulls.
+//   - imgOwnerClientBuilders: the client-builders Kustomization reconciles the
+//     client repo's per-app builders/ tree. git-auto-sync's only Deployments
+//     are the per-app sidecars there, so its ref is rewritten by that
+//     Kustomization's spec.images, not the dev-loop overlay. Listing it under
+//     dev-loop would be a dead no-op.
+//
+// Every schema.ImageNames entry MUST appear here; an image with no owner is
+// rendered into NEITHER block, which the image agreement test
+// (TestBootstrapImages_TemplateUnionMatchesSchema) turns into a CI failure
+// instead of a runtime ImagePullBackOff. See docs/dev/add-controller-image.md.
+var bootstrapImageOwners = map[string]string{
+	"git-server":               imgOwnerDevLoop,
+	"image-builder-controller": imgOwnerDevLoop,
+	"git-deploy-controller":    imgOwnerDevLoop,
+	"git-auto-sync":            imgOwnerClientBuilders,
+}
+
+// bootstrapValues maps cfg + resolved image refs onto the value names the
+// embedded templates expect. It loops over schema.ImageNames (no hand-unrolled
+// per-image keys), splitting each resolved ref into a bootstrapImage and
+// bucketing it into DevLoopImages or ClientBuilderImages per bootstrapImageOwners.
+// The two `images:` template blocks range over their respective slice.
+func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName string) (map[string]any, error) {
 	// The client-infra tier reconciles at flux.iac_interval; infra changes
 	// less often than app code, so it can poll slower than interval_local.
 	// Optional — fall back to interval_local when unset (older repos).
@@ -73,18 +113,24 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		iacInterval = cfg.Flux.IntervalLocal
 	}
 
-	// All three need a tag (kustomize requires it); empty newTag would
-	// otherwise leave the base's value. Default refs always have one;
-	// reject overrides that don't (matches what `up` step 9 expects).
-	for name, val := range map[string]string{
-		"git-server:               (newTag)": gsTag,
-		"git-auto-sync:            (newTag)": gasTag,
-		"image-builder-controller: (newTag)": ibcTag,
-		"git-deploy-controller:    (newTag)": gdcTag,
-	} {
-		if val == "" {
-			return nil, fmt.Errorf("bootstrap: %s missing — flywheel.images overrides must include an explicit `:tag`", strings.TrimSuffix(name, " (newTag)"))
+	var devLoopImages, clientBuilderImages []bootstrapImage
+	for _, name := range flywheelSchema.ImageNames {
+		newName, newTag := splitImageRef(refs[name])
+		// Every image needs a tag (kustomize requires it); an empty newTag
+		// would otherwise leave the base's value. Default refs always have
+		// one; reject overrides that don't (matches what `up` step 9 expects).
+		if newTag == "" {
+			return nil, fmt.Errorf("bootstrap: %s missing — flywheel.images overrides must include an explicit `:tag`", name)
 		}
+		img := bootstrapImage{Name: name, ImageName: newName, ImageTag: newTag}
+		switch bootstrapImageOwners[name] {
+		case imgOwnerDevLoop:
+			devLoopImages = append(devLoopImages, img)
+		case imgOwnerClientBuilders:
+			clientBuilderImages = append(clientBuilderImages, img)
+		}
+		// An image with no owner entry is intentionally rendered into NEITHER
+		// block; the image agreement test catches that omission in CI.
 	}
 
 	return map[string]any{
@@ -93,26 +139,20 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		// ranges over it (text/template visits map keys in sorted order, so the
 		// rendered ConfigMap is deterministic) instead of hardcoding keys — so
 		// this Flux-owned copy and the step-11 prelude direct apply can't diverge.
-		"FlywheelConfigData":              FlywheelConfigData(cfg, repoBaseName),
-		"ClientName":                      cfg.Client.Name,
-		"RepoBaseName":                    repoBaseName,
-		"Domain":                          cfg.Local.Domain,
-		"ClusterName":                     cfg.Cluster.Name,
-		"Registry":                        cfg.Cluster.Registry,
-		"RegistryPort":                    cfg.Cluster.RegistryPort,
-		"IntegrationBranch":               cfg.IntegrationBranch(),
-		"FluxIntervalLocal":               cfg.Flux.IntervalLocal,
-		"FluxIacInterval":                 iacInterval,
-		"FlywheelSHA":                     flywheelSHA,
-		"GitServerImageName":              gsName,
-		"GitServerImageTag":               gsTag,
-		"GitServerMemoryLimit":            cfg.GitServerMemoryLimit(),
-		"GitAutoSyncImageName":            gasName,
-		"GitAutoSyncImageTag":             gasTag,
-		"ImageBuilderControllerImageName": ibcName,
-		"ImageBuilderControllerImageTag":  ibcTag,
-		"GitDeployControllerImageName":    gdcName,
-		"GitDeployControllerImageTag":     gdcTag,
+		"FlywheelConfigData":   FlywheelConfigData(cfg, repoBaseName),
+		"ClientName":           cfg.Client.Name,
+		"RepoBaseName":         repoBaseName,
+		"Domain":               cfg.Local.Domain,
+		"ClusterName":          cfg.Cluster.Name,
+		"Registry":             cfg.Cluster.Registry,
+		"RegistryPort":         cfg.Cluster.RegistryPort,
+		"IntegrationBranch":    cfg.IntegrationBranch(),
+		"FluxIntervalLocal":    cfg.Flux.IntervalLocal,
+		"FluxIacInterval":      iacInterval,
+		"FlywheelSHA":          flywheelSHA,
+		"GitServerMemoryLimit": cfg.GitServerMemoryLimit(),
+		"DevLoopImages":        devLoopImages,
+		"ClientBuilderImages":  clientBuilderImages,
 	}, nil
 }
 
