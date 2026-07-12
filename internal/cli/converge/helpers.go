@@ -159,10 +159,10 @@ func FlywheelConfigData(cfg *flywheelSchema.File, repoBaseName, buildKitClientRe
 		// client each build Job runs (issue #107 — mirrored so per-node cold
 		// pulls come from the LAN registry, not Docker Hub).
 		"images.buildkit_client": buildKitClientRef,
-		"client.name":           cfg.Client.Name,
-		"cluster.name":          cfg.Cluster.Name,
-		"cluster.registry":      cfg.Cluster.Registry,
-		"cluster.registry_port": fmt.Sprintf("%d", cfg.Cluster.RegistryPort),
+		"client.name":            cfg.Client.Name,
+		"cluster.name":           cfg.Cluster.Name,
+		"cluster.registry":       cfg.Cluster.Registry,
+		"cluster.registry_port":  fmt.Sprintf("%d", cfg.Cluster.RegistryPort),
 		// flywheel's namespace is fixed (naming.FlywheelNamespace), not
 		// client-configurable — the schema knob is deprecated (task T14).
 		"namespaces.flywheel": naming.FlywheelNamespace,

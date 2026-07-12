@@ -70,13 +70,13 @@ func main() {
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
 	cfg := controller.Config{
-		Namespace:        envOrFlag(nsFlag, "FLYWHEEL_NAMESPACE"),
-		BuilderNamespace: envOrFlag(builderNsFlag, "BUILDER_NAMESPACE"),
-		Registry:         envOrFlag(registryFlag, "CLUSTER_REGISTRY"),
-		RegistryPort:     envOrFlag(portFlag, "CLUSTER_REGISTRY_PORT"),
-		ClusterName:      envOrFlag(clusterFlag, "CLUSTER_NAME"),
-		ClientName:       envOrFlag(clientFlag, "CLIENT_NAME"),
-		BuildKitAddr:     envOrFlag(buildKitAddrFlag, "BUILDKIT_ADDR"),
+		Namespace:           envOrFlag(nsFlag, "FLYWHEEL_NAMESPACE"),
+		BuilderNamespace:    envOrFlag(builderNsFlag, "BUILDER_NAMESPACE"),
+		Registry:            envOrFlag(registryFlag, "CLUSTER_REGISTRY"),
+		RegistryPort:        envOrFlag(portFlag, "CLUSTER_REGISTRY_PORT"),
+		ClusterName:         envOrFlag(clusterFlag, "CLUSTER_NAME"),
+		ClientName:          envOrFlag(clientFlag, "CLIENT_NAME"),
+		BuildKitAddr:        envOrFlag(buildKitAddrFlag, "BUILDKIT_ADDR"),
 		BuildKitClientImage: os.Getenv("BUILDKIT_CLIENT_IMAGE"),
 	}
 
