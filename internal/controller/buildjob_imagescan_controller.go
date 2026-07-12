@@ -30,19 +30,16 @@ package controller
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime/schema"
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/builder"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/predicate"
 
+	"github.com/cobr-io/flywheel/internal/fluxpoke"
 	"github.com/cobr-io/flywheel/internal/naming"
 )
 
@@ -111,30 +108,14 @@ func (r *BuildJobReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 // pokeImageRepository bumps the reconcile-request annotation on the named
-// ImageRepository in the Flux namespace. It uses a JSON merge patch of just
-// the annotation rather than a read-modify-write Update: image-reflector
-// re-resolves the ImageRepository status on every scan, so a get-then-update
-// races those writes and loses with "the object has been modified" (observed
-// in practice). A merge patch touches only our key and never conflicts. A
-// NotFound is not an error: a multi-image repo may name its ImageRepositories
-// differently than the source, in which case the scan simply falls back to its
-// poll interval.
+// ImageRepository in the Flux namespace so image-reflector scans the registry
+// now. A multi-image repo may name its ImageRepositories differently than the
+// source, so a NotFound just falls back to the poll interval — see fluxpoke for
+// the shared merge-patch rationale.
 func (r *BuildJobReconciler) pokeImageRepository(ctx context.Context, name string) error {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(imageRepositoryGVK)
-	u.SetNamespace(naming.FluxNamespace)
-	u.SetName(name)
-	patch := fmt.Appendf(nil,
-		`{"metadata":{"annotations":{%q:%q}}}`,
-		naming.ReconcileRequestAnnotation, time.Now().UTC().Format(time.RFC3339Nano),
-	)
-	if err := r.Patch(ctx, u, client.RawPatch(types.MergePatchType, patch)); err != nil {
-		if apierrors.IsNotFound(err) {
-			return nil
-		}
-		return err
-	}
-	return nil
+	return fluxpoke.Poke(ctx, r.Client,
+		fluxpoke.Unstructured(imageRepositoryGVK, naming.FluxNamespace, name),
+		time.Now())
 }
 
 // buildSucceeded reports whether the pod's build container has terminated

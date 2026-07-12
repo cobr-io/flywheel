@@ -6,26 +6,30 @@ import (
 	"strings"
 	"time"
 
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/cobr-io/flywheel/internal/fluxpoke"
 	"github.com/cobr-io/flywheel/internal/naming"
 )
 
+// iuaGVK / kustGVK are the Flux image-automation and kustomize kinds. Flywheel
+// vendors neither, so K8sFlux addresses them as unstructured (via
+// fluxpoke.Unstructured). GitRepository IS vendored (sourcev1), so it is
+// addressed as a typed object below.
 var (
-	gitRepoGVK = schema.GroupVersionKind{Group: "source.toolkit.fluxcd.io", Version: "v1", Kind: "GitRepository"}
-	iuaGVK     = schema.GroupVersionKind{Group: "image.toolkit.fluxcd.io", Version: "v1", Kind: "ImageUpdateAutomation"}
-	kustGVK    = schema.GroupVersionKind{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization"}
+	iuaGVK  = schema.GroupVersionKind{Group: "image.toolkit.fluxcd.io", Version: "v1", Kind: "ImageUpdateAutomation"}
+	kustGVK = schema.GroupVersionKind{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Kind: "Kustomization"}
 )
 
 // K8sFlux implements Flux against a Kubernetes API via a controller-runtime
-// client, patching Flux objects as unstructured (there is no typed image-
-// automation API vendored). Mirrors the patch shapes used by
-// internal/controller/imagepolicy_iua_controller.go and what sync.sh did with
-// kubectl.
+// client. Reconcile pokes go through internal/fluxpoke — the single poke
+// implementation shared with the build controllers. Mirrors what sync.sh did
+// with kubectl.
 type K8sFlux struct {
 	Client client.Client
 
@@ -41,17 +45,26 @@ type K8sFlux struct {
 	Now func() time.Time
 }
 
+// gitRepoRef is a typed, name/namespace-only reference to the self
+// GitRepository — enough to Get into or Patch, without carrying a re-declared
+// unstructured GVK.
+func (k *K8sFlux) gitRepoRef() *sourcev1.GitRepository {
+	return &sourcev1.GitRepository{
+		ObjectMeta: metav1.ObjectMeta{Namespace: k.GitRepoNamespace, Name: k.GitRepoName},
+	}
+}
+
 // ConfiguredAuthored reads the deploy-branch annotation off the self
 // GitRepository, or "" when unset/absent.
 func (k *K8sFlux) ConfiguredAuthored(ctx context.Context) (string, error) {
-	u := obj(gitRepoGVK, k.GitRepoNamespace, k.GitRepoName)
-	if err := k.Client.Get(ctx, client.ObjectKeyFromObject(u), u); err != nil {
+	gr := k.gitRepoRef()
+	if err := k.Client.Get(ctx, client.ObjectKeyFromObject(gr), gr); err != nil {
 		if apierrors.IsNotFound(err) {
 			return "", nil
 		}
 		return "", err
 	}
-	return u.GetAnnotations()[naming.DeployBranchAnnotation], nil
+	return gr.GetAnnotations()[naming.DeployBranchAnnotation], nil
 }
 
 // SuspendIUA sets spec.suspend on the ImageUpdateAutomation. A missing IUA is
@@ -60,13 +73,13 @@ func (k *K8sFlux) SuspendIUA(ctx context.Context, suspend bool) error {
 	if k.IUAName == "" {
 		return nil
 	}
-	u := obj(iuaGVK, k.IUANamespace, k.IUAName)
+	u := fluxpoke.Unstructured(iuaGVK, k.IUANamespace, k.IUAName)
 	return k.patch(ctx, u, fmt.Appendf(nil, `{"spec":{"suspend":%t}}`, suspend))
 }
 
 // PokeGitRepository bumps the self GitRepository's reconcile-request annotation.
 func (k *K8sFlux) PokeGitRepository(ctx context.Context) error {
-	return k.pokeReconcile(ctx, gitRepoGVK, k.GitRepoNamespace, k.GitRepoName)
+	return fluxpoke.Poke(ctx, k.Client, k.gitRepoRef(), k.nowTime())
 }
 
 // PokeKustomization bumps the apps Kustomization's reconcile-request annotation.
@@ -74,7 +87,9 @@ func (k *K8sFlux) PokeKustomization(ctx context.Context) error {
 	if k.KustomizationName == "" {
 		return nil
 	}
-	return k.pokeReconcile(ctx, kustGVK, k.KustomizationNamespace, k.KustomizationName)
+	return fluxpoke.Poke(ctx, k.Client,
+		fluxpoke.Unstructured(kustGVK, k.KustomizationNamespace, k.KustomizationName),
+		k.nowTime())
 }
 
 // WaitArtifact blocks until the GitRepository's stored artifact revision contains
@@ -92,10 +107,9 @@ func (k *K8sFlux) WaitArtifact(ctx context.Context, targetSHA string) error {
 	}
 	deadline := time.Now().Add(timeout)
 	for {
-		u := obj(gitRepoGVK, k.GitRepoNamespace, k.GitRepoName)
-		if err := k.Client.Get(ctx, client.ObjectKeyFromObject(u), u); err == nil {
-			rev, _, _ := unstructured.NestedString(u.Object, "status", "artifact", "revision")
-			if strings.Contains(rev, targetSHA) {
+		gr := k.gitRepoRef()
+		if err := k.Client.Get(ctx, client.ObjectKeyFromObject(gr), gr); err == nil {
+			if a := gr.Status.Artifact; a != nil && strings.Contains(a.Revision, targetSHA) {
 				return nil
 			}
 		}
@@ -110,14 +124,10 @@ func (k *K8sFlux) WaitArtifact(ctx context.Context, targetSHA string) error {
 	}
 }
 
-func (k *K8sFlux) pokeReconcile(ctx context.Context, gvk schema.GroupVersionKind, ns, name string) error {
-	u := obj(gvk, ns, name)
-	patch := fmt.Appendf(nil, `{"metadata":{"annotations":{%q:%q}}}`, naming.ReconcileRequestAnnotation, k.now())
-	return k.patch(ctx, u, patch)
-}
-
-// patch applies a JSON merge patch, treating a missing object as success.
-func (k *K8sFlux) patch(ctx context.Context, u *unstructured.Unstructured, p []byte) error {
+// patch applies a JSON merge patch, treating a missing object as success. Used
+// for the non-poke mutation (SuspendIUA); the reconcile pokes go through
+// fluxpoke.
+func (k *K8sFlux) patch(ctx context.Context, u client.Object, p []byte) error {
 	err := k.Client.Patch(ctx, u, client.RawPatch(types.MergePatchType, p))
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -125,18 +135,9 @@ func (k *K8sFlux) patch(ctx context.Context, u *unstructured.Unstructured, p []b
 	return err
 }
 
-func (k *K8sFlux) now() string {
-	n := time.Now
+func (k *K8sFlux) nowTime() time.Time {
 	if k.Now != nil {
-		n = k.Now
+		return k.Now()
 	}
-	return n().UTC().Format(time.RFC3339Nano)
-}
-
-func obj(gvk schema.GroupVersionKind, ns, name string) *unstructured.Unstructured {
-	u := &unstructured.Unstructured{}
-	u.SetGroupVersionKind(gvk)
-	u.SetNamespace(ns)
-	u.SetName(name)
-	return u
+	return time.Now()
 }
