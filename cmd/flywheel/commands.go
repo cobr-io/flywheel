@@ -57,12 +57,18 @@ func newDoctorCmd() *cobra.Command {
 			bad := 0
 			for _, r := range results {
 				label := fmt.Sprintf("%-8s — %s", r.Check.Name, r.Check.Description)
-				if r.OK() {
+				switch {
+				case r.OK():
 					style.OK(os.Stdout, "%s", label)
 					continue
+				case r.Severity == doctor.SeverityError:
+					bad++
+					style.Err(os.Stdout, "%s", label)
+				default:
+					// Advisory finding (warn/info): surfaced distinctly but
+					// doesn't fail the run — see doctor.Warnf/Infof.
+					style.Warn(os.Stdout, "%s", label)
 				}
-				bad++
-				style.Err(os.Stdout, "%s", label)
 				style.Detail(os.Stdout, "  %v", r.Err)
 			}
 			if bad > 0 {

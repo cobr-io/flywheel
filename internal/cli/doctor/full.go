@@ -95,10 +95,11 @@ func workspaceMountCheck(repoDir string) Check {
 // Firefox and Chrome/Chromium read; without it `mkcert -install` covers
 // only the system store and browsers still reject `*.<domain>` certs. A
 // dev convenience surfaced in full `flywheel doctor` — like pre-commit/yq
-// it never gates `up`. Skipped entirely when mkcert is absent (the
-// mkcert quick-check already reports that). Note for WSL users: the
-// browser usually runs on Windows with its own trust store, so mkcert's
-// CA must also be imported there — see README § Windows (WSL).
+// it never gates `up` (SeverityWarn via Warnf). Skipped entirely when
+// mkcert is absent (the mkcert quick-check already reports that). Note
+// for WSL users: the browser usually runs on Windows with its own trust
+// store, so mkcert's CA must also be imported there — see README §
+// Windows (WSL).
 func nssCertutilCheck() Check {
 	return Check{
 		Name:        "certutil",
@@ -108,7 +109,7 @@ func nssCertutilCheck() Check {
 				return nil
 			}
 			if _, err := exec.LookPath("certutil"); err != nil {
-				return fmt.Errorf("certutil not on PATH: install libnss3-tools " +
+				return Warnf("certutil not on PATH: install libnss3-tools " +
 					"(Debian/Ubuntu: `sudo apt install libnss3-tools`; Fedora: " +
 					"`sudo dnf install nss-tools`) so `mkcert -install` can add its " +
 					"CA to Firefox/Chrome trust")
@@ -122,31 +123,33 @@ func nssCertutilCheck() Check {
 // `pre-commit` (the framework that wires .git/hooks) and mikefarah `yq`
 // (the SOPS-shape guard's only dependency). Both are dev conveniences,
 // not runtime prerequisites — they appear in full `flywheel doctor` so a
-// developer can see why hooks aren't firing, but never gate `up`.
+// developer can see why hooks aren't firing, but never gate `up`
+// (SeverityWarn).
 func commitHookChecks() []Check {
 	return []Check{
-		binaryCheck("pre-commit", "activates this repo's commit hooks (SOPS-shape, local-only guard)"),
+		advisoryBinaryCheck("pre-commit", "activates this repo's commit hooks (SOPS-shape, local-only guard)"),
 		yqCheck(),
 	}
 }
 
 // yqCheck verifies mikefarah's yq is on PATH. The kislyuk/python yq is a
 // different tool with an incompatible expression syntax, so we assert the
-// binary identifies as mikefarah's.
+// binary identifies as mikefarah's. A dev convenience (SeverityWarn) —
+// see commitHookChecks.
 func yqCheck() Check {
 	return Check{
 		Name:        "yq",
 		Description: "mikefarah yq — drives the SOPS-shape commit hook",
 		Run: func(ctx context.Context) error {
 			if _, err := exec.LookPath("yq"); err != nil {
-				return fmt.Errorf("yq not on PATH: %w", err)
+				return Warnf("yq not on PATH: %v", err)
 			}
 			out, err := exec.CommandContext(ctx, "yq", "--version").CombinedOutput()
 			if err != nil {
-				return fmt.Errorf("yq --version failed: %w (%s)", err, string(out))
+				return Warnf("yq --version failed: %v (%s)", err, string(out))
 			}
 			if !strings.Contains(strings.ToLower(string(out)), "mikefarah") {
-				return fmt.Errorf("found a non-mikefarah yq (%s); the SOPS-shape hook needs mikefarah/yq",
+				return Warnf("found a non-mikefarah yq (%s); the SOPS-shape hook needs mikefarah/yq",
 					strings.TrimSpace(string(out)))
 			}
 			return nil

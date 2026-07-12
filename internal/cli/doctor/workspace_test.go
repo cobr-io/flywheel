@@ -77,6 +77,16 @@ func TestWorkspaceCheck_Findings(t *testing.T) {
 			t.Errorf("findings %q should mention %q", err.Error(), want)
 		}
 	}
+
+	// Workspace findings are advisories (T25): never gate `up`, so they must
+	// surface as SeverityWarn, not the default SeverityError.
+	res := Run([]Check{workspaceCheck(repo)})[0]
+	if res.OK() {
+		t.Fatal("expected the same findings via Run")
+	}
+	if res.Severity != SeverityWarn {
+		t.Errorf("Severity = %q, want %q (workspace findings must not fail `flywheel doctor`)", res.Severity, SeverityWarn)
+	}
 }
 
 // Outside a flywheel repo the check is a no-op (passes) and writes nothing.

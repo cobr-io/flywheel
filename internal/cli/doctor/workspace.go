@@ -2,7 +2,6 @@ package doctor
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -15,8 +14,7 @@ import (
 
 // workspaceCheck reports the state of the workspace block (flywheel.yaml) versus
 // what is actually on disk under workspaces_root. Read-only: it never clones,
-// prompts, or mutates anything. The doctor framework is pass/fail (no warn
-// level), so every actionable finding surfaces as one informational failure —
+// prompts, or mutates anything. Every finding here is SeverityWarn (via Warnf) —
 // full `flywheel doctor` does not gate `up`, and `up`'s own reconcile is what
 // fixes missing siblings. Outside a flywheel repo it is a no-op (passes).
 func workspaceCheck(repoDir string) Check {
@@ -76,7 +74,7 @@ func workspaceCheck(repoDir string) Check {
 			if len(msgs) == 0 {
 				return nil
 			}
-			return errors.New(strings.Join(msgs, "; "))
+			return Warnf("%s", strings.Join(msgs, "; "))
 		},
 	}
 }
