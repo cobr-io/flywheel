@@ -19,12 +19,21 @@
 //	GITREPOSITORY_NAME/_NAMESPACE       self GitRepository (default flux-system/flux-system)
 //	IUA_NAME/_NAMESPACE                 ImageUpdateAutomation (default flywheel-self/flux-system)
 //	KUSTOMIZATION_NAME/_NAMESPACE       apps Kustomization (default client-apps/flux-system)
+//	HEALTH_PROBE_ADDR        healthz/readyz bind address (default ":8081")
+//
+// Health probes (see health.go): /healthz reports 200 once the process is up
+// (liveness — nothing here warrants a restart decision besides "is the
+// process running"). /readyz reports 200 once the loop has completed at least
+// one Tick attempt and hasn't gone quiet for readinessWindow polls; a hung
+// git/Flux call flips it to 503 without killing the process, which would just
+// restart into the same stuck state.
 package main
 
 import (
 	"context"
 	"errors"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -80,6 +89,14 @@ func main() {
 
 	log.Printf("git-deploy-controller: worktree=%s bare=%s default=%s deploy=%s poll=%s",
 		worktree, bareURL, defaultBranch, deployBranch, poll)
+
+	healthAddr := envOr("HEALTH_PROBE_ADDR", ":8081")
+	healthSrv := &http.Server{Addr: healthAddr, Handler: newHealthMux(loop, poll)}
+	go func() {
+		if err := healthSrv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("health probe server: %v", err)
+		}
+	}()
 
 	if err := loop.Run(ctrl.SetupSignalHandler()); err != nil && !errors.Is(err, context.Canceled) {
 		log.Fatalf("loop: %v", err)

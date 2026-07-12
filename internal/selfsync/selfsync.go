@@ -24,6 +24,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/cobr-io/flywheel/internal/deploybranch"
@@ -64,6 +65,22 @@ type Loop struct {
 
 	seeded         bool   // DEPLOY has been established at least once this process lifetime
 	deployedBranch string // the AUTHORED branch DEPLOY was last built from (to detect `flywheel use` switches)
+
+	lastTick atomic.Int64 // unix nanos of the last Run iteration that completed a Tick call; read via LastTick
+}
+
+// LastTick reports the wall-clock time the last Run iteration finished
+// attempting a Tick (regardless of whether that Tick returned an error), or
+// the zero Time if Run has not completed one yet. Safe for concurrent use
+// while Run is looping. This is the heartbeat the process's readiness probe
+// reads to detect a stalled loop (a hung git/Flux call), not a proxy for tick
+// success — see cmd/git-deploy-controller's health server.
+func (l *Loop) LastTick() time.Time {
+	n := l.lastTick.Load()
+	if n == 0 {
+		return time.Time{}
+	}
+	return time.Unix(0, n)
 }
 
 // TickResult reports what a single Tick did.
@@ -83,6 +100,7 @@ func (l *Loop) Run(ctx context.Context) error {
 		if _, err := l.Tick(ctx); err != nil {
 			l.logf("tick error: %v", err)
 		}
+		l.lastTick.Store(time.Now().UnixNano())
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
