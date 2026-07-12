@@ -19,7 +19,7 @@ import (
 // (clusters/local/flux-system/*) from the binary's embedded templates
 // into a fresh tmpdir, using values resolved at this `up`'s runtime.
 //
-// The output is bootstrap-only: `flywheel up` step 11d applies these
+// The output is bootstrap-only: `flywheel up`'s apply-flux-system step applies these
 // resources directly via kustomize/kubectl, and Flux thereafter
 // reconciles only their *sourceRef* targets (builders/, apps/,
 // infra/, the Flywheel mirror) — never this directory. So we
@@ -120,7 +120,7 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		newName, newTag := splitImageRef(refs[name])
 		// Every image needs a tag (kustomize requires it); an empty newTag
 		// would otherwise leave the base's value. Default refs always have
-		// one; reject overrides that don't (matches what `up` step 9 expects).
+		// one; reject overrides that don't (matches what `up`'s mirror-images step expects).
 		if newTag == "" {
 			return nil, fmt.Errorf("bootstrap: %s missing — flywheel.images overrides must include an explicit `:tag`", name)
 		}

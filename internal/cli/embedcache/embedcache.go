@@ -1,6 +1,6 @@
 // Package embedcache extracts the binary's embedded asset tree
 // (`flywheel.Assets`) to a stable on-disk cache directory and commits
-// it to a real git repo there, so `flywheel up` step 11c can push it
+// it to a real git repo there, so `flywheel up`'s push-mirror step can push it
 // into the in-cluster Flywheel mirror just like the pre-embed cache.
 //
 // This replaces the gitcache.EnsureClone path: no network, no

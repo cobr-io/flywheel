@@ -33,7 +33,7 @@ type portAssignment struct {
 }
 
 // healHostPorts re-probes the configured host ports BEFORE the registry
-// (step 6) and cluster (step 7) are created, and reallocates any that a
+// (create-registry) and cluster (create-cluster) are created, and reallocates any that a
 // foreign process now holds — so a static port that drifted out from under
 // the allocation self-heals instead of crashing k3d with "address already in
 // use" (issue #1). Each reallocated port is written back to flywheel.yaml and

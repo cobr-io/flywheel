@@ -1,6 +1,6 @@
 // Package flux embeds the Flux install manifest at a pinned version
 // and applies it via the SSA applier with fieldManager=flux-controller.
-// `flywheel up` step 10.
+// `flywheel up`'s flux-install step.
 //
 // install.yaml is kept as PRISTINE upstream Flux — regenerating it is a
 // clean overwrite with no manual re-patching. Flywheel's one deviation

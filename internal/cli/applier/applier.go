@@ -2,8 +2,8 @@
 // client-go. Every apply uses fieldManager="flux-controller" so that
 // when Flux takes over the same resource later it silently adopts
 // ownership without conflict warnings or drift-restomp loops (per
-// design § up step 10 and the closed material gap on field-manager
-// strategy).
+// design § up's flux-install step and the closed material gap on
+// field-manager strategy).
 package applier
 
 import (
@@ -46,7 +46,7 @@ type Applier struct {
 }
 
 // ResetMapper invalidates the cached discovery data so newly-installed
-// CRDs (e.g. Flux's ImageUpdateAutomation, installed in `up` step 10)
+// CRDs (e.g. Flux's ImageUpdateAutomation, installed in `up`'s flux-install step)
 // become mappable. Call after applying CRDs and before applying the
 // custom resources that use them.
 func (a *Applier) ResetMapper() {
