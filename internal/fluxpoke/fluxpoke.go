@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	"github.com/cobr-io/flywheel/internal/naming"
 )
@@ -45,6 +46,12 @@ import (
 // interval. obj must carry its GVK, namespace, and name (a typed object the
 // client's scheme recognises, or one built by Unstructured). A NotFound is
 // treated as success — the poke is best-effort and falls back to the poll path.
+//
+// The NotFound is logged (never silent): a poke aimed at a misnamed or
+// mis-namespaced target still "works" through the interval fallback, which
+// reads as an unexplained ~10-30s of dev-loop latency. The log line is what
+// the e2e latency guard greps for, so a regression fails CI instead of
+// quietly slowing the loop (docs/dev/dev-loop-latency.md).
 func Poke(ctx context.Context, c client.Client, obj client.Object, now time.Time) error {
 	patch := fmt.Appendf(nil,
 		`{"metadata":{"annotations":{%q:%q}}}`,
@@ -52,6 +59,9 @@ func Poke(ctx context.Context, c client.Client, obj client.Object, now time.Time
 	)
 	if err := c.Patch(ctx, obj, client.RawPatch(types.MergePatchType, patch)); err != nil {
 		if apierrors.IsNotFound(err) {
+			gvk := obj.GetObjectKind().GroupVersionKind()
+			logf.FromContext(ctx).Info("poke target not found; falling back to the poll interval",
+				"kind", gvk.Kind, "namespace", obj.GetNamespace(), "name", obj.GetName())
 			return nil
 		}
 		return err

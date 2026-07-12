@@ -306,3 +306,50 @@ wait_for_replicas() {
   dump_diag
   return 1
 }
+
+# --- dev-loop latency guards (docs/dev/dev-loop-latency.md) -----------------
+
+# cycle_report "cold_v1=12s warm_v2=9s warm_v3=8s" — always emit the measured
+# leg durations (greppable CYCLE prefix), and surface them in the GitHub job
+# summary when running in Actions. Report-always beats gate-only: the numbers
+# stay visible on green runs, so trend drift is spottable in history.
+cycle_report() {
+  echo "CYCLE $*"
+  if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+    echo "**dev-loop cycle:** $*" >> "$GITHUB_STEP_SUMMARY"
+  fi
+}
+
+# assert_dev_loop_pokes — the mechanism guard: every fast-path poke must have
+# fired at least once during the scenario, and no poke controller may be
+# gated off. These are binary (fire or don't), so they hold on a slow or
+# contended runner where wall-clock gates would flake. A missing poke does
+# not break the loop — it quantizes a hop to its Flux poll interval — which
+# is exactly why it needs an assertion: nothing else fails.
+assert_dev_loop_pokes() {
+  local logs
+  logs=$(kc -n flywheel-system logs deploy/image-builder-controller 2>/dev/null || true)
+  local ok=0
+  for msg in \
+    "poked ImageRepository to scan after build container exited" \
+    "poked ImageUpdateAutomation after new latest tag resolved" \
+    "poked source GitRepository after IUA push"; do
+    if ! grep -qF "$msg" <<<"$logs"; then
+      log "POKE MISSING: expected controller log line not found: $msg"
+      ok=1
+    fi
+  done
+  if grep -qF "poke disabled" <<<"$logs"; then
+    log "POKE DISABLED: a poke controller is gated off (preflight denial)"
+    ok=1
+  fi
+  if grep -qF "poke target not found" <<<"$logs"; then
+    log "POKE MISTARGETED: a poke hit NotFound (wrong name/namespace?)"
+    ok=1
+  fi
+  if (( ok != 0 )); then
+    dump_diag
+    return 1
+  fi
+  log "poke assertions OK (all fast-path pokes fired; none disabled/mistargeted)"
+}

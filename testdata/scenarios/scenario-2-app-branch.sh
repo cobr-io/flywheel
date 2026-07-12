@@ -22,7 +22,7 @@ wait_for_served_text "hello from feat/foo" "$(scaled 180)"
 # Switch back to main; should reconcile back to main's content.
 switch_app_branch main
 wait_for_gitrepo_branch flywheel-system "$APP" main "$(scaled 60)"
-# main's last content (from scenario 1 steady-state) is "v2".
-wait_for_served_text "hello from sample-app v2" "$(scaled 180)"
+# main's last content (scenario 1's final steady-state leg) is "v3".
+wait_for_served_text "hello from sample-app v3" "$(scaled 180)"
 
 log "scenario 2 PASS"

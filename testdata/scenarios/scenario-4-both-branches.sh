@@ -46,7 +46,7 @@ wait_for_deploy_branch experiment/both "$(scaled 30)"  # unchanged
 # Switching the app back rebuilds main's content into a fresh (newest-tag) image
 # that the IUA bumps onto DEPLOY; same image chain as above, so the same generous
 # window. This is the step that timed out at 180s in CI (converged in ~40s locally).
-wait_for_served_text "hello from sample-app v2" "$(scaled 360)"
+wait_for_served_text "hello from sample-app v3" "$(scaled 360)"
 wait_for_replicas 2 "$(scaled 60)"  # gitops still selected on its feature branch → still 2
 
 # Select gitops back to main too.
