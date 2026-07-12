@@ -45,6 +45,26 @@ spec:
                   key: git.integration_branch
             - name: DEPLOY_WORKDIR
               value: /var/lib/git-deploy/clone
+          ports:
+            - containerPort: 8081
+              name: health
+          # Liveness = process up (the HTTP server answers regardless of loop
+          # state — a hung git/Flux call must not trigger a restart into the
+          # same stuck state). Readiness = the loop's last tick attempt
+          # completed within readinessWindow polls (health.go); it flips false
+          # on a stall without killing the process. See cmd/git-deploy-controller.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 10
           volumeMounts:
             - name: workspaces
               mountPath: /workspaces
