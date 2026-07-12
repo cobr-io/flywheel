@@ -90,34 +90,33 @@ func TestCorpus_Kustomization(t *testing.T) {
 			notes: "re-adding an existing entry is a no-op",
 		},
 		{
-			name:    "inline_comment_on_resources",
-			in:      kHead + "resources:  # keep sorted\n  - ./foo\n",
-			op:      appendRes("bar"),
-			wantErr: "missing a `resources:` key",
-			// BASELINE BUG: the line scanner matches `trim == "resources:"` only,
-			// so `resources:  # keep sorted` (a valid key with a line comment) is
-			// not recognized and append REFUSES with a bogus "missing key" error.
-			notes: "BASELINE BUG: inline comment on resources: defeats the scanner",
+			name: "inline_comment_on_resources",
+			in:   kHead + "resources:  # keep sorted\n  - ./foo\n",
+			op:   appendRes("bar"),
+			// FIXED: yamledit navigates the node tree, so a valid key with a line
+			// comment is recognized and appended to; the comment is preserved.
+			// (Baseline refused with a bogus "missing key" error.)
+			want:  kHead + "resources:  # keep sorted\n  - ./foo\n  - ./bar\n",
+			notes: "FIXED: inline comment on resources: is handled",
 		},
 		{
 			name: "four_space_indent",
 			in:   kHead + "resources:\n    - ./foo\n    - ./baz\n",
 			op:   appendRes("bar"),
-			// BASELINE BUG: lastResourceEntry only recognizes 2-space `  - ` items,
-			// so a 4-space-indented list is treated as empty: the new entry is
-			// inserted right after the key at 2-space indent, LANDING ABOVE the
-			// original items and breaking indentation/order.
-			want:  kHead + "resources:\n  - ./bar\n    - ./foo\n    - ./baz\n",
-			notes: "BASELINE BUG: 4-space indent corrupts placement + indentation",
+			// FIXED: the new entry is appended after the last item at the list's
+			// OWN indent (4 spaces), preserving order and indentation. (Baseline
+			// inserted a 2-space entry above the originals, corrupting the list.)
+			want:  kHead + "resources:\n    - ./foo\n    - ./baz\n    - ./bar\n",
+			notes: "FIXED: 4-space indent appended correctly at its own indent",
 		},
 		{
-			name:    "crlf_line_endings",
-			in:      "apiVersion: kustomize.config.k8s.io/v1beta1\r\nkind: Kustomization\r\nresources:\r\n  - ./foo\r\n",
-			op:      appendRes("bar"),
-			wantErr: "missing a `resources:` key",
-			// BASELINE BUG: TrimRight(line, " \t") leaves the trailing \r, so
-			// `resources:\r` != `resources:` and the scanner refuses the file.
-			notes: "BASELINE BUG: CRLF trailing \\r defeats the scanner",
+			name: "crlf_line_endings",
+			in:   "apiVersion: kustomize.config.k8s.io/v1beta1\r\nkind: Kustomization\r\nresources:\r\n  - ./foo\r\n",
+			op:   appendRes("bar"),
+			// FIXED: CRLF is recognized and the new entry is written with CRLF too.
+			// (Baseline refused the file over the trailing \r.)
+			want:  "apiVersion: kustomize.config.k8s.io/v1beta1\r\nkind: Kustomization\r\nresources:\r\n  - ./foo\r\n  - ./bar\r\n",
+			notes: "FIXED: CRLF handled, entry appended with CRLF",
 		},
 		{
 			name:  "duplicate_resources_key_edits_first",
@@ -141,10 +140,9 @@ func TestCorpus_PreflightResources(t *testing.T) {
 		{"block_sequence", kHead + "resources:\n  - ./foo\n", false, "present block key accepted"},
 		{"empty_inline_list", kHead + "resources: []\n", false, "empty inline list accepted"},
 		{"missing_key", kHead + "patches: []\n", true, "no resources key rejected"},
-		// BASELINE BUG: preflight mirrors appendResource's scanner, so an inline
-		// comment on resources: is rejected here too — meaning add-app fails its
-		// pre-flight on a perfectly valid kustomization.
-		{"inline_comment", kHead + "resources:  # keep sorted\n", true, "BASELINE BUG: inline comment rejected by preflight"},
+		// FIXED: preflight now routes through yamledit.HasSequenceKey, so an inline
+		// comment on resources: is accepted — matching appendResource exactly.
+		{"inline_comment", kHead + "resources:  # keep sorted\n", false, "FIXED: inline comment accepted by preflight"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
