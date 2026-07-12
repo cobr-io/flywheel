@@ -33,6 +33,10 @@ jobs:
     with:
       scenarios: "all"
       timeout-minutes: 90
+      # 3× fits here: the largest scaled wait (scenario-1's 480s → 24m) stays
+      # far under the 90m budget, so a failing wait still times out and dumps
+      # diagnostics instead of being cancelled by the job budget.
+      timeout-scale: 3
 
   alert:
     # Page someone when the nightly goes red. Opens a stably-titled issue, or
