@@ -16,7 +16,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/cobr-io/flywheel/internal/cli/allocator"
@@ -24,7 +23,6 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/style"
-	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // Options captures the user-facing knobs for `down`.
@@ -59,17 +57,9 @@ func Down(ctx context.Context, opts Options, out io.Writer) error {
 		return fmt.Errorf("delete registry: %w", err)
 	}
 	// Release allocator entry.
-	allocPath := opts.AllocationsPath
-	if allocPath == "" {
-		if opts.HomeOverride != "" {
-			allocPath = filepath.Join(opts.HomeOverride, ".config", "flywheel", "allocations.json")
-		} else {
-			p, err := allocator.DefaultPath()
-			if err != nil {
-				return err
-			}
-			allocPath = p
-		}
+	allocPath, err := allocator.ResolvePath(opts.AllocationsPath, opts.HomeOverride)
+	if err != nil {
+		return err
 	}
 	if a, err := allocator.Load(allocPath); err == nil {
 		a.Release(cfg.Client.Name)
@@ -99,25 +89,14 @@ func confirmDestructive(stdin io.Reader, out io.Writer, clusterName string) erro
 }
 
 func loadConfig(repoDir string) (*schema.File, error) {
-	committed, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
-	if err != nil {
-		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
-	}
-	var local []byte
-	if data, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFileLocal)); err == nil {
-		local = data
-	}
-	merged, err := config.MergeYAML(committed, local)
-	if err != nil {
-		return nil, err
-	}
-	f, err := schema.Parse(merged)
+	f, err := config.Load(repoDir, config.LoadOptions{})
 	if err != nil {
 		return nil, err
 	}
 	// Don't full-validate here — destroy should still work even if the
 	// committed file is mid-edit, as long as cluster.name + client.name
-	// are present.
+	// are present (cluster.name to delete the cluster, client.name to
+	// release the allocator entry).
 	if f.Cluster.Name == "" || f.Client.Name == "" {
 		return nil, fmt.Errorf("flywheel.yaml missing cluster.name or client.name")
 	}

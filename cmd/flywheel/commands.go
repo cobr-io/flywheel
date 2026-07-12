@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/spf13/cobra"
 
@@ -11,6 +10,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/add/app"
 	"github.com/cobr-io/flywheel/internal/cli/applier"
 	"github.com/cobr-io/flywheel/internal/cli/clean"
+	"github.com/cobr-io/flywheel/internal/cli/config"
 	"github.com/cobr-io/flywheel/internal/cli/converge"
 	"github.com/cobr-io/flywheel/internal/cli/doctor"
 	"github.com/cobr-io/flywheel/internal/cli/down"
@@ -23,7 +23,6 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/up"
 	"github.com/cobr-io/flywheel/internal/cli/usecmd"
 	"github.com/cobr-io/flywheel/internal/cli/worktree"
-	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 func newVersionCmd() *cobra.Command {
@@ -400,22 +399,12 @@ func completeWorktreeDirs(cmd *cobra.Command, args []string, toComplete string) 
 	return dirs, cobra.ShellCompDirectiveNoFileComp
 }
 
-// readClusterConfig reads + parses flywheel.yaml (no full validation) for
-// commands that just need cluster.name + namespaces.
+// readClusterConfig reads the merged flywheel.yaml(+.local), no full
+// validation, for commands that just need cluster.name + namespaces (today:
+// `clean`). RequireCluster asserts cluster.name; the flywheel namespace
+// default is filled by the shared loader. It merges flywheel.yaml.local like
+// every other command, so a per-developer cluster-name override is honoured
+// consistently.
 func readClusterConfig(repoDir string) (*schema.File, error) {
-	raw, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
-	if err != nil {
-		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
-	}
-	f, err := schema.Parse(raw)
-	if err != nil {
-		return nil, err
-	}
-	if f.Cluster.Name == "" {
-		return nil, fmt.Errorf("flywheel.yaml missing cluster.name")
-	}
-	if f.Namespaces.Flywheel == "" {
-		f.Namespaces.Flywheel = "flywheel-system"
-	}
-	return f, nil
+	return config.Load(repoDir, config.LoadOptions{RequireCluster: true})
 }
