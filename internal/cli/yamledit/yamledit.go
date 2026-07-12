@@ -524,7 +524,9 @@ func spliceLines(data []byte, startLine, endLine int, block []byte) []byte {
 	if endLine < len(starts) {
 		endOff = starts[endLine] // first byte of the line after endLine
 	}
-	out := make([]byte, 0, startOff+len(block)+(len(data)-endOff))
+	// No precomputed capacity: the inputs are small client YAML files, and
+	// summing offsets for a make() capacity trips CodeQL's overflow check.
+	var out []byte
 	out = append(out, data[:startOff]...)
 	out = append(out, block...)
 	out = append(out, data[endOff:]...)
