@@ -76,8 +76,40 @@ func appURL(name, domain string, httpsPort int) string {
 // Kubernetes labels and object names live in this character set.
 var dns1123Label = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?$`)
 
-// Run executes the 5-step pipeline from the design.
+// validateDNSLabel returns an error if v is not a valid DNS-1123 label, naming
+// the offending field (e.g. "--name", "--namespace"). This is the single home
+// for the check the user-supplied name and namespace both need; the derived-name
+// guard keeps its own message because its guidance ("pass --name") differs.
+func validateDNSLabel(field, v string) error {
+	if !dns1123Label.MatchString(v) {
+		return fmt.Errorf("invalid %s %q: must be a DNS-1123 label (lowercase, dashes, 1-63 chars)", field, v)
+	}
+	return nil
+}
+
+// Run scaffolds an app end to end: it renders the per-app builder tree
+// (builders/base/<name>/) and workload tree (apps/base/<name>/), registers both
+// in their parent kustomizations, and records the app in flywheel.yaml's
+// workspace block.
+//
+// The ordering is transactional, in three phases:
+//
+//   - derive-and-validate: every fallible check that only reads the repo —
+//     config load, validation, worktree resolution (cloning a git URL into
+//     workspaces_root when given one — a sibling, never the client repo), name
+//     and image derivation, the Dockerfile pre-flight, the destination and
+//     kustomization pre-checks, and the local-only guard.
+//   - render-to-staging: render both template trees into a throwaway staging
+//     directory. This is the step most likely to fail (a bad template).
+//   - commit: a short tail whose steps are unlikely to fail — move the staged
+//     trees into place, edit the kustomizations, and upsert the workspace entry
+//     LAST (it is the registration).
+//
+// A failure before the commit tail therefore leaves flywheel.yaml and the
+// builders/ apps/ trees byte-for-byte untouched. A failure inside the tail
+// prints exactly what was written and how to undo it.
 func Run(opts Options) (*Result, error) {
+	// ----- defaults -----
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout
 	}
@@ -109,7 +141,13 @@ func Run(opts Options) (*Result, error) {
 		opts.AppsTemplateFS = sub
 	}
 
-	// 1. Read client config (need workspaces_root + namespaces + cluster info).
+	// ===================== Phase: derive & validate =====================
+	// Everything here only reads the repo (plus, for a git URL, clones into
+	// workspaces_root — a sibling, never the client repo). No client-repo
+	// mutation happens until the commit tail.
+
+	// Config: read flywheel.yaml (+ .local) for workspaces_root, namespaces,
+	// and cluster info.
 	cfg, err := readConfig(opts.RepoDir)
 	if err != nil {
 		return nil, err
@@ -118,20 +156,20 @@ func Run(opts Options) (*Result, error) {
 		return nil, errors.New("flywheel.yaml: local.domain is required (used as the Ingress host suffix for the scaffolded workload)")
 	}
 
-	// Resolve the target namespace: explicit --namespace wins; otherwise the
-	// global apps namespace (keeps existing behaviour byte-for-byte).
+	// Namespace: explicit --namespace wins; otherwise the global apps namespace
+	// (keeps existing behaviour byte-for-byte).
 	if opts.Namespace == "" {
 		opts.Namespace = cfg.Namespaces.Apps
 	}
-	if !dns1123Label.MatchString(opts.Namespace) {
-		return nil, fmt.Errorf("invalid --namespace %q: must be a DNS-1123 label (lowercase, dashes, 1-63 chars)", opts.Namespace)
+	if err := validateDNSLabel("--namespace", opts.Namespace); err != nil {
+		return nil, err
 	}
 
-	// 2. Resolve the host worktree directory. <dir> may be a bare name (a child
-	// of workspaces_root), a relative path (vs cwd), or an absolute path; it must
-	// resolve to an existing directory that is a direct child of workspaces_root
-	// — the only layout the cluster's single /workspaces bind-mount and
-	// git-server's basename scan support.
+	// Worktree: <dir> may be a bare name (a child of workspaces_root), a relative
+	// path (vs cwd), or an absolute path; it must resolve to an existing
+	// directory that is a direct child of workspaces_root — the only layout the
+	// cluster's single /workspaces bind-mount and git-server's basename scan
+	// support.
 	if opts.Worktree == "" {
 		return nil, errors.New("worktree directory is required")
 	}
@@ -140,15 +178,17 @@ func Run(opts Options) (*Result, error) {
 		wsRoot = filepath.Dir(opts.RepoDir)
 	}
 
-	// Clone mode (#3): a git URL is cloned into workspaces_root as a sibling,
-	// then registered exactly like an on-disk worktree. The clone sets the
-	// dest's `origin` to the URL, so the source-provenance probe below records
-	// it automatically (no special-casing).
+	// Clone mode: a git URL is cloned into workspaces_root as a sibling, then
+	// registered exactly like an on-disk worktree. The clone sets the dest's
+	// `origin` to the URL, so the source-provenance probe below records it
+	// automatically (no special-casing).
 	if wt.LooksLikeGitURL(opts.Worktree) {
 		// Validate --name BEFORE cloning so an invalid name fails fast instead
 		// of leaving a stray clone on disk (which a re-run would then refuse).
-		if opts.Name != "" && !dns1123Label.MatchString(opts.Name) {
-			return nil, fmt.Errorf("invalid --name %q: must be a DNS-1123 label (lowercase, dashes, 1-63 chars)", opts.Name)
+		if opts.Name != "" {
+			if err := validateDNSLabel("--name", opts.Name); err != nil {
+				return nil, err
+			}
 		}
 		dirName := opts.Name
 		if dirName == "" {
@@ -179,11 +219,11 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	// 3. Decide the app name: an explicit --name wins; otherwise derive it from a
-	// project manifest in the worktree, falling back to the directory name.
+	// Name: an explicit --name wins; otherwise derive it from a project manifest
+	// in the worktree, falling back to the directory name.
 	if opts.Name != "" {
-		if !dns1123Label.MatchString(opts.Name) {
-			return nil, fmt.Errorf("invalid --name %q: must be a DNS-1123 label (lowercase, dashes, 1-63 chars)", opts.Name)
+		if err := validateDNSLabel("--name", opts.Name); err != nil {
+			return nil, err
 		}
 	} else {
 		derived, source, derr := deriveName(worktreePath)
@@ -205,8 +245,8 @@ func Run(opts Options) (*Result, error) {
 		return nil, fmt.Errorf("derived app name %q is not a valid DNS-1123 label; pass --name", opts.Name)
 	}
 
-	// 4. Default the image to the app name, then warn on names that overflow the
-	// build Job's 63-char budget. The build Job is named
+	// Image: default to the app name, then warn on names that overflow the build
+	// Job's 63-char budget. The build Job is named
 	// build-<gitrepo>[-<image>]-<ts>-<sha>, and the GitRepository is named after
 	// the app, so the human part is the app name (and image, if it differs).
 	// Over-budget names still build (the controller truncates + hashes) but the
@@ -223,8 +263,8 @@ func Run(opts Options) (*Result, error) {
 		style.Warn(opts.Stdout, "app name %q is long: build Pod names will be truncated to fit Kubernetes' 63-char Job-name limit (builds still work)", opts.Name)
 	}
 
-	// Pre-flight: the build needs at least a Dockerfile. Without this check
-	// add-app happily scaffolds an app that can never build — the failure
+	// Dockerfile pre-flight: the build needs at least a Dockerfile. Without this
+	// check add-app happily scaffolds an app that can never build — the failure
 	// only surfaces much later in the buildkit build Job. Fail early instead.
 	dockerfilePath := filepath.Join(worktreePath, opts.Context, opts.Dockerfile)
 	if _, err := os.Stat(dockerfilePath); err != nil {
@@ -235,8 +275,8 @@ func Run(opts Options) (*Result, error) {
 		return nil, err
 	}
 
-	// 3. Pre-flight existence check on BOTH destinations so we never leave
-	// the repo half-scaffolded (builders rendered but apps render failed).
+	// Destinations: refuse if EITHER already exists, so we never leave the repo
+	// half-scaffolded (builders rendered but apps render failed).
 	builderDest := filepath.Join(opts.RepoDir, "builders", "base", opts.Name)
 	appsDest := filepath.Join(opts.RepoDir, "apps", "base", opts.Name)
 	for _, dest := range []string{builderDest, appsDest} {
@@ -247,17 +287,17 @@ func Run(opts Options) (*Result, error) {
 		}
 	}
 
-	// 4. Render per-app-template into builders/base/<name>/.
-	// The per-app git-auto-sync Deployment commits the *canonical* ghcr.io
-	// ref — NOT a resolved/content-addressed registry ref. The client-builders
-	// Flux Kustomization rewrites this name to whatever `up` mirrored into the
-	// local registry (a dogfood `:dogfood-<sha>` build or the released
-	// `:<version>` default), re-rendered fresh on every `up`. Committing the
-	// resolved ref instead would pin a digest that goes stale the next time the
-	// dogfood image is rebuilt — the ImagePullBackOff this avoids. This mirrors
-	// how git-server / image-builder-controller are handled (stable ghcr name
-	// in the manifest, rewritten by the Kustomization's spec.images).
-	gitAutoSyncRef := imagepin.DefaultRef("git-auto-sync", cfg.Flywheel.Version)
+	// Kustomizations: pre-check the two files the commit tail appends to, so a
+	// malformed kustomization fails now — before any write — rather than after
+	// the trees are already on disk.
+	buildersKust := filepath.Join(opts.RepoDir, "builders", "base", "kustomization.yaml")
+	appsKust := filepath.Join(opts.RepoDir, "apps", "base", "kustomization.yaml")
+	for _, k := range []string{buildersKust, appsKust} {
+		if err := preflightResources(k); err != nil {
+			return nil, err
+		}
+	}
+
 	// Source provenance: the GitRepository spec.url always points at the
 	// in-cluster bare repo, so it can't tell a local-only app from a
 	// remote-backed one. Record where the source actually came from — the
@@ -279,47 +319,103 @@ func Run(opts Options) (*Result, error) {
 		}
 		style.Warn(opts.Stdout, "'%s' has no external git remote — its source exists only on this machine. Before this branch merges to %s, push the worktree to a remote and run 'flywheel publish-app %s'", opts.Name, integ, opts.Name)
 	}
-
+	// Built here, written LAST (the registration).
 	repo := schema.WorkspaceRepo{Name: worktree, URL: srcURL, LocalOnly: localOnly, Branch: opts.Branch}
-	if err := config.UpsertWorkspaceRepo(filepath.Join(opts.RepoDir, naming.ConfigFile), repo); err != nil {
-		return nil, fmt.Errorf("record %s in the workspace block: %w", worktree, err)
-	}
 
+	// ===================== Phase: render to staging =====================
+	// The renders are the most likely thing to fail (a bad template). Doing them
+	// into a throwaway dir under the repo (same filesystem, so the tail's moves
+	// are atomic renames) means a failure leaves the client repo untouched.
+
+	// The per-app git-auto-sync Deployment commits the *canonical* ghcr.io
+	// ref — NOT a resolved/content-addressed registry ref. The client-builders
+	// Flux Kustomization rewrites this name to whatever `up` mirrored into the
+	// local registry (a dogfood `:dogfood-<sha>` build or the released
+	// `:<version>` default), re-rendered fresh on every `up`. Committing the
+	// resolved ref instead would pin a digest that goes stale the next time the
+	// dogfood image is rebuilt — the ImagePullBackOff this avoids. This mirrors
+	// how git-server / image-builder-controller are handled (stable ghcr name
+	// in the manifest, rewritten by the Kustomization's spec.images).
+	gitAutoSyncRef := imagepin.DefaultRef("git-auto-sync", cfg.Flywheel.Version)
 	values := buildValues(opts, cfg, worktree, gitAutoSyncRef)
-	if err := render.Tree(opts.TemplateFS, ".", builderDest, values); err != nil {
+
+	staging, err := os.MkdirTemp(opts.RepoDir, ".flywheel-add-app-*")
+	if err != nil {
+		return nil, fmt.Errorf("create staging directory: %w", err)
+	}
+	defer os.RemoveAll(staging)
+
+	stagedBuilder := filepath.Join(staging, "builder")
+	if err := render.Tree(opts.TemplateFS, ".", stagedBuilder, values); err != nil {
 		return nil, fmt.Errorf("render per-app-template: %w", err)
 	}
-
-	// 5. Append `  - ./<name>` to builders/base/kustomization.yaml.
-	if err := appendResource(filepath.Join(opts.RepoDir, "builders", "base", "kustomization.yaml"), opts.Name); err != nil {
-		return nil, fmt.Errorf("append to builders/base/kustomization.yaml: %w", err)
-	}
-
-	// 6. Render apps-template into apps/base/<name>/.
-	if err := render.Tree(opts.AppsTemplateFS, ".", appsDest, values); err != nil {
+	stagedApps := filepath.Join(staging, "apps")
+	if err := render.Tree(opts.AppsTemplateFS, ".", stagedApps, values); err != nil {
 		return nil, fmt.Errorf("render apps-template: %w", err)
 	}
 
-	// 7. Append `  - ./<name>` to apps/base/kustomization.yaml.
-	if err := appendResource(filepath.Join(opts.RepoDir, "apps", "base", "kustomization.yaml"), opts.Name); err != nil {
-		return nil, fmt.Errorf("append to apps/base/kustomization.yaml: %w", err)
+	// ===================== Phase: commit =====================
+	// Short and unlikely to fail: move the staged trees into place, register them
+	// in the kustomizations, then record the workspace entry LAST. Each completed
+	// step is remembered so a later failure can report exactly what was written
+	// (we cannot cleanly roll back the in-place kustomization edits).
+	var written []string
+	fail := func(err error) (*Result, error) {
+		if len(written) > 0 {
+			style.Warn(opts.Stdout, "add app failed after writing part of the repo; changes made so far:")
+			for _, w := range written {
+				style.Detail(opts.Stdout, "  %s", w)
+			}
+			style.Detail(opts.Stdout, "to undo: git -C %s checkout -- . && git -C %s clean -fd builders/base/%s apps/base/%s",
+				opts.RepoDir, opts.RepoDir, opts.Name, opts.Name)
+		}
+		return nil, err
 	}
 
-	// 7b. Ensure the target namespace exists. The default apps namespace is
-	// created cluster-side (clusters/<env>/flux-system/namespaces.yaml), so only
+	if err := os.Rename(stagedBuilder, builderDest); err != nil {
+		return fail(fmt.Errorf("move rendered builder into place: %w", err))
+	}
+	written = append(written, "created "+builderDest)
+
+	if err := appendResource(buildersKust, opts.Name); err != nil {
+		return fail(fmt.Errorf("append to builders/base/kustomization.yaml: %w", err))
+	}
+	written = append(written, "registered ./"+opts.Name+" in builders/base/kustomization.yaml")
+
+	if err := os.Rename(stagedApps, appsDest); err != nil {
+		return fail(fmt.Errorf("move rendered workload into place: %w", err))
+	}
+	written = append(written, "created "+appsDest)
+
+	if err := appendResource(appsKust, opts.Name); err != nil {
+		return fail(fmt.Errorf("append to apps/base/kustomization.yaml: %w", err))
+	}
+	written = append(written, "registered ./"+opts.Name+" in apps/base/kustomization.yaml")
+
+	// Ensure the target namespace exists. The default apps namespace is created
+	// cluster-side (clusters/<env>/flux-system/namespaces.yaml), so only
 	// ADDITIONAL namespaces need a managed object here. Idempotent: two apps
 	// sharing one namespace yield exactly one Namespace doc.
 	if opts.Namespace != cfg.Namespaces.Apps {
 		nsManifest := filepath.Join(opts.RepoDir, "apps", "base", "namespaces.yaml")
 		if err := ensureNamespace(nsManifest, opts.Namespace); err != nil {
-			return nil, fmt.Errorf("ensure namespace %q: %w", opts.Namespace, err)
+			return fail(fmt.Errorf("ensure namespace %q: %w", opts.Namespace, err))
 		}
-		if err := appendResource(filepath.Join(opts.RepoDir, "apps", "base", "kustomization.yaml"), "namespaces.yaml"); err != nil {
-			return nil, fmt.Errorf("register namespaces.yaml in apps/base/kustomization.yaml: %w", err)
+		written = append(written, "declared namespace "+opts.Namespace+" in apps/base/namespaces.yaml")
+		if err := appendResource(appsKust, "namespaces.yaml"); err != nil {
+			return fail(fmt.Errorf("register namespaces.yaml in apps/base/kustomization.yaml: %w", err))
 		}
+		written = append(written, "registered ./namespaces.yaml in apps/base/kustomization.yaml")
 	}
 
-	// 8. Print next steps.
+	// Registration LAST: the workspace block is the source of truth the guard,
+	// `up`-clone, and `publish-app` key on — record the app only once everything
+	// else is safely on disk.
+	if err := config.UpsertWorkspaceRepo(filepath.Join(opts.RepoDir, naming.ConfigFile), repo); err != nil {
+		return fail(fmt.Errorf("record %s in the workspace block: %w", worktree, err))
+	}
+
+	// ----- done -----
 	style.Summary(opts.Stdout, "added builder:  %s", builderDest)
 	style.Summary(opts.Stdout, "added workload: %s", appsDest)
 	return &Result{
@@ -429,6 +525,26 @@ func WorkspaceDirs(repoDir string) ([]string, error) {
 // reaches the per-app sidecar through `up`, not through this read.
 func readConfig(repoDir string) (*schema.File, error) {
 	return config.Load(repoDir, config.LoadOptions{})
+}
+
+// preflightResources verifies path is an appendable kustomization: it exists,
+// is readable, and has a top-level `resources:` key. It mirrors appendResource's
+// preconditions so the commit tail is unlikely to fail after the repo has been
+// mutated. Kept as a separate read-only check (rather than folded into
+// appendResource) so T24's yaml-editing consolidation can replace both without a
+// merge conflict here.
+func preflightResources(path string) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	for _, line := range strings.Split(string(raw), "\n") {
+		switch strings.TrimRight(line, " \t") {
+		case "resources:", "resources: []":
+			return nil
+		}
+	}
+	return fmt.Errorf("%s missing a `resources:` key", path)
 }
 
 // appendResource inserts `  - ./<name>` under the `resources:` key of
