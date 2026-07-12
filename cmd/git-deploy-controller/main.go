@@ -39,6 +39,9 @@ import (
 	"strings"
 	"time"
 
+	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -47,10 +50,31 @@ import (
 	"github.com/cobr-io/flywheel/internal/selfsync"
 )
 
+// newScheme builds the client scheme. selfsync's K8sFlux accesses GitRepository
+// as a typed sourcev1 object (the kind is vendored), so sourcev1 MUST be
+// registered here — the default client scheme only carries core kinds, and a
+// missing registration fails every Get/Patch at runtime ("no kind is
+// registered"), silently freezing the deploy branch. Unstructured access (the
+// IUA/Kustomization pokes) needs no registration.
+func newScheme() (*runtime.Scheme, error) {
+	s := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		return nil, err
+	}
+	if err := sourcev1.AddToScheme(s); err != nil {
+		return nil, err
+	}
+	return s, nil
+}
+
 func main() {
 	log.SetFlags(log.LstdFlags | log.LUTC)
 
-	cl, err := client.New(ctrl.GetConfigOrDie(), client.Options{})
+	scheme, err := newScheme()
+	if err != nil {
+		log.Fatalf("build scheme: %v", err)
+	}
+	cl, err := client.New(ctrl.GetConfigOrDie(), client.Options{Scheme: scheme})
 	if err != nil {
 		log.Fatalf("kube client: %v", err)
 	}
