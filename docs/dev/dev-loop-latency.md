@@ -16,12 +16,14 @@ cluster bring-up.
 |------|----------|-------|
 | Warm edit→served cycle (steady state) | **7–13 s** | includes the in-cluster image rebuild; THE number to protect |
 | First deploy after `add app` (cold) | 11–28 s | first build has no layer cache; includes first-scan machinery |
-| First bump after `add app` | 7–41 s, bimodal (~50/50) | known race, [#107](https://github.com/cobr-io/flywheel/issues/107): a 30 s ImagePolicy backoff scheduled during the pre-first-push `NAME_UNKNOWN` window sometimes eats the leg |
+| Any single warm leg (early bumps) | 7–41 s, bimodal (~50/50 per leg) | known race, [#107](https://github.com/cobr-io/flywheel/issues/107): a leg can quantize to a Flux interval (+10–30 s); observed striking the 2nd and 3rd bumps independently |
 | Gitops-repo edit → converged | ~2–12 s | git-deploy-controller tick 2 s + source fetch (poked) + apply (event-driven) |
 | `flywheel up` (fresh cluster) | ~2–4 min local, ~9 min CI | cluster create + Flux install + bootstrap + image mirror |
 
-If a steady-state warm cycle exceeds ~20 s, treat it as a defect: either a
-poke stopped firing (chain below) or a Flux object is in error/backoff.
+Because #107 is a per-leg coin flip, judge loop health by the **fastest of
+two consecutive warm bumps** (that's also how the CI gate works). If BOTH of
+two consecutive warm cycles exceed ~20 s, treat it as a defect: either a poke
+stopped firing (chain below) or a Flux object is in error/backoff.
 
 ## The warm-cycle budget, hop by hop
 
@@ -64,10 +66,10 @@ A loop that "works but feels slow" is almost always one or more dead pokes.
 
 ## Known deviations
 
-- **[#107](https://github.com/cobr-io/flywheel/issues/107)** — first bump
-  after `add app` races a 30 s ImagePolicy backoff (~50% incidence). Fix
-  directions in the issue; until fixed, judge loop health by the *second*
-  bump onward.
+- **[#107](https://github.com/cobr-io/flywheel/issues/107)** — early warm
+  legs race Flux interval quantization (~50% incidence PER LEG; seen on the
+  2nd and 3rd bumps independently). Fix directions in the issue; until
+  fixed, judge loop health by the fastest of two consecutive bumps.
 - **macOS + colima**: host-port forwarding can lag or wedge after rapid
   cluster create/delete cycles — `curl` against `*.localdev.me:<port>` failing
   while the pod is Running is a forwarding artifact, not a loop stall. Also
