@@ -23,6 +23,7 @@ import (
 )
 
 func TestResolve_DefaultsWhenNoOverrides(t *testing.T) {
+	t.Parallel()
 	cfg := &schema.File{}
 	cfg.Flywheel.Version = "v0.1.0"
 	refs := Resolve(cfg)
@@ -38,6 +39,7 @@ func TestResolve_DefaultsWhenNoOverrides(t *testing.T) {
 }
 
 func TestResolve_OverridesWin(t *testing.T) {
+	t.Parallel()
 	cfg := &schema.File{}
 	cfg.Flywheel.Version = "v0.1.0"
 	cfg.Flywheel.Images = map[string]string{
@@ -56,6 +58,7 @@ func TestResolve_OverridesWin(t *testing.T) {
 }
 
 func TestIsDefault(t *testing.T) {
+	t.Parallel()
 	if !IsDefault("git-server", "v0.1.0", "ghcr.io/cobr-io/git-server:v0.1.0") {
 		t.Error("default ref not detected")
 	}
@@ -65,6 +68,7 @@ func TestIsDefault(t *testing.T) {
 }
 
 func TestRegistryRefs(t *testing.T) {
+	t.Parallel()
 	// registryRefs takes the final tag verbatim (dogfood-<sha> or a version).
 	push, pull := registryRefs("acme-local-registry", 50001, "git-auto-sync", "dogfood-abcdef012345")
 	if push != "localhost:50001/git-auto-sync:dogfood-abcdef012345" {
@@ -84,6 +88,7 @@ func TestRegistryRefs(t *testing.T) {
 }
 
 func TestDogfoodTag(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct{ in, want string }{
 		{"sha256:abcdef0123456789", "dogfood-abcdef012345"},
 		{"abcdef0123456789", "dogfood-abcdef012345"},
@@ -96,6 +101,7 @@ func TestDogfoodTag(t *testing.T) {
 }
 
 func TestHasRegistryHost(t *testing.T) {
+	t.Parallel()
 	for _, c := range []struct {
 		ref  string
 		want bool
@@ -115,6 +121,7 @@ func TestHasRegistryHost(t *testing.T) {
 }
 
 func TestIsLocalOnlyOverride(t *testing.T) {
+	t.Parallel()
 	// The default ghcr ref is never local-only (it's pulled from a registry).
 	if isLocalOnlyOverride("git-server", "v0.1.0", DefaultRef("git-server", "v0.1.0")) {
 		t.Error("default ref misclassified as a local-only override")
@@ -131,8 +138,11 @@ func TestIsLocalOnlyOverride(t *testing.T) {
 
 // CheckLocalOverrides flags only the local-only dogfood pins that are absent
 // from the docker store — skipping defaults, registry-qualified overrides, and
-// already-built images.
+// already-built images. Exercised through the unexported checkLocalOverrides
+// so the docker probe is injected via deps, not a package-level var — no
+// shared state with other tests, so this is safe under t.Parallel.
 func TestCheckLocalOverrides(t *testing.T) {
+	t.Parallel()
 	cfg := &schema.File{}
 	cfg.Flywheel.Version = "v0.1.0"
 	cfg.Flywheel.Images = map[string]string{
@@ -140,14 +150,12 @@ func TestCheckLocalOverrides(t *testing.T) {
 		"git-auto-sync":            "flywheel-dev/git-auto-sync:dogfood", // local-only, MISSING
 		"image-builder-controller": "ghcr.io/me/ibc:wip",                 // registry override, skipped
 	}
-	// Stub the docker probe: only git-server's ref is "built".
-	orig := inLocalDocker
-	t.Cleanup(func() { inLocalDocker = orig })
-	inLocalDocker = func(_ context.Context, ref string) bool {
+	d := defaultDeps()
+	d.inLocalDocker = func(_ context.Context, ref string) bool {
 		return ref == "flywheel-dev/git-server:dogfood"
 	}
 
-	missing := CheckLocalOverrides(context.Background(), cfg)
+	missing := checkLocalOverrides(context.Background(), d, cfg)
 	if len(missing) != 1 {
 		t.Fatalf("want exactly 1 missing override, got %d: %+v", len(missing), missing)
 	}
@@ -159,20 +167,21 @@ func TestCheckLocalOverrides(t *testing.T) {
 // All defaults (no overrides) → nothing flagged, and the docker probe is never
 // even consulted for released refs.
 func TestCheckLocalOverrides_DefaultsClean(t *testing.T) {
+	t.Parallel()
 	cfg := &schema.File{}
 	cfg.Flywheel.Version = "v0.1.0"
-	orig := inLocalDocker
-	t.Cleanup(func() { inLocalDocker = orig })
-	inLocalDocker = func(context.Context, string) bool {
+	d := defaultDeps()
+	d.inLocalDocker = func(context.Context, string) bool {
 		t.Fatal("inLocalDocker should not be probed for default refs")
 		return false
 	}
-	if missing := CheckLocalOverrides(context.Background(), cfg); len(missing) != 0 {
+	if missing := checkLocalOverrides(context.Background(), d, cfg); len(missing) != 0 {
 		t.Errorf("defaults should flag nothing, got %+v", missing)
 	}
 }
 
 func TestMissingDogfoodError(t *testing.T) {
+	t.Parallel()
 	err := MissingDogfoodError([]MissingDogfood{
 		{Name: "git-auto-sync", Ref: "flywheel-dev/git-auto-sync:dogfood"},
 	})
@@ -184,50 +193,54 @@ func TestMissingDogfoodError(t *testing.T) {
 	}
 }
 
-// fakeDigester supplies a controlled digest to remoteTag and records whether
-// Digest() was consulted (a default ref must not need it).
-type fakeDigester struct {
-	h      v1.Hash
-	err    error
-	called *bool
-}
-
-func (f fakeDigester) Digest() (v1.Hash, error) {
-	if f.called != nil {
-		*f.called = true
-	}
-	return f.h, f.err
-}
-
-// The default ref is tagged with its immutable version — the source digest is
+// The default ref is tagged with its immutable version — the digest source is
 // never consulted (it IS the content address for a release).
-func TestRemoteTag_DefaultUsesVersion(t *testing.T) {
+func TestPickTag_DefaultUsesVersion(t *testing.T) {
+	t.Parallel()
 	called := false
-	tag, err := remoteTag(
-		fakeDigester{h: v1.Hash{Algorithm: "sha256", Hex: "deadbeef"}, called: &called},
-		DefaultRef("git-server", "v0.1.0"), "git-server", "v0.1.0")
+	tag, err := pickTag(DefaultRef("git-server", "v0.1.0"), "git-server", "v0.1.0", func() (string, error) {
+		called = true
+		return "sha256:deadbeef", nil
+	})
 	if err != nil {
-		t.Fatalf("remoteTag: %v", err)
+		t.Fatalf("pickTag: %v", err)
 	}
 	if tag != "v0.1.0" {
 		t.Errorf("tag = %q, want v0.1.0", tag)
 	}
 	if called {
-		t.Error("Digest() should not be consulted for a released ref")
+		t.Error("digest source should not be consulted for a released ref")
 	}
 }
 
-// A registry-qualified override is content-addressed by the source image
-// digest, so the tag rolls when the upstream image changes.
-func TestRemoteTag_OverrideUsesSourceDigest(t *testing.T) {
-	tag, err := remoteTag(
-		fakeDigester{h: v1.Hash{Algorithm: "sha256", Hex: "abcdef0123456789ffff"}},
-		"ghcr.io/me/git-server:wip", "git-server", "v0.1.0")
+// A non-default ref (registry-qualified override or local docker build) is
+// content-addressed by whatever digest the caller's source supplies, so the
+// tag rolls when that content changes. This is the one tag picker both
+// mirrorRemote (registry digest) and mirrorLocal (docker image ID) funnel
+// through.
+func TestPickTag_OverrideUsesDigestSource(t *testing.T) {
+	t.Parallel()
+	tag, err := pickTag("ghcr.io/me/git-server:wip", "git-server", "v0.1.0", func() (string, error) {
+		return "sha256:abcdef0123456789ffff", nil
+	})
 	if err != nil {
-		t.Fatalf("remoteTag: %v", err)
+		t.Fatalf("pickTag: %v", err)
 	}
 	if tag != "dogfood-abcdef012345" {
 		t.Errorf("tag = %q, want dogfood-abcdef012345", tag)
+	}
+}
+
+// A digest-source failure (e.g. `docker inspect` erroring) is wrapped, not
+// swallowed.
+func TestPickTag_DigestSourceErrorWrapped(t *testing.T) {
+	t.Parallel()
+	cause := errors.New("inspect failed")
+	_, err := pickTag("ghcr.io/me/git-server:wip", "git-server", "v0.1.0", func() (string, error) {
+		return "", cause
+	})
+	if !errors.Is(err, cause) {
+		t.Errorf("want wrapped cause, got: %v", err)
 	}
 }
 
@@ -235,34 +248,36 @@ func TestRemoteTag_OverrideUsesSourceDigest(t *testing.T) {
 // host-platform image and remoteWrite streams it to the local registry under
 // the version tag. The docker store is never touched.
 func TestMirrorToRegistry_RegistryRefStreamsToLocalRegistry(t *testing.T) {
+	t.Parallel()
 	img, err := random.Image(1024, 1)
 	if err != nil {
 		t.Fatalf("random.Image: %v", err)
 	}
 	var gotPlatform v1.Platform
 	var gotDst string
+	d := defaultDeps()
 	// The copy platform must come from the docker DAEMON arch, not the CLI
 	// binary's GOARCH (issue #54) — stub it to a fixed value and prove it flows
 	// through to the go-containerregistry copy.
-	stub(t, &daemonArch, func(context.Context) (string, error) { return "amd64", nil })
-	stub(t, &remoteImage, func(_ context.Context, ref name.Reference, p v1.Platform) (v1.Image, error) {
+	d.daemonArch = func(context.Context) (string, error) { return "amd64", nil }
+	d.remoteImage = func(_ context.Context, ref name.Reference, p v1.Platform) (v1.Image, error) {
 		gotPlatform = p
 		if ref.Name() != "ghcr.io/cobr-io/git-server:v0.1.0" {
 			t.Errorf("source ref = %q", ref.Name())
 		}
 		return img, nil
-	})
-	stub(t, &remoteWrite, func(_ context.Context, dst name.Reference, _ v1.Image) error {
+	}
+	d.remoteWrite = func(_ context.Context, dst name.Reference, _ v1.Image) error {
 		gotDst = dst.Name()
 		return nil
-	})
+	}
 	// A registry ref must never fall back to the docker store.
-	stub(t, &inLocalDocker, func(context.Context, string) bool {
+	d.inLocalDocker = func(context.Context, string) bool {
 		t.Fatal("inLocalDocker must not be probed for a registry-hosted ref")
 		return false
-	})
+	}
 
-	pullRef, err := mirrorToRegistry(context.Background(),
+	pullRef, err := mirrorToRegistry(context.Background(), d,
 		DefaultRef("git-server", "v0.1.0"), "acme-local-registry", 50001, "git-server", "v0.1.0", io.Discard)
 	if err != nil {
 		t.Fatalf("mirrorToRegistry: %v", err)
@@ -282,8 +297,10 @@ func TestMirrorToRegistry_RegistryRefStreamsToLocalRegistry(t *testing.T) {
 // not the CLI binary's GOARCH — so a cross-arch install mirrors the arch the
 // cluster can actually exec (issue #54).
 func TestHostPlatform_UsesDaemonArch(t *testing.T) {
-	stub(t, &daemonArch, func(context.Context) (string, error) { return "amd64", nil })
-	p := hostPlatform(context.Background())
+	t.Parallel()
+	d := defaultDeps()
+	d.daemonArch = func(context.Context) (string, error) { return "amd64", nil }
+	p := hostPlatform(context.Background(), d)
 	if p.OS != "linux" || p.Architecture != "amd64" {
 		t.Errorf("hostPlatform = %+v, want linux/amd64", p)
 	}
@@ -293,10 +310,12 @@ func TestHostPlatform_UsesDaemonArch(t *testing.T) {
 // to the binary's GOARCH — the pre-#54 behaviour, and harmless since the
 // subsequent registry read fails on a dead daemon anyway.
 func TestHostPlatform_FallsBackToGOARCHOnDaemonError(t *testing.T) {
-	stub(t, &daemonArch, func(context.Context) (string, error) {
+	t.Parallel()
+	d := defaultDeps()
+	d.daemonArch = func(context.Context) (string, error) {
 		return "", errors.New("docker daemon not reachable")
-	})
-	p := hostPlatform(context.Background())
+	}
+	p := hostPlatform(context.Background(), d)
 	if p.OS != "linux" || p.Architecture != runtime.GOARCH {
 		t.Errorf("hostPlatform = %+v, want linux/%s (GOARCH fallback)", p, runtime.GOARCH)
 	}
@@ -306,13 +325,15 @@ func TestHostPlatform_FallsBackToGOARCHOnDaemonError(t *testing.T) {
 // not the registry→registry copy. When it is not yet built, the mirror stops
 // with build guidance and never reaches remoteImage.
 func TestMirrorToRegistry_LocalOnlyRefUsesDockerPath(t *testing.T) {
-	stub(t, &remoteImage, func(_ context.Context, _ name.Reference, _ v1.Platform) (v1.Image, error) {
+	t.Parallel()
+	d := defaultDeps()
+	d.remoteImage = func(_ context.Context, _ name.Reference, _ v1.Platform) (v1.Image, error) {
 		t.Fatal("remoteImage must not be called for a local-only dogfood ref")
 		return nil, nil
-	})
-	stub(t, &inLocalDocker, func(context.Context, string) bool { return false })
+	}
+	d.inLocalDocker = func(context.Context, string) bool { return false }
 
-	_, err := mirrorToRegistry(context.Background(),
+	_, err := mirrorToRegistry(context.Background(), d,
 		"flywheel-dev/git-server:dogfood", "acme-local-registry", 50001, "git-server", "v0.1.0", io.Discard)
 	if err == nil {
 		t.Fatal("want MissingDogfoodError for an unbuilt local-only ref")
@@ -325,11 +346,13 @@ func TestMirrorToRegistry_LocalOnlyRefUsesDockerPath(t *testing.T) {
 // A read failure on the unmodified default ref surfaces the option-(c) override
 // guidance, with the underlying cause preserved for diagnosis.
 func TestMirrorRemote_DefaultRefReadFailureReturnsOptionC(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("MANIFEST_UNKNOWN: manifest unknown")
-	stub(t, &remoteImage, func(_ context.Context, _ name.Reference, _ v1.Platform) (v1.Image, error) {
+	d := defaultDeps()
+	d.remoteImage = func(_ context.Context, _ name.Reference, _ v1.Platform) (v1.Image, error) {
 		return nil, cause
-	})
-	_, err := mirrorRemote(context.Background(),
+	}
+	_, err := mirrorRemote(context.Background(), d,
 		DefaultRef("git-server", "v0.1.0"), "acme-local-registry", 50001, "git-server", "v0.1.0", io.Discard)
 	if err == nil {
 		t.Fatal("want an error on read failure")
@@ -342,21 +365,13 @@ func TestMirrorRemote_DefaultRefReadFailureReturnsOptionC(t *testing.T) {
 	}
 }
 
-// stub swaps a package-var function for the duration of a test and restores it
-// afterward. Keeps the network/docker dependencies injectable.
-func stub[T any](t *testing.T, target *T, replacement T) {
-	t.Helper()
-	orig := *target
-	*target = replacement
-	t.Cleanup(func() { *target = orig })
-}
-
-// End-to-end against a real in-memory registry (no stubs): the whole point of
-// issue #50 is that copying a multi-arch index must land a SINGLE-platform image
-// in the local registry, never an index (which `docker push` rejects under the
-// containerd image store). This proves that property through the actual
-// go-containerregistry copy path.
+// End-to-end against a real in-memory registry (no stubbed remoteImage/
+// remoteWrite): the whole point of issue #50 is that copying a multi-arch
+// index must land a SINGLE-platform image in the local registry, never an
+// index (which `docker push` rejects under the containerd image store). This
+// proves that property through the actual go-containerregistry copy path.
 func TestMirrorRemote_ResolvesIndexToSinglePlatformImage(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(registry.New())
 	t.Cleanup(srv.Close)
 	u, err := url.Parse(srv.URL)
@@ -391,7 +406,8 @@ func TestMirrorRemote_ResolvesIndexToSinglePlatformImage(t *testing.T) {
 	}
 	// Pin the copy platform to the test's GOARCH so the assertion is
 	// independent of whatever docker daemon (if any) backs the CI runner.
-	stub(t, &daemonArch, func(context.Context) (string, error) { return runtime.GOARCH, nil })
+	d := defaultDeps()
+	d.daemonArch = func(context.Context) (string, error) { return runtime.GOARCH, nil }
 	wantChild, ok := childByArch[runtime.GOARCH]
 	if !ok {
 		t.Skipf("test host arch %q not represented in the seed index", runtime.GOARCH)
@@ -406,7 +422,7 @@ func TestMirrorRemote_ResolvesIndexToSinglePlatformImage(t *testing.T) {
 
 	// Mirror it. The ref is registry-hosted but not the default ghcr ref, so the
 	// local tag is content-addressed by the resolved image's digest.
-	pullRef, err := mirrorRemote(context.Background(),
+	pullRef, err := mirrorRemote(context.Background(), d,
 		host+"/cobr-io/git-server:v9.9.9", "test-registry", port, "git-server", "v0.1.0", io.Discard)
 	if err != nil {
 		t.Fatalf("mirrorRemote: %v", err)
