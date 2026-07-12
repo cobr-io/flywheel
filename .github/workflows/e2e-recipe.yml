@@ -31,6 +31,19 @@ on:
         description: 'Job wall-clock budget in minutes.'
         required: true
         type: number
+      timeout-scale:
+        # The scale and the job budget are a PAIR: every scenario wait ceiling
+        # is multiplied by the scale, so the largest scaled wait must stay
+        # comfortably UNDER the job budget — otherwise a genuinely-failing wait
+        # is killed by the job budget first, which cancels the run before
+        # dump_diag fires and eats the diagnostics (seen on PR #101: two
+        # cancelled runs hid a real deploy-branch freeze). Largest single wait
+        # today is scenario-1's 480s: ×2 = 16m (fits the 25m per-PR budget with
+        # ~5m of setup), ×3 = 24m (needs the nightly's 90m).
+        description: 'TIMEOUT_SCALE for scenario wait ceilings; keep max scaled wait under timeout-minutes.'
+        required: false
+        type: number
+        default: 2
 
 permissions:
   contents: read
@@ -152,13 +165,15 @@ jobs:
           done
           cd "$GITHUB_WORKSPACE"
           # Which scenarios run is the caller's `scenarios` input (per-PR "1 5",
-          # nightly "all"). CI exports TIMEOUT_SCALE=3 so the scenario wait
-          # ceilings — tuned on a dev box — never trip on a slow 2-core runner.
+          # nightly "all"). TIMEOUT_SCALE comes from the caller too, so the
+          # wait ceilings — tuned on a dev box — stretch for slow 2-core
+          # runners WITHOUT outlasting the job budget (see the timeout-scale
+          # input's comment for the pairing rule).
           export KCTX=k3d-acme-local
           export CLIENT_REPO="$HOME/e2e/acme"
           export WORKSPACES_ROOT="$HOME/e2e"
           export CLIENT_NAME=acme
-          export TIMEOUT_SCALE=3
+          export TIMEOUT_SCALE=${{ inputs.timeout-scale }}
           bash testdata/scenarios/run.sh "$SCENARIOS"
       - name: Teardown
         if: always()
