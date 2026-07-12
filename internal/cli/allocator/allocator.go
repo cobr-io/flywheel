@@ -71,6 +71,23 @@ func DefaultPath() (string, error) {
 	return filepath.Join(home, ".config", "flywheel", "allocations.json"), nil
 }
 
+// ResolvePath resolves the allocations ledger path for a command. Precedence:
+// an explicit path wins (tests inject one); otherwise
+// homeOverride/.config/flywheel/allocations.json when a home override is set
+// (tests); otherwise DefaultPath() for the running user. It returns an error
+// only when no path can be derived (DefaultPath fails because the user has no
+// home dir). Shared by `up`'s port-heal and `down`'s allocator release so the
+// resolution rule lives in exactly one place.
+func ResolvePath(explicit, homeOverride string) (string, error) {
+	if explicit != "" {
+		return explicit, nil
+	}
+	if homeOverride != "" {
+		return filepath.Join(homeOverride, ".config", "flywheel", "allocations.json"), nil
+	}
+	return DefaultPath()
+}
+
 // Load reads the allocations file at the given path. A missing file is
 // treated as an empty allocator (so the first `flywheel new` on a fresh
 // host doesn't error).

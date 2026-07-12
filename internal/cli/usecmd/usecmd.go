@@ -19,7 +19,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -190,26 +189,8 @@ func currentBranch(repoDir string) string {
 
 // readConfig parses flywheel.yaml merged with flywheel.yaml.local (for a
 // per-developer cluster-name override, unlikely but consistent with the other
-// commands). Only cluster.name is needed to resolve the k3d context.
+// commands). Only cluster.name is needed to resolve the k3d context, so it
+// loads with RequireCluster and no full validation.
 func readConfig(repoDir string) (*flywheelSchema.File, error) {
-	committed, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
-	if err != nil {
-		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
-	}
-	var local []byte
-	if data, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFileLocal)); err == nil {
-		local = data
-	}
-	merged, err := config.MergeYAML(committed, local)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := flywheelSchema.Parse(merged)
-	if err != nil {
-		return nil, err
-	}
-	if cfg.Cluster.Name == "" {
-		return nil, fmt.Errorf("flywheel.yaml: cluster.name is required")
-	}
-	return cfg, nil
+	return config.Load(repoDir, config.LoadOptions{RequireCluster: true})
 }

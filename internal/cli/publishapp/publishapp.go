@@ -110,17 +110,5 @@ func Run(opts Options) error {
 // readConfig loads the merged flywheel.yaml(+.local) — we only need
 // paths.workspaces_root, which lives in the .local overlay.
 func readConfig(repoDir string) (*schema.File, error) {
-	committed, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
-	if err != nil {
-		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
-	}
-	var local []byte
-	if data, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFileLocal)); err == nil {
-		local = data
-	}
-	merged, err := config.MergeYAML(committed, local)
-	if err != nil {
-		return nil, err
-	}
-	return schema.Parse(merged)
+	return config.Load(repoDir, config.LoadOptions{})
 }

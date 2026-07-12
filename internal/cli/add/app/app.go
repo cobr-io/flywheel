@@ -418,35 +418,13 @@ func WorkspaceDirs(repoDir string) ([]string, error) {
 }
 
 // readConfig parses flywheel.yaml, merged with flywheel.yaml.local if
-// present. The merge matters for namespace/interval defaults; image
-// overrides no longer affect the committed git-auto-sync manifest (it
-// pins the canonical ghcr.io name, rewritten at reconcile by the
-// client-builders Kustomization), so a `.local` override reaches the
-// per-app sidecar through `up`, not through this read.
+// present. The merge matters for namespace/interval defaults (filled by the
+// shared loader when unset); image overrides no longer affect the committed
+// git-auto-sync manifest (it pins the canonical ghcr.io name, rewritten at
+// reconcile by the client-builders Kustomization), so a `.local` override
+// reaches the per-app sidecar through `up`, not through this read.
 func readConfig(repoDir string) (*schema.File, error) {
-	committed, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFile))
-	if err != nil {
-		return nil, fmt.Errorf("read flywheel.yaml: %w", err)
-	}
-	var local []byte
-	if data, err := os.ReadFile(filepath.Join(repoDir, naming.ConfigFileLocal)); err == nil {
-		local = data
-	}
-	merged, err := config.MergeYAML(committed, local)
-	if err != nil {
-		return nil, err
-	}
-	cfg, err := schema.Parse(merged)
-	if err != nil {
-		return nil, err
-	}
-	if cfg.Namespaces.Apps == "" {
-		cfg.Namespaces.Apps = "apps"
-	}
-	if cfg.Flux.IntervalLocal == "" {
-		cfg.Flux.IntervalLocal = "10s"
-	}
-	return cfg, nil
+	return config.Load(repoDir, config.LoadOptions{})
 }
 
 // appendResource inserts `  - ./<name>` under the `resources:` key of

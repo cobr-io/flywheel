@@ -180,12 +180,11 @@ func updateLedger(ledger *allocator.File, cfg *schema.File, repoDir string) {
 }
 
 // allocationsPath resolves ~/.config/flywheel/allocations.json, honouring a
-// test home override.
+// test home override. It delegates the precedence rule to allocator.ResolvePath
+// (shared with `down`), adding up's own "never block on a missing home" fallback
+// to a relative path.
 func allocationsPath(homeOverride string) string {
-	if homeOverride != "" {
-		return filepath.Join(homeOverride, ".config", "flywheel", "allocations.json")
-	}
-	p, err := allocator.DefaultPath()
+	p, err := allocator.ResolvePath("", homeOverride)
 	if err != nil {
 		return filepath.Join(".config", "flywheel", "allocations.json")
 	}
