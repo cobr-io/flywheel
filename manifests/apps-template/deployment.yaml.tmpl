@@ -47,13 +47,13 @@ spec:
   ingressClassName: traefik
   # No `secretName` under tls: Traefik's TLSStore.default
   # (kube-system/local-cert, provisioned by `flywheel up` step 13) serves
-  # the wildcard *.{{ .LocalDomain }} cert. Listing the host here just
+  # the wildcard *.{{ .Domain }} cert. Listing the host here just
   # attaches the route to the websecure entrypoint.
   tls:
     - hosts:
-        - {{ .AppName }}.{{ .LocalDomain }}
+        - {{ .AppName }}.{{ .Domain }}
   rules:
-    - host: {{ .AppName }}.{{ .LocalDomain }}
+    - host: {{ .AppName }}.{{ .Domain }}
       http:
         paths:
           - path: /

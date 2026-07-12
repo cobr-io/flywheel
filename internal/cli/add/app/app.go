@@ -427,29 +427,46 @@ func Run(opts Options) (*Result, error) {
 	}, nil
 }
 
-// buildValues constructs the value map for the per-app-template files.
-// Field names mirror the template placeholders. AppName drives the logical
-// identity (resource names, Ingress host, image); Worktree drives the physical
-// bindings (the /workspaces mount, the bare-repo URL, the GitRepository URL).
-func buildValues(opts Options, cfg *schema.File, worktree, gitAutoSyncRef string) map[string]any {
-	return map[string]any{
-		"AppName":           opts.Name,
-		"Worktree":          worktree,
-		"AppsNamespace":     opts.Namespace,
-		"ClientName":        cfg.Client.Name,
-		"FluxIntervalLocal": cfg.Flux.IntervalLocal,
-		// flywheel's namespace is fixed (naming.FlywheelNamespace); the per-app
-		// scaffolds (GitRepository, build-config, git-auto-sync) reference it as
-		// a placeholder rather than a baked literal (task T14).
-		"FlywheelNamespace": naming.FlywheelNamespace,
-		"GitServerURL":      naming.GitServerURL(naming.FlywheelNamespace),
-		"GitAutoSyncImage":  gitAutoSyncRef,
-		"RegistryURL":       fmt.Sprintf("k3d-%s:5000", cfg.Cluster.Registry),
-		"Image":             opts.Image,
-		"Context":           opts.Context,
-		"Dockerfile":        opts.Dockerfile,
-		"Target":            opts.Target,
-		"LocalDomain":       cfg.Local.Domain,
+// appContext is the typed render context for the per-app + apps template trees.
+// It embeds the shared schema.Core projection and adds the add-app extras.
+// AppName drives the logical identity (resource names, Ingress host, image);
+// Worktree drives the physical bindings (the /workspaces mount, the bare-repo
+// URL, the GitRepository URL).
+type appContext struct {
+	schema.Core
+	AppName          string
+	Worktree         string
+	GitServerURL     string
+	GitAutoSyncImage string
+	RegistryURL      string
+	Image            string
+	Context          string
+	Dockerfile       string
+	Target           string
+}
+
+// buildValues constructs the render context for the per-app + apps templates.
+// It projects cfg through schema.NewCore, then overrides Core.AppsNamespace
+// with the resolved per-app namespace (opts.Namespace — an explicit --namespace
+// wins over the cfg default) since add-app's namespace semantics differ from
+// the cfg-wide default the constructor supplies.
+func buildValues(opts Options, cfg *schema.File, worktree, gitAutoSyncRef string) appContext {
+	core := schema.NewCore(cfg)
+	core.AppsNamespace = opts.Namespace
+	return appContext{
+		Core:     core,
+		AppName:  opts.Name,
+		Worktree: worktree,
+		// flywheel's namespace is fixed (Core.FlywheelNamespace = naming
+		// .FlywheelNamespace); the per-app scaffolds reference the git-server in
+		// it via a placeholder rather than a baked literal (task T14).
+		GitServerURL:     naming.GitServerURL(naming.FlywheelNamespace),
+		GitAutoSyncImage: gitAutoSyncRef,
+		RegistryURL:      fmt.Sprintf("k3d-%s:5000", cfg.Cluster.Registry),
+		Image:            opts.Image,
+		Context:          opts.Context,
+		Dockerfile:       opts.Dockerfile,
+		Target:           opts.Target,
 	}
 }
 

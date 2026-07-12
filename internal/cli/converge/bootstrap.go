@@ -12,7 +12,6 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/render"
 	flywheelSchema "github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/execx"
-	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // RenderBootstrap materialises the in-cluster Flux entrypoint
@@ -101,12 +100,46 @@ var bootstrapImageOwners = map[string]string{
 	"git-auto-sync":            imgOwnerClientBuilders,
 }
 
-// bootstrapValues maps cfg + resolved image refs onto the value names the
-// embedded templates expect. It loops over schema.ImageNames (no hand-unrolled
-// per-image keys), splitting each resolved ref into a bootstrapImage and
-// bucketing it into DevLoopImages or ClientBuilderImages per bootstrapImageOwners.
-// The two `images:` template blocks range over their respective slice.
-func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName string) (map[string]any, error) {
+// bootstrapContext is the typed render context for the bootstrap tree
+// (templates/bootstrap/clusters/local/flux-system/*). It embeds the shared
+// schema.Core projection and adds the bootstrap-only extras: the ConfigMap
+// key/value map, the two image slices the `images:` blocks range over, and the
+// infra cadence / git-server tunable / SHA that only these templates read.
+//
+// Only three Core fields are actually referenced by the bootstrap templates
+// (AppsNamespace, FlywheelNamespace, FluxIntervalLocal); the rest ride along
+// unused via the embed, which is harmless (a struct field a template never
+// names is simply ignored). The previous map form also carried ClientName,
+// Domain, ClusterName, Registry, RegistryPort and IntegrationBranch that NO
+// bootstrap template used — those dead keys are gone by construction.
+type bootstrapContext struct {
+	flywheelSchema.Core
+	// RepoBaseName is the client repo basename — not derivable from cfg (it is
+	// a filesystem fact), so it is a bootstrap extra rather than a Core field.
+	RepoBaseName string
+	// FluxIacInterval is the client-infra reconcile cadence (flux.iac_interval,
+	// falling back to interval_local).
+	FluxIacInterval      string
+	FlywheelSHA          string
+	GitServerMemoryLimit string
+	// FlywheelConfigData is the flywheel-config ConfigMap's full key/value map
+	// from the single producer (FlywheelConfigData). flywheel-config.yaml.tmpl
+	// ranges over it (text/template visits map keys in sorted order, so the
+	// rendered ConfigMap is deterministic) instead of hardcoding keys — so this
+	// Flux-owned copy and the step-11 prelude direct apply can't diverge.
+	FlywheelConfigData map[string]string
+	// DevLoopImages / ClientBuilderImages are the resolved image refs the two
+	// `images:` blocks range over, bucketed per bootstrapImageOwners.
+	DevLoopImages       []bootstrapImage
+	ClientBuilderImages []bootstrapImage
+}
+
+// bootstrapValues maps cfg + resolved image refs onto the bootstrap render
+// context. It loops over schema.ImageNames (no hand-unrolled per-image keys),
+// splitting each resolved ref into a bootstrapImage and bucketing it into
+// DevLoopImages or ClientBuilderImages per bootstrapImageOwners. The two
+// `images:` template blocks range over their respective slice.
+func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName string) (bootstrapContext, error) {
 	// The client-infra tier reconciles at flux.iac_interval; infra changes
 	// less often than app code, so it can poll slower than interval_local.
 	// Optional — fall back to interval_local when unset (older repos).
@@ -122,7 +155,7 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		// would otherwise leave the base's value. Default refs always have
 		// one; reject overrides that don't (matches what `up`'s mirror-images step expects).
 		if newTag == "" {
-			return nil, fmt.Errorf("bootstrap: %s missing — flywheel.images overrides must include an explicit `:tag`", name)
+			return bootstrapContext{}, fmt.Errorf("bootstrap: %s missing — flywheel.images overrides must include an explicit `:tag`", name)
 		}
 		img := bootstrapImage{Name: name, ImageName: newName, ImageTag: newTag}
 		switch bootstrapImageOwners[name] {
@@ -135,38 +168,19 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		// block; the image agreement test catches that omission in CI.
 	}
 
-	return map[string]any{
-		// FlywheelConfigData is the flywheel-config ConfigMap's full key/value
-		// map from the single producer (FlywheelConfigData). flywheel-config.yaml.tmpl
-		// ranges over it (text/template visits map keys in sorted order, so the
-		// rendered ConfigMap is deterministic) instead of hardcoding keys — so
-		// this Flux-owned copy and the step-11 prelude direct apply can't diverge.
-		"FlywheelConfigData": FlywheelConfigData(cfg, repoBaseName),
-		// flywheel's namespace is fixed (naming.FlywheelNamespace), not
-		// client-configurable. The bootstrap templates (namespaces, sources,
-		// flywheel-config, builders-kustomization) reference it as a placeholder
-		// so the literal lives in ONE place (task T14).
-		"FlywheelNamespace": naming.FlywheelNamespace,
-		// AppsNamespace is the CONFIGURED default apps namespace
-		// (namespaces.apps — a real client knob, unlike the fixed flywheel one).
-		// namespaces.yaml.tmpl creates this namespace so the bootstrap honours a
-		// non-"apps" default; `add app` scaffolds workloads into the same value.
-		// cfg is always loader-defaulted (config.Load → applyLoadDefaults) by the
-		// time up reaches RenderBootstrap, so this is never empty in production.
-		"AppsNamespace":        cfg.Namespaces.Apps,
-		"ClientName":           cfg.Client.Name,
-		"RepoBaseName":         repoBaseName,
-		"Domain":               cfg.Local.Domain,
-		"ClusterName":          cfg.Cluster.Name,
-		"Registry":             cfg.Cluster.Registry,
-		"RegistryPort":         cfg.Cluster.RegistryPort,
-		"IntegrationBranch":    cfg.IntegrationBranch(),
-		"FluxIntervalLocal":    cfg.Flux.IntervalLocal,
-		"FluxIacInterval":      iacInterval,
-		"FlywheelSHA":          flywheelSHA,
-		"GitServerMemoryLimit": cfg.GitServerMemoryLimit(),
-		"DevLoopImages":        devLoopImages,
-		"ClientBuilderImages":  clientBuilderImages,
+	// Core supplies FlywheelNamespace (fixed at naming.FlywheelNamespace) and
+	// AppsNamespace (the configured default — a real client knob); cfg is always
+	// loader-defaulted (config.Load → applyLoadDefaults) by the time up reaches
+	// RenderBootstrap, so AppsNamespace is never empty in production.
+	return bootstrapContext{
+		Core:                 flywheelSchema.NewCore(cfg),
+		RepoBaseName:         repoBaseName,
+		FluxIacInterval:      iacInterval,
+		FlywheelSHA:          flywheelSHA,
+		GitServerMemoryLimit: cfg.GitServerMemoryLimit(),
+		FlywheelConfigData:   FlywheelConfigData(cfg, repoBaseName),
+		DevLoopImages:        devLoopImages,
+		ClientBuilderImages:  clientBuilderImages,
 	}, nil
 }
 
