@@ -14,6 +14,7 @@ import (
 
 	"github.com/cobr-io/flywheel/internal/cli/config"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
+	"github.com/cobr-io/flywheel/internal/cli/sourcemode"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	"github.com/cobr-io/flywheel/internal/cli/worktree"
 	"github.com/cobr-io/flywheel/internal/naming"
@@ -65,7 +66,7 @@ func Run(opts Options) error {
 	case !ok:
 		style.Detail(opts.Stdout, "%s (worktree %q) is not declared in the workspace block; nothing to publish (run 'flywheel add app' to register it)", opts.Name, app.Worktree)
 		return nil
-	case !entry.LocalOnly:
+	case !sourcemode.IsLocalOnly(entry):
 		style.Detail(opts.Stdout, "%s is already remote-backed (source: %s); nothing to publish", opts.Name, entry.URL)
 		return nil
 	}

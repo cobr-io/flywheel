@@ -19,10 +19,10 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/k3d"
 	"github.com/cobr-io/flywheel/internal/cli/publishapp"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
+	"github.com/cobr-io/flywheel/internal/cli/sourcemode"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	"github.com/cobr-io/flywheel/internal/cli/up"
 	"github.com/cobr-io/flywheel/internal/cli/usecmd"
-	"github.com/cobr-io/flywheel/internal/cli/worktree"
 	"github.com/cobr-io/flywheel/internal/naming"
 )
 
@@ -328,19 +328,13 @@ func completeLocalOnlyApps(cmd *cobra.Command, args []string, toComplete string)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	localOnly := make(map[string]bool)
-	for _, name := range cfg.LocalOnlyWorktrees() {
-		localOnly[name] = true
-	}
-	apps, err := worktree.DeclaredApps(wd)
+	apps, err := sourcemode.LocalOnlyApps(wd, cfg)
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
 	var names []string
 	for _, a := range apps {
-		if localOnly[a.Worktree] {
-			names = append(names, a.Name)
-		}
+		names = append(names, a.Name)
 	}
 	return names, cobra.ShellCompDirectiveNoFileComp
 }

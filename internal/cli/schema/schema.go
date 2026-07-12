@@ -175,6 +175,16 @@ func (f *File) IntegrationBranch() string {
 	return DefaultIntegrationBranch
 }
 
+// ValidSource reports whether r sets exactly one of url / local_only — the
+// invariant Validate enforces and config/edit.go's writeEntry relies on. It is
+// the single definition of that rule; internal/cli/sourcemode re-exports it so
+// the local-only lifecycle reads it from one place. (The raw local-only
+// predicate is the LocalOnly field itself; see sourcemode.IsLocalOnly.)
+func (r WorkspaceRepo) ValidSource() bool {
+	hasURL := strings.TrimSpace(r.URL) != ""
+	return hasURL != r.LocalOnly
+}
+
 // WorkspaceRepo returns the workspace entry declaring the given worktree, and
 // ok=false when no entry does.
 func (f *File) WorkspaceRepo(worktree string) (WorkspaceRepo, bool) {
@@ -368,9 +378,9 @@ func Validate(f *File) error {
 			es = append(es, ValidateError{field + ".name", fmt.Sprintf("duplicate worktree %q (the block is keyed by worktree)", r.Name)})
 		}
 		seen[r.Name] = true
-		// Exactly one of url / local_only. hasURL == LocalOnly catches both
-		// "both set" and "neither set".
-		if hasURL := strings.TrimSpace(r.URL) != ""; hasURL == r.LocalOnly {
+		// Exactly one of url / local_only (WorkspaceRepo.ValidSource is the one
+		// definition of this rule, shared with sourcemode).
+		if !r.ValidSource() {
 			es = append(es, ValidateError{field, "set exactly one of url or local_only"})
 		}
 		// branch is optional; a present value must be a plausible branch name
