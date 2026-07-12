@@ -4,7 +4,7 @@ metadata:
   name: {{ .AppName }}-build-config
   # Co-located with its GitRepository in flywheel-system (builder infra);
   # image-builder-controller reads it from BUILDER_NAMESPACE.
-  namespace: flywheel-system
+  namespace: {{ .FlywheelNamespace }}
 data:
   # image-builder-controller reads this on every observed GitRepository
   # revision and creates one build Job per `builds[]` entry. For

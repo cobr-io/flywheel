@@ -96,14 +96,17 @@ func Load(repoDir string, opts LoadOptions) (*schema.File, error) {
 // Load-time defaults, filled by Load when the corresponding field is unset.
 //
 // These live here (loader-applied) rather than as schema accessor methods (the
-// IntegrationBranch() pattern) on purpose: every command reads the struct
-// fields directly (cfg.Namespaces.Apps, cfg.Flux.IntervalLocal,
-// cfg.Namespaces.Flywheel across converge, add app, cmd/flywheel), so applying
-// the default once here keeps it in ONE place without having to convert every
+// IntegrationBranch() pattern) on purpose: commands read the struct fields
+// directly (cfg.Namespaces.Apps, cfg.Flux.IntervalLocal), so applying the
+// default once here keeps it in ONE place without having to convert every
 // reader to an accessor. For a fully-validated config they are no-ops:
-// schema.Validate requires namespaces.apps, namespaces.flywheel, and
-// flux.interval_local to be non-empty, so only the not-fully-validated commands
-// ever exercise them.
+// schema.Validate requires namespaces.apps and flux.interval_local to be
+// non-empty, so only the not-fully-validated commands ever exercise them.
+//
+// cfg.Namespaces.Flywheel is a special case: nothing reads it any more (the
+// namespace is fixed at naming.FlywheelNamespace, task T14). The default below
+// is kept only so the struct field is populated for any generic serialization
+// of an under-validated config; it feeds no behavior.
 const (
 	defaultAppsNamespace     = "apps"
 	defaultFluxIntervalLocal = "10s"

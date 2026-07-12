@@ -12,6 +12,6 @@ metadata:
   namespace: flux-system
 spec:
   interval: {{ .FluxIntervalLocal }}
-  url: http://git-server.flywheel-system.svc.cluster.local:8080/{{ .RepoBaseName }}.git
+  url: http://git-server.{{ .FlywheelNamespace }}.svc.cluster.local:8080/{{ .RepoBaseName }}.git
   ref:
     branch: flywheel/local-deploy

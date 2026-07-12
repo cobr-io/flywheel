@@ -3,6 +3,8 @@ package schema
 import (
 	"strings"
 	"testing"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // T0.1 — validates a representative flywheel.yaml and rejects a malformed one.
@@ -199,7 +201,8 @@ func TestValidate_RejectsMissingFields(t *testing.T) {
 		{"no cluster.registry_port", `registry_port: 50001`, "cluster.registry_port"},
 		{"no cluster.http_port", `http_port: 8083`, "cluster.http_port"},
 		{"no cluster.https_port", `https_port: 8543`, "cluster.https_port"},
-		{"no namespaces.flywheel", `flywheel: flywheel-system`, "namespaces.flywheel"},
+		// namespaces.flywheel is NOT in this table: it is optional (task T14).
+		// Its behavior matrix is covered by TestValidate_FlywheelNamespaceFixed.
 		{"no namespaces.apps", `apps: apps`, "namespaces.apps"},
 		{"no flux.interval_local", `interval_local: 10s`, "flux.interval_local"},
 	}
@@ -222,6 +225,59 @@ func TestValidate_RejectsMissingFields(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestValidate_FlywheelNamespaceFixed locks in the T14 behavior matrix for the
+// deprecated, now-fixed namespaces.flywheel key: unset is fine, the fixed value
+// is fine (older client files carry it), any other value is a clear error.
+func TestValidate_FlywheelNamespaceFixed(t *testing.T) {
+	// base is validYAML with the whole `namespaces:` block reduced to apps only,
+	// so each case can splice in its own flywheel line (or none).
+	base := strings.Replace(validYAML,
+		"namespaces:\n  flywheel: flywheel-system\n  apps: apps\n",
+		"namespaces:\n  apps: apps\n", 1)
+
+	t.Run("unset is valid", func(t *testing.T) {
+		f, err := Parse([]byte(base))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if err := Validate(f); err != nil {
+			t.Errorf("Validate with namespaces.flywheel unset should pass, got: %v", err)
+		}
+	})
+
+	t.Run("fixed value is valid", func(t *testing.T) {
+		y := strings.Replace(base,
+			"namespaces:\n  apps: apps\n",
+			"namespaces:\n  flywheel: "+naming.FlywheelNamespace+"\n  apps: apps\n", 1)
+		f, err := Parse([]byte(y))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		if err := Validate(f); err != nil {
+			t.Errorf("Validate with namespaces.flywheel=%q should pass, got: %v", naming.FlywheelNamespace, err)
+		}
+	})
+
+	t.Run("other value errors clearly", func(t *testing.T) {
+		y := strings.Replace(base,
+			"namespaces:\n  apps: apps\n",
+			"namespaces:\n  flywheel: other\n  apps: apps\n", 1)
+		f, err := Parse([]byte(y))
+		if err != nil {
+			t.Fatalf("Parse: %v", err)
+		}
+		err = Validate(f)
+		if err == nil {
+			t.Fatal("Validate with namespaces.flywheel=other should error, got nil")
+		}
+		for _, want := range []string{"namespaces.flywheel", "fixed at " + naming.FlywheelNamespace, "remove"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q missing %q", err.Error(), want)
+			}
+		}
+	})
 }
 
 func TestValidate_RejectsWrongSchema(t *testing.T) {

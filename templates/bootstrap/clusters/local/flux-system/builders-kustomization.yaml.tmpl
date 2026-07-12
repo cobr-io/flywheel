@@ -51,7 +51,7 @@ spec:
         kind: Deployment
         metadata:
           name: git-server
-          namespace: flywheel-system
+          namespace: {{ .FlywheelNamespace }}
         spec:
           template:
             spec:

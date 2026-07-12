@@ -14,7 +14,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: flywheel-config
-  namespace: flywheel-system
+  namespace: {{ .FlywheelNamespace }}
 data:
 {{- range $key, $value := .FlywheelConfigData }}
   {{ $key }}: "{{ $value }}"

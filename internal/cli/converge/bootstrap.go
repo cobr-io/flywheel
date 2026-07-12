@@ -12,6 +12,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/render"
 	flywheelSchema "github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/execx"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // RenderBootstrap materialises the in-cluster Flux entrypoint
@@ -140,7 +141,12 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		// ranges over it (text/template visits map keys in sorted order, so the
 		// rendered ConfigMap is deterministic) instead of hardcoding keys — so
 		// this Flux-owned copy and the step-11 prelude direct apply can't diverge.
-		"FlywheelConfigData":   FlywheelConfigData(cfg, repoBaseName),
+		"FlywheelConfigData": FlywheelConfigData(cfg, repoBaseName),
+		// flywheel's namespace is fixed (naming.FlywheelNamespace), not
+		// client-configurable. The bootstrap templates (namespaces, sources,
+		// flywheel-config, builders-kustomization) reference it as a placeholder
+		// so the literal lives in ONE place (task T14).
+		"FlywheelNamespace":    naming.FlywheelNamespace,
 		"ClientName":           cfg.Client.Name,
 		"RepoBaseName":         repoBaseName,
 		"Domain":               cfg.Local.Domain,

@@ -5,7 +5,7 @@ metadata:
   # Builder infra lives in flywheel-system (where image-builder-controller
   # watches, via BUILDER_NAMESPACE) so the apps namespace holds only the
   # user's application workloads.
-  namespace: flywheel-system
+  namespace: {{ .FlywheelNamespace }}
   # Source provenance lives in flywheel.yaml's workspace block (keyed by
   # worktree), not on this resource: spec.url below always points at the
   # in-cluster bare repo and so cannot distinguish a local-only app from a

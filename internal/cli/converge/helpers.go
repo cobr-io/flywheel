@@ -94,7 +94,7 @@ func gitServerMemoryPatch(limit string) string {
       kind: Deployment
       metadata:
         name: git-server
-        namespace: flywheel-system
+        namespace: %s
       spec:
         template:
           spec:
@@ -103,7 +103,7 @@ func gitServerMemoryPatch(limit string) string {
                 resources:
                   limits:
                     memory: %s
-`, limit)
+`, naming.FlywheelNamespace, limit)
 }
 
 // splitImageRef splits an image reference into newName + newTag. If the
@@ -149,10 +149,12 @@ func FlywheelConfigData(cfg *flywheelSchema.File, repoBaseName string) map[strin
 		"cluster.name":          cfg.Cluster.Name,
 		"cluster.registry":      cfg.Cluster.Registry,
 		"cluster.registry_port": fmt.Sprintf("%d", cfg.Cluster.RegistryPort),
-		"namespaces.flywheel":   cfg.Namespaces.Flywheel,
-		"namespaces.apps":       cfg.Namespaces.Apps,
-		"flux.interval_local":   cfg.Flux.IntervalLocal,
-		"local.domain":          cfg.Local.Domain,
+		// flywheel's namespace is fixed (naming.FlywheelNamespace), not
+		// client-configurable — the schema knob is deprecated (task T14).
+		"namespaces.flywheel": naming.FlywheelNamespace,
+		"namespaces.apps":     cfg.Namespaces.Apps,
+		"flux.interval_local": cfg.Flux.IntervalLocal,
+		"local.domain":        cfg.Local.Domain,
 		// Read by git-deploy-controller (dev-loop/base is static, so per-repo
 		// values arrive via this ConfigMap): the gitops repo basename it derives
 		// WORKTREE + BARE_REPO_URL from, and the AUTHORED fallback branch.
@@ -178,7 +180,7 @@ func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelS
 			"kind":       "ConfigMap",
 			"metadata": map[string]interface{}{
 				"name":      "flywheel-config",
-				"namespace": cfg.Namespaces.Flywheel,
+				"namespace": naming.FlywheelNamespace,
 				// Marks this as flywheel-applied machinery so `up`'s orphan
 				// prune (PruneOrphanedMachinery) keeps it in scope.
 				"labels": map[string]interface{}{

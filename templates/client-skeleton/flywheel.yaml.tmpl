@@ -20,7 +20,8 @@ cluster:
   k3s_image: v1.34.1-k3s1
 
 namespaces:
-  flywheel: flywheel-system
+  # flywheel's own namespace is fixed at flywheel-system and not configurable —
+  # don't add a `flywheel:` key here.
   apps: apps
 
 flux:

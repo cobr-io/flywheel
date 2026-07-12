@@ -18,6 +18,8 @@ package controller
 import (
 	"fmt"
 	"strings"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // Config carries every client-specific value the controller needs. Every
@@ -65,7 +67,9 @@ type Config struct {
 // defaultBuildKitAddr is the in-cluster buildkitd Service address (see
 // manifests/dev-loop/base/buildkitd.yaml) used when flywheel-config doesn't
 // override it.
-const defaultBuildKitAddr = "tcp://buildkitd.flywheel-system:1234"
+// The namespace is fixed (naming.FlywheelNamespace) — buildkitd is flywheel
+// infra, so its Service always lives there (task T14).
+const defaultBuildKitAddr = "tcp://buildkitd." + naming.FlywheelNamespace + ":1234"
 
 // BuildKitAddrOrDefault returns the configured buildkitd address, or the
 // default in-cluster Service address when unset.
