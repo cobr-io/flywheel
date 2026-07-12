@@ -3,6 +3,8 @@ package controller
 import (
 	"strings"
 	"testing"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // Invariant: no client-specific literals reachable in the binary; every
@@ -89,5 +91,18 @@ func TestRegistryURL_UsesInClusterPortNotHostPort(t *testing.T) {
 		if got := c.RegistryURL(); got != tc.want {
 			t.Errorf("RegistryURL(%q, hostPort=%q) = %q, want %q", tc.registry, tc.hostPort, got, tc.want)
 		}
+	}
+}
+
+// The build Jobs' client image: mirrored in-cluster ref when flywheel-config
+// provides it, upstream Hub ref (naming.BuildKitClientImage) when it doesn't —
+// the offline / stale-ConfigMap fallback (issue #107).
+func TestBuildKitClientImageOrDefault(t *testing.T) {
+	if got := (Config{}).BuildKitClientImageOrDefault(); got != naming.BuildKitClientImage {
+		t.Fatalf("empty config: got %q, want %q", got, naming.BuildKitClientImage)
+	}
+	mirrored := "k3d-acme-local-registry:5000/moby/buildkit:dogfood-abc123def456"
+	if got := (Config{BuildKitClientImage: mirrored}).BuildKitClientImageOrDefault(); got != mirrored {
+		t.Fatalf("configured: got %q, want %q", got, mirrored)
 	}
 }

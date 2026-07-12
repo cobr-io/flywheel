@@ -16,6 +16,8 @@ import (
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // TestBuildJobName covers the build Job naming: repo/image dedupe, the
@@ -479,6 +481,12 @@ func TestRenderJob_BuildKitWiring(t *testing.T) {
 	cs := spec.Containers
 	if len(cs) != 1 || cs[0].Name != "build" {
 		t.Fatalf("build container must be the single container named 'build' (scan-poke depends on it); got %+v", cs)
+	}
+	// With BuildKitClientImage unset, the client container image falls back to
+	// the upstream Hub ref — the naming constant `up`'s mirror step and the
+	// template agree on (issue #107).
+	if cs[0].Image != naming.BuildKitClientImage {
+		t.Fatalf("client container image = %q, want fallback %q", cs[0].Image, naming.BuildKitClientImage)
 	}
 	args := append(append([]string{}, cs[0].Command...), cs[0].Args...)
 	joined := strings.Join(args, " ")

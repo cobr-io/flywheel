@@ -62,6 +62,16 @@ type Config struct {
 	// or `BUILDKIT_ADDR` env (not currently surfaced through flywheel.yaml /
 	// flywheel-config).
 	BuildKitAddr string
+
+	// BuildKitClientImage is the image for the thin buildkit CLIENT container
+	// each build Job runs (the build executes in the buildkitd daemon at
+	// BuildKitAddr). Sourced from the flywheel-config key
+	// `images.buildkit_client`: `up` mirrors the client image into the local
+	// registry and writes the in-cluster ref there, so per-node first pulls
+	// come from the LAN instead of Docker Hub (issue #107). Optional: empty
+	// falls back to naming.BuildKitClientImage (the upstream Docker Hub ref) —
+	// correct whenever the mirror was skipped or the key predates this field.
+	BuildKitClientImage string
 }
 
 // defaultBuildKitAddr is the in-cluster buildkitd Service address (see
@@ -70,6 +80,16 @@ type Config struct {
 // The namespace is fixed (naming.FlywheelNamespace) — buildkitd is flywheel
 // infra, so its Service always lives there (task T14).
 const defaultBuildKitAddr = "tcp://buildkitd." + naming.FlywheelNamespace + ":1234"
+
+// BuildKitClientImageOrDefault returns the configured buildkit client image,
+// or the upstream Docker Hub ref when unset (per-node pulls, pre-#107
+// behavior).
+func (c Config) BuildKitClientImageOrDefault() string {
+	if c.BuildKitClientImage == "" {
+		return naming.BuildKitClientImage
+	}
+	return c.BuildKitClientImage
+}
 
 // BuildKitAddrOrDefault returns the configured buildkitd address, or the
 // default in-cluster Service address when unset.

@@ -83,9 +83,17 @@ wait_for_served_text() {
   local deadline=$((SECONDS + timeout))
   while (( SECONDS < deadline )); do
     local pod
+    # Newest Running pod (items[-1] after the creationTimestamp sort), NOT
+    # items[0]: during a rolling update the OLD pod is Terminating but still
+    # phase=Running for its termination grace period (30s default — busybox
+    # httpd ignores SIGTERM), and whether it sorts first is a name-suffix
+    # coin flip. Probing it made ~50% of warm legs read ~30s slower than the
+    # rollout actually was (issue #107's second cause — a measurement
+    # artifact; Service/ingress traffic cuts over immediately).
     pod=$(kc -n apps get pods -l app="$APP" \
       --field-selector=status.phase=Running \
-      -o jsonpath='{.items[0].metadata.name}' 2>/dev/null || true)
+      --sort-by=.metadata.creationTimestamp \
+      -o jsonpath='{.items[-1].metadata.name}' 2>/dev/null || true)
     if [[ -n "$pod" ]]; then
       local got
       got=$(kc -n apps exec "$pod" -- cat /www/index.html 2>/dev/null || true)

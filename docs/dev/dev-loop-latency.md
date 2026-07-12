@@ -16,7 +16,7 @@ cluster bring-up.
 |------|----------|-------|
 | Warm edit→served cycle (steady state) | **7–13 s** | includes the in-cluster image rebuild; THE number to protect |
 | First deploy after `add app` (cold) | 11–28 s | first build has no layer cache; includes first-scan machinery |
-| Any single warm leg (early bumps) | 7–41 s, bimodal (~50/50 per leg) | known race, [#107](https://github.com/cobr-io/flywheel/issues/107): a leg can quantize to a Flux interval (+10–30 s); observed striking the 2nd and 3rd bumps independently |
+| Any single warm leg (early bumps) | 7–13 s (was 7–41 s bimodal) | fixed: [#107](https://github.com/cobr-io/flywheel/issues/107) was a per-node cold pull of the buildkit client image from Docker Hub; `up` now pre-seeds it into the local registry |
 | Gitops-repo edit → converged | ~2–12 s | git-deploy-controller tick 2 s + source fetch (poked) + apply (event-driven) |
 | `flywheel up` (fresh cluster) | ~2–4 min local, ~9 min CI | cluster create + Flux install + bootstrap + image mirror |
 
@@ -35,7 +35,7 @@ Measured from a fast-mode capture (commit `13:53:57Z` → new pod `13:54:09Z`,
 | 1 | commit → git-auto-sync push | ≤ 2 s | sidecar `POLL_INTERVAL=2s` |
 | 2 | push → app GitRepository artifact | ≈ 0 s | sidecar pokes the GitRepository (`reconcile.fluxcd.io/requestedAt`) |
 | 3 | artifact → build Job created | ≈ 1 s | image-builder-controller watches GitRepository (event) |
-| 4 | build + push to local registry | 5–8 s warm | kaniko/BuildKit layer cache; cold builds add ~5–15 s |
+| 4 | build + push to local registry | 5–8 s warm | shared buildkitd daemon layer cache; cold builds add ~5–15 s. The per-Job CLIENT image is pre-seeded into the local registry by `up`, so a node's first build pulls it over the LAN (~2s), not Docker Hub (issue #107) |
 | 5 | build container exit → ImageRepository scan | ≈ 0.2 s | buildjob-imagescan controller pokes the ImageRepository |
 | 6 | scan → ImagePolicy resolves tag | ≈ 0.1 s | policy reconciles on ImageRepository status event |
 | 7 | policy → IUA commits bump to deploy branch | ≤ 5 s | imagepolicy-iua controller pokes the IUA (interval 5 s is the fallback) |
@@ -67,9 +67,12 @@ A loop that "works but feels slow" is almost always one or more dead pokes.
 ## Known deviations
 
 - **[#107](https://github.com/cobr-io/flywheel/issues/107)** — early warm
-  legs race Flux interval quantization (~50% incidence PER LEG; seen on the
-  2nd and 3rd bumps independently). Fix directions in the issue; until
-  fixed, judge loop health by the fastest of two consecutive bumps.
+  legs used to lose 15-30 s ~50% of the time: the build Job's thin buildkit
+  CLIENT image was cold-pulled from Docker Hub once per NODE, and Jobs
+  schedule on arbitrary nodes. Fixed by `up`'s mirror-buildkit-client step
+  (LAN-registry pre-seed; Hub fallback when offline). Watch the CYCLE lines
+  confirm the distribution collapses, then tighten the scenario-1 gate from
+  min-of-two-legs to every-leg.
 - **macOS + colima**: host-port forwarding can lag or wedge after rapid
   cluster create/delete cycles — `curl` against `*.localdev.me:<port>` failing
   while the pod is Running is a forwarding artifact, not a loop stall. Also
