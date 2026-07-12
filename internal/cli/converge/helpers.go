@@ -128,12 +128,23 @@ func splitImageRef(ref string) (string, string) {
 	return ref[:i], ref[i+1:]
 }
 
-// ApplyFlywheelConfig regenerates the flywheel-config ConfigMap from the
-// merged flywheel.yaml and applies it to flywheel-system. The keys here
-// are the contract from design § The flywheel-config ConfigMap; nothing
-// under paths.* or sops.* is included. (Closed material gap O3 / T1.13.)
-func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelSchema.File, repoBaseName string, out io.Writer) error {
-	data := map[string]interface{}{
+// FlywheelConfigData is the SINGLE source of truth for the flywheel-config
+// ConfigMap's data map — the contract between the CLI and the in-cluster
+// Flywheel components (per design § The flywheel-config ConfigMap). Both
+// writers derive their keys from here, so the two copies can never diverge:
+//
+//   - the direct apply at the step-11 prelude (ApplyFlywheelConfig), so the
+//     dev-loop controllers applied in step 11a can read the ConfigMap the
+//     moment their pods start; and
+//   - the bootstrap-tree copy Flux owns long-term
+//     (flywheel-config.yaml.tmpl), rendered by ranging over this map (injected
+//     as `FlywheelConfigData` in bootstrapValues).
+//
+// Nothing under paths.* or sops.* is included — those are host-only or
+// secret-only. Values are strings so both consumers (kubelet valueFrom, YAML
+// render) see the identical bytes.
+func FlywheelConfigData(cfg *flywheelSchema.File, repoBaseName string) map[string]string {
+	return map[string]string{
 		"client.name":           cfg.Client.Name,
 		"cluster.name":          cfg.Cluster.Name,
 		"cluster.registry":      cfg.Cluster.Registry,
@@ -147,6 +158,19 @@ func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelS
 		// WORKTREE + BARE_REPO_URL from, and the AUTHORED fallback branch.
 		"repo.base_name":         repoBaseName,
 		"git.integration_branch": cfg.IntegrationBranch(),
+	}
+}
+
+// ApplyFlywheelConfig regenerates the flywheel-config ConfigMap from the
+// merged flywheel.yaml and applies it to the flywheel namespace. Its keys come
+// from FlywheelConfigData (the single producer), so this direct apply and the
+// bootstrap-tree copy (flywheel-config.yaml.tmpl, applied at step 11d) agree by
+// construction. (Closed material gap O3 / T1.13.)
+func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelSchema.File, repoBaseName string, out io.Writer) error {
+	kv := FlywheelConfigData(cfg, repoBaseName)
+	data := make(map[string]interface{}, len(kv))
+	for k, v := range kv {
+		data[k] = v
 	}
 	cm := &unstructured.Unstructured{
 		Object: map[string]interface{}{

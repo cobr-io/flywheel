@@ -88,6 +88,12 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 	}
 
 	return map[string]any{
+		// FlywheelConfigData is the flywheel-config ConfigMap's full key/value
+		// map from the single producer (FlywheelConfigData). flywheel-config.yaml.tmpl
+		// ranges over it (text/template visits map keys in sorted order, so the
+		// rendered ConfigMap is deterministic) instead of hardcoding keys — so
+		// this Flux-owned copy and the step-11 prelude direct apply can't diverge.
+		"FlywheelConfigData":              FlywheelConfigData(cfg, repoBaseName),
 		"ClientName":                      cfg.Client.Name,
 		"RepoBaseName":                    repoBaseName,
 		"Domain":                          cfg.Local.Domain,
