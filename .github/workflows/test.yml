@@ -41,6 +41,13 @@ jobs:
             echo "ERROR: prod scaffolding leaked into client-skeleton; deferred to v0.2+"
             exit 1
           fi
+      - name: cross-phase invariant — completion paths agree (T27)
+        # scripts/install-completions.sh is the single source of truth for the
+        # zsh/bash/fish completion destination paths; install.sh inlines its own
+        # copy (fetched standalone via curl, can't source it) and uninstall.sh
+        # keeps a static fallback for the same standalone case. Both hand-kept
+        # copies can drift silently — this turns that into a test failure.
+        run: bash scripts/check-completion-paths-drift.sh
       # Portability guards. The native runner is linux/amd64, but Flywheel
       # is developed on macOS and run on Linux/WSL (incl. arm64). These
       # catch the regressions that *are* code-level — formatting drift, CRLF

@@ -104,16 +104,30 @@ else
 fi
 
 # ---- shell completions ----------------------------------------------------
-# Canonical paths written by scripts/install-completions.sh — keep in sync.
+# scripts/install-completions.sh is the single source of truth for the three
+# completion destination paths (--print-paths). Consume it when this
+# uninstall.sh is running from inside a flywheel checkout (`make uninstall`,
+# or a cloned repo); fall back to a static copy of the same paths for the
+# standalone curl-pipe-bash uninstall (no repo checkout available) or an old
+# install. scripts/check-completion-paths-drift.sh (run in CI) asserts the
+# fallback below never drifts from the real source.
 remove_completion() {
   local shell="$1" dest="$2"
   if [ -e "$dest" ]; then
     rm -f "$dest" && info "removed ${shell} completion → ${dest}"
   fi
 }
-remove_completion zsh  "${HOME}/.zsh/completions/_flywheel"
-remove_completion bash "${HOME}/.local/share/bash-completion/completions/flywheel"
-remove_completion fish "${HOME}/.config/fish/completions/flywheel.fish"
+
+COMPLETIONS_SCRIPT="$(dirname "${BASH_SOURCE[0]:-$0}")/scripts/install-completions.sh"
+if [ -f "$COMPLETIONS_SCRIPT" ]; then
+  while read -r shell dest; do
+    remove_completion "$shell" "$dest"
+  done < <(bash "$COMPLETIONS_SCRIPT" --print-paths)
+else
+  remove_completion zsh  "${HOME}/.zsh/completions/_flywheel"
+  remove_completion bash "${HOME}/.local/share/bash-completion/completions/flywheel"
+  remove_completion fish "${HOME}/.config/fish/completions/flywheel.fish"
+fi
 
 # ---- optional: embed cache ------------------------------------------------
 CACHE_DIR="${HOME}/.cache/flywheel"
