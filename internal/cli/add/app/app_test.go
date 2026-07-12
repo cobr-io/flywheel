@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 )
@@ -587,6 +588,56 @@ func TestAddApp_RefusesIfAppsDirExists(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(repo, "builders", "base", "hello")); !os.IsNotExist(err) {
 		t.Errorf("pre-flight failed too late: builders/base/hello was created (err=%v)", err)
+	}
+}
+
+// TestAddApp_RenderFailureLeavesRepoUntouched is the transactional invariant: a
+// render failure (injected via a bad Options.TemplateFS) must leave flywheel.yaml
+// byte-for-byte untouched and scaffold nothing — the workspace registration is
+// the LAST thing Run does, after the renders succeed.
+func TestAddApp_RenderFailureLeavesRepoUntouched(t *testing.T) {
+	repo := setupRepo(t)
+	mkWorktree(t, repo, "hello", nil)
+
+	before := readFile(t, filepath.Join(repo, "flywheel.yaml"))
+	beforeBuildersKust := readFile(t, filepath.Join(repo, "builders", "base", "kustomization.yaml"))
+
+	// A template referencing an undefined key fails at render time
+	// (render.Tree renders with missingkey=error).
+	badFS := fstest.MapFS{
+		"kustomization.yaml.tmpl": &fstest.MapFile{Data: []byte("name: {{ .DoesNotExist }}\n")},
+	}
+	_, err := Run(Options{RepoDir: repo, Worktree: "hello", TemplateFS: badFS, Stdout: io.Discard})
+	if err == nil {
+		t.Fatal("expected a render failure")
+	}
+
+	// flywheel.yaml is untouched: no workspace entry was written.
+	if after := readFile(t, filepath.Join(repo, "flywheel.yaml")); after != before {
+		t.Errorf("flywheel.yaml was mutated despite a render failure:\n--- before ---\n%s\n--- after ---\n%s", before, after)
+	}
+	if _, ok := workspaceRepo(t, repo, "hello"); ok {
+		t.Errorf("workspace entry should not exist after a render failure")
+	}
+	// The kustomizations and scaffold dirs are untouched too.
+	if after := readFile(t, filepath.Join(repo, "builders", "base", "kustomization.yaml")); after != beforeBuildersKust {
+		t.Errorf("builders/base/kustomization.yaml was mutated despite a render failure:\n%s", after)
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, "builders", "base", "hello")); !os.IsNotExist(statErr) {
+		t.Errorf("builder dir should not exist after a render failure")
+	}
+	if _, statErr := os.Stat(filepath.Join(repo, "apps", "base", "hello")); !os.IsNotExist(statErr) {
+		t.Errorf("apps dir should not exist after a render failure")
+	}
+	// The staging directory must be cleaned up (no leftover under the repo root).
+	entries, err := os.ReadDir(repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".flywheel-add-app-") {
+			t.Errorf("staging directory leaked: %s", e.Name())
+		}
 	}
 }
 
