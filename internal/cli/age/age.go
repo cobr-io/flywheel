@@ -116,7 +116,7 @@ func LoadKeypairFromPath(path string) (Keypair, error) {
 // ~/.config/flywheel/<client>/age.key. Returns the raw text (suitable
 // for sops/age consumers) and the path it was read from (for error
 // messages). Caller is responsible for the mode-check elsewhere if
-// needed — design § up step 5 mode-checks 0600.
+// needed — up's age-key step mode-checks 0600.
 func ReadPrivateKey(clientName string) (string, string, error) {
 	path, err := HostKeyPath(clientName)
 	if err != nil {

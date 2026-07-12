@@ -34,7 +34,7 @@ func (p *PortForward) Close() {
 // `namespace`) and forwards a local port to the pod's `targetPort`.
 // Returns a PortForward whose LocalPort is the OS-chosen ephemeral port.
 //
-// Used by `flywheel up` step 11c to push the cached Flywheel clone into
+// Used by `flywheel up`'s push-mirror step to push the cached Flywheel clone into
 // the in-cluster git-server before Flux reconciles from the mirror.
 func ForwardToService(ctx context.Context, kubeconfigPath, contextName, namespace, svcName string, targetPort int, out io.Writer) (*PortForward, error) {
 	cfg, err := loadRESTConfig(kubeconfigPath, contextName)

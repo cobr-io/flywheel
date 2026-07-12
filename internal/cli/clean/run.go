@@ -33,8 +33,8 @@ func Run(ctx context.Context, a *applier.Applier, opts Options, out io.Writer) e
 }
 
 // cleanOrphanedPVCs deletes PVCs in the flywheel namespace labeled
-// managed-by=flywheel. (Design § up step 12: PVCs are never auto-deleted
-// by `up`; `clean` is the explicit removal path.)
+// managed-by=flywheel. (By design, `up` never auto-deletes PVCs;
+// `clean` is the explicit removal path.)
 func cleanOrphanedPVCs(ctx context.Context, a *applier.Applier, ns string, out io.Writer) error {
 	gvr := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
 	// Label-scoped: only PVCs flywheel itself applied carry

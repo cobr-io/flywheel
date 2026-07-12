@@ -1,6 +1,6 @@
 // Package doctor runs the host-prerequisite checks documented in design
 // § Prerequisites. `doctor --quick` runs the minimal set wired into
-// `flywheel up` step 2; `doctor` (full mode) adds profile-specific
+// `flywheel up`'s check-host step; `doctor` (full mode) adds profile-specific
 // checks and live-port-collision validation against the allocator.
 package doctor
 
@@ -31,7 +31,7 @@ type Result struct {
 
 func (r Result) OK() bool { return r.Err == nil }
 
-// QuickChecks are the minimum set `flywheel up` step 2 runs before any
+// QuickChecks are the minimum set `flywheel up`'s check-host step runs before any
 // network call.
 func QuickChecks() []Check {
 	return []Check{

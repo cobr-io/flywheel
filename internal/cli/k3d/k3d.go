@@ -88,7 +88,7 @@ func DeleteRegistry(ctx context.Context, name string) error {
 	return nil
 }
 
-// CreateClusterOpts captures every option `flywheel up` step 7 sets.
+// CreateClusterOpts captures every option `flywheel up`'s create-cluster step sets.
 type CreateClusterOpts struct {
 	Name           string
 	K3sImage       string // e.g. v1.34.1-k3s1

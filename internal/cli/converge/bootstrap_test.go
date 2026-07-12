@@ -48,7 +48,7 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 		"newTag: dogfood",
 		"newName: flywheel-dev/image-builder-controller",
 		// Must be rewritten on the Flux path too, or its pod ErrImagePulls the
-		// base ghcr ref while step 11a applies the local one (two-apply-paths).
+		// base ghcr ref while up's dev-loop step applies the local one (two-apply-paths).
 		"newName: flywheel-dev/git-deploy-controller",
 	} {
 		if !strings.Contains(bk, want) {
@@ -163,7 +163,7 @@ func TestRenderBootstrap_RejectsUntaggedOverride(t *testing.T) {
 	}
 }
 
-// The bootstrap tree is applied by `up` step 11d, so every object it emits
+// The bootstrap tree is applied by `up`'s apply-flux-system step, so every object it emits
 // must carry app.kubernetes.io/managed-by=flywheel (directive: label
 // everything `up` creates, issue #27). The label lives in the root
 // kustomization's `labels:` block, which only materialises when kustomize

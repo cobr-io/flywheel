@@ -202,8 +202,8 @@ func managedByFlywheel() map[string]interface{} {
 }
 
 // createAgeSecret creates the `sops-age` Secret in `flux-system`. Flux's
-// SOPS decryption looks for a key named `age.agekey`. Per design § up
-// step 13.
+// SOPS decryption looks for a key named `age.agekey`. Run by `up`'s
+// create-secrets step.
 func createAgeSecret(ctx context.Context, a *applier.Applier, ageContent string, out io.Writer) error {
 	secret := &unstructured.Unstructured{
 		Object: map[string]interface{}{

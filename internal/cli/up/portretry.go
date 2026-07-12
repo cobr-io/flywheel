@@ -42,7 +42,7 @@ func retryOnPortCollision(create, reheal func() error) error {
 }
 
 // createRegistryHealOnce creates the k3d registry. The docker-aware portheal
-// (step 5b) should have already cleared collisions, but a port can still be
+// (the heal-host-ports step) should have already cleared collisions, but a port can still be
 // taken between that probe and this bind (TOCTOU). On such a failure it removes
 // the partial registry, reheals registry_port from its pool, and retries once;
 // any other error is returned unchanged.

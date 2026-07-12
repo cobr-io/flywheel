@@ -5,8 +5,8 @@
 // Destructive reconciliation of the git-managed layers is intentionally NOT
 // flywheel's job: Flux owns those (every Flux Kustomization is prune:true).
 // flywheel applies only recreatable machinery directly — and, as of issue #27,
-// reaps its OWN superseded machinery (step 11e): resources labeled
-// app.kubernetes.io/managed-by=flywheel that a version bump stops rendering.
+// reaps its OWN superseded machinery (the prune-machinery step): resources
+// labeled app.kubernetes.io/managed-by=flywheel that a version bump stops rendering.
 // That prune is scoped by the label and a kind denylist so it can never delete
 // an app/infra workload (those are unlabeled, Flux-owned) nor a Namespace or
 // Flux Kustomization/GitRepository (whose deletion would cascade).
@@ -66,13 +66,81 @@ type Options struct {
 	SkipFluxInstall bool   // tests with Flux already present
 }
 
-// Run executes the up pipeline, numbered by the in-line step comments below
-// (1-15 plus lettered sub-steps). The numbering is historical and has gaps —
-// steps 4 and 12 were removed by earlier refactors and step 8 is now just a
-// pointer to where its work actually happens (step 11a) — kept as-is here so
-// renumbering stays a dedicated change (see task T19) rather than noise in
-// unrelated diffs. Returns nil on success; partial failures abort early and
-// return the first error.
+// upState is the mutable state threaded through the up pipeline. Each step reads
+// what earlier steps produced and writes what later steps consume; holding it in
+// one struct is what lets the pipeline be a flat table (see Run) instead of a
+// long function with data flow hidden between blocks.
+type upState struct {
+	ctx  context.Context
+	opts Options
+	out  io.Writer
+
+	cfg    *schema.File
+	layout gitcheckout.Layout
+
+	cacheDir    string
+	sha         string
+	kubeContext string
+
+	ageKeyContent string
+	ageKeyPath    string
+
+	workspacesRoot string
+	resolvedImages map[string]string
+
+	a *applier.Applier
+
+	repoBaseName string
+	bootstrapDir string // rendered bootstrap tmpdir; Run removes it on exit
+
+	keepDevLoop   []applier.ResourceRef
+	keepBootstrap []applier.ResourceRef
+
+	// bootstrapOK gates the prune step: if applying the flux-system tree
+	// (the apply-flux-system step) fails, a resource that simply didn't get
+	// applied must not be mistaken for a superseded orphan — so
+	// prune-machinery is skipped. Starts true; only apply-flux-system clears it.
+	bootstrapOK bool
+}
+
+// step is one entry in up's pipeline. run performs the work over the shared
+// upState. A nil skip means "always run"; otherwise the step is skipped when
+// skip reports true — this is how prune-machinery consults bootstrap state and
+// how the --wait / test seams elide optional work. critical selects the failure
+// policy: a critical step's error aborts the pipeline (wrapped with the step
+// name); a non-critical step's error is logged as a warning and the pipeline
+// continues. The name replaces the historical step number everywhere it used to
+// appear — in these errors/warnings and in cross-package doc comments.
+type step struct {
+	name     string
+	critical bool
+	skip     func(*upState) bool
+	run      func(*upState) error
+}
+
+// runSteps executes steps in declaration order, owning the warn-vs-abort policy
+// so no individual step re-implements it. It is the single place the pipeline's
+// control flow lives; the table in Run is pure data.
+func runSteps(s *upState, steps []step) error {
+	for _, st := range steps {
+		if st.skip != nil && st.skip(s) {
+			continue
+		}
+		if err := st.run(s); err != nil {
+			if st.critical {
+				return fmt.Errorf("%s: %w", st.name, err)
+			}
+			style.Warn(s.out, "%s: %v", st.name, err)
+		}
+	}
+	return nil
+}
+
+// Run executes the up pipeline as a table of named steps (see the steps slice
+// below), driven by runSteps. Steps replaced the old 1-15 numbering — which had
+// gaps and was cited from other packages — with stable names; runSteps owns the
+// abort-on-critical / warn-and-continue policy. Returns nil on success; a
+// critical step's failure aborts and returns the first error.
 func Run(ctx context.Context, opts Options) error {
 	if opts.Stdout == nil {
 		opts.Stdout = os.Stdout
@@ -84,391 +152,485 @@ func Run(ctx context.Context, opts Options) error {
 		}
 		opts.RepoDir = wd
 	}
-	out := opts.Stdout
+	s := &upState{ctx: ctx, opts: opts, out: opts.Stdout, bootstrapOK: true}
+	defer func() {
+		if s.bootstrapDir != "" {
+			_ = os.RemoveAll(s.bootstrapDir)
+		}
+	}()
 
-	// Step 1 — read flywheel.yaml + .local, merge, validate.
-	cfg, err := converge.LoadConfig(opts.RepoDir)
-	if err != nil {
-		return fmt.Errorf("step 1 (read config): %w", err)
+	steps := []step{
+		{name: "load-config", critical: true, run: (*upState).loadConfig},
+		{name: "version-check", critical: true, run: (*upState).versionCheck},
+		{name: "check-host", critical: true, run: (*upState).checkHost},
+		{name: "inspect-checkout", critical: true, run: (*upState).inspectCheckout},
+		{name: "embed-cache", critical: true, run: (*upState).embedCache},
+		{name: "age-key", critical: true, run: (*upState).ageKey},
+		{name: "mkcert", critical: true, run: (*upState).mkcert},
+		{name: "heal-host-ports", critical: true, run: (*upState).healPorts},
+		{name: "create-registry", critical: true, run: (*upState).createRegistry},
+		{name: "resolve-workspaces-root", critical: true, run: (*upState).resolveWorkspacesRoot},
+		{name: "reconcile-worktrees", run: (*upState).reconcile},
+		{name: "create-cluster", critical: true, run: (*upState).createCluster},
+		{name: "verify-mounts", critical: true, run: (*upState).verifyMounts},
+		{name: "mirror-images", critical: true, run: (*upState).mirrorImages},
+		{name: "new-applier", critical: true, run: (*upState).newApplier},
+		{name: "flux-install", critical: true, skip: skipFluxInstall, run: (*upState).fluxInstall},
+		{name: "render-bootstrap", critical: true, run: (*upState).renderBootstrap},
+		{name: "ensure-namespaces", critical: true, run: (*upState).ensureNamespaces},
+		{name: "flywheel-config", critical: true, run: (*upState).flywheelConfig},
+		{name: "dev-loop", critical: true, run: (*upState).devLoop},
+		{name: "wait-git-server", critical: true, run: (*upState).waitGitServer},
+		{name: "push-mirror", run: (*upState).pushMirror},
+		{name: "apply-flux-system", run: (*upState).applyFluxSystem},
+		{name: "prune-machinery", skip: skipPrune, run: (*upState).pruneMachinery},
+		{name: "create-secrets", critical: true, run: (*upState).createSecrets},
+		{name: "wait-flux-kustomizations", skip: skipWait, run: (*upState).waitFluxKustomizations},
+		{name: "success", critical: true, run: (*upState).printSuccess},
 	}
-	style.Step(out, "%s @ %s", cfg.Client.Name, cfg.Flywheel.Version)
+	return runSteps(s, steps)
+}
 
-	// Version-drift gate — before any host/network work. `up` only proceeds
-	// when the installed binary and the pinned flywheel.version agree (or the
-	// user accepts a forward bump). A dev build skips. See checkVersionDrift.
-	newVersion, err := checkVersionDrift(out, opts.Stdin, opts.RepoDir, cfg.Flywheel.Version)
+func skipFluxInstall(s *upState) bool { return s.opts.SkipFluxInstall }
+func skipWait(s *upState) bool        { return !waitEnabled(s.opts) }
+func skipPrune(s *upState) bool       { return !s.bootstrapOK }
+
+// loadConfig reads flywheel.yaml + .local, merges, and validates.
+func (s *upState) loadConfig() error {
+	cfg, err := converge.LoadConfig(s.opts.RepoDir)
 	if err != nil {
 		return err
 	}
-	cfg.Flywheel.Version = newVersion
+	s.cfg = cfg
+	style.Step(s.out, "%s @ %s", cfg.Client.Name, cfg.Flywheel.Version)
+	return nil
+}
 
-	// Step 2 — doctor BEFORE network (closed material gap O7 / plan
-	// T1.3 reorder).
-	style.Step(out, "checking host prerequisites")
+// versionCheck is the version-drift gate — run before any host/network work.
+// `up` only proceeds when the installed binary and the pinned flywheel.version
+// agree (or the user accepts a forward bump). A dev build skips inside
+// checkVersionDrift.
+func (s *upState) versionCheck() error {
+	newVersion, err := checkVersionDrift(s.out, s.opts.Stdin, s.opts.RepoDir, s.cfg.Flywheel.Version)
+	if err != nil {
+		return err
+	}
+	s.cfg.Flywheel.Version = newVersion
+	return nil
+}
+
+// checkHost runs the doctor host-prerequisite checks BEFORE any network work
+// (closed material gap O7 / plan T1.3 reorder).
+func (s *upState) checkHost() error {
+	style.Step(s.out, "checking host prerequisites")
 	checks := doctor.QuickChecks()
 	if results := doctor.Run(checks); !allOK(results) {
-		printDoctor(out, results)
-		return fmt.Errorf("step 2: host prerequisites missing — fix the issues above and retry")
+		printDoctor(s.out, results)
+		return fmt.Errorf("host prerequisites missing — fix the issues above and retry")
 	}
+	return nil
+}
 
-	// Step 2b — classify the git checkout. A git linked worktree needs its shared
-	// git dir bind-mounted so the in-cluster git-deploy-controller can read it
-	// (issue #62); a *nested* worktree can't satisfy flywheel's sibling model, so
-	// refuse it here (before any network/cluster work) with remediation.
-	layout, lerr := gitcheckout.Inspect(opts.RepoDir)
+// inspectCheckout classifies the git checkout. A git linked worktree needs its
+// shared git dir bind-mounted so the in-cluster git-deploy-controller can read
+// it (issue #62); a *nested* worktree can't satisfy flywheel's sibling model, so
+// refuse it here (before any network/cluster work) with remediation.
+func (s *upState) inspectCheckout() error {
+	layout, lerr := gitcheckout.Inspect(s.opts.RepoDir)
 	if lerr != nil {
-		style.Warn(out, "could not classify git checkout (%v); assuming a normal clone", lerr)
+		style.Warn(s.out, "could not classify git checkout (%v); assuming a normal clone", lerr)
 	}
+	s.layout = layout
 	if layout.IsWorktree && layout.Nested {
 		if os.Getenv(gitcheckout.AllowNestedEnv) == "" {
-			return fmt.Errorf("step 2: %s", gitcheckout.NestedRemediation(layout))
+			return fmt.Errorf("%s", gitcheckout.NestedRemediation(layout))
 		}
-		style.Warn(out, "%s is a nested git worktree; proceeding because %s is set (apps must live in-repo)",
+		style.Warn(s.out, "%s is a nested git worktree; proceeding because %s is set (apps must live in-repo)",
 			layout.Dir, gitcheckout.AllowNestedEnv)
 	}
 	if layout.IsWorktree && layout.CommonDir != "" {
-		style.Detail(out, "git worktree: mounting shared git dir %s", layout.CommonDir)
+		style.Detail(s.out, "git worktree: mounting shared git dir %s", layout.CommonDir)
 	}
+	return nil
+}
 
-	// Step 3 — extract the binary's embedded asset tree to
-	// ~/.cache/flywheel/<version>/ and stamp a deterministic commit. The
-	// resulting cacheDir is what step 11c pushes into the in-cluster
-	// flywheel.git mirror; the SHA goes into flywheel-source's spec.ref.
-	cacheRoot := opts.CacheRoot
+// embedCache extracts the binary's embedded asset tree to
+// ~/.cache/flywheel/<version>/ and stamps a deterministic commit. The resulting
+// cacheDir is what the push-mirror step pushes into the in-cluster flywheel.git
+// mirror; the SHA goes into flywheel-source's spec.ref.
+func (s *upState) embedCache() error {
+	cacheRoot := s.opts.CacheRoot
 	if cacheRoot == "" {
-		if opts.HomeOverride != "" {
-			cacheRoot = filepath.Join(opts.HomeOverride, ".cache", "flywheel")
+		if s.opts.HomeOverride != "" {
+			cacheRoot = filepath.Join(s.opts.HomeOverride, ".cache", "flywheel")
 		} else {
-			cacheRoot, err = embedcache.DefaultRoot()
+			r, err := embedcache.DefaultRoot()
 			if err != nil {
 				return err
 			}
+			cacheRoot = r
 		}
 	}
-	var cacheDir, sha string
-	if opts.FlywheelSHA != "" {
+	if s.opts.FlywheelSHA != "" {
 		// Test path: caller pre-populated the cache and pinned the SHA.
-		cacheDir = filepath.Join(cacheRoot, cfg.Flywheel.Version)
-		sha = opts.FlywheelSHA
+		s.cacheDir = filepath.Join(cacheRoot, s.cfg.Flywheel.Version)
+		s.sha = s.opts.FlywheelSHA
 	} else {
-		cacheDir, sha, err = embedcache.Populate(cacheRoot, cfg.Flywheel.Version, flywheel.Assets, ".")
+		cacheDir, sha, err := embedcache.Populate(cacheRoot, s.cfg.Flywheel.Version, flywheel.Assets, ".")
 		if err != nil {
-			return fmt.Errorf("step 3 (embed cache): %w", err)
+			return err
 		}
+		s.cacheDir, s.sha = cacheDir, sha
 	}
-	style.Detail(out, "flywheel cache: %s @ %s", cacheDir, sha[:12])
+	style.Detail(s.out, "flywheel cache: %s @ %s", s.cacheDir, s.sha[:12])
+	return nil
+}
 
-	// kube context for the applier + mirror push below.
-	kubeContext := k3d.KubeContext(cfg.Cluster.Name)
-
-	// Step 5 — load age key + mkcert generate.
-	ageKeyContent, ageKeyPath, err := loadAgeKey(opts.RepoDir, cfg.Client.Name, opts.HomeOverride)
+// ageKey loads the age private key to install as the in-cluster sops-age Secret.
+func (s *upState) ageKey() error {
+	content, path, err := loadAgeKey(s.opts.RepoDir, s.cfg.Client.Name, s.opts.HomeOverride)
 	if err != nil {
-		return fmt.Errorf("step 5 (age key): %w", err)
+		return err
 	}
-	style.Detail(out, "age key: %s", ageKeyPath)
-	if err := ensureMkcert(ctx, opts.RepoDir, cfg.Local.Domain, out); err != nil {
-		return fmt.Errorf("step 5 (mkcert): %w", err)
-	}
+	s.ageKeyContent, s.ageKeyPath = content, path
+	style.Detail(s.out, "age key: %s", path)
+	return nil
+}
 
-	// Step 5b — heal host-port collisions before k3d binds them. The ports in
-	// flywheel.yaml are allocated once at init time; by now one may be held by
-	// another process (issue #1). Reallocate any foreign-held port from its
-	// pool and persist it, so cluster creation doesn't crash with "address
-	// already in use". A port our own running cluster/registry holds is left
-	// as-is (re-running up stays idempotent).
-	if err := healHostPorts(ctx, opts, cfg, out); err != nil {
-		return fmt.Errorf("step 5b (host ports): %w", err)
-	}
+// mkcert runs `mkcert -install` and generates cert/{cert,key}.pem for the domain.
+func (s *upState) mkcert() error {
+	return ensureMkcert(s.ctx, s.opts.RepoDir, s.cfg.Local.Domain, s.out)
+}
 
-	// Step 6 — k3d registry create. Wrapped so a port taken between the step-5b
-	// probe and this bind (TOCTOU) self-heals + retries instead of crashing.
-	if err := createRegistryHealOnce(ctx, opts, cfg, out); err != nil {
-		return fmt.Errorf("step 6: %w", err)
-	}
+// healPorts heals host-port collisions before k3d binds them. The ports in
+// flywheel.yaml are allocated once at init time; by now one may be held by
+// another process (issue #1). Reallocate any foreign-held port from its pool and
+// persist it, so cluster creation doesn't crash with "address already in use". A
+// port our own running cluster/registry holds is left as-is (re-running up stays
+// idempotent).
+func (s *upState) healPorts() error {
+	return healHostPorts(s.ctx, s.opts, s.cfg, s.out)
+}
 
-	// Step 7 — k3d cluster create.
-	workspacesRoot, err := workspacesRootFrom(cfg, opts.RepoDir)
+// createRegistry creates the k3d registry. Wrapped so a port taken between the
+// heal-host-ports probe and this bind (TOCTOU) self-heals + retries instead of
+// crashing.
+func (s *upState) createRegistry() error {
+	return createRegistryHealOnce(s.ctx, s.opts, s.cfg, s.out)
+}
+
+// resolveWorkspacesRoot resolves the host dir the cluster bind-mounts as
+// /workspaces (explicit paths.workspaces_root, else repoDir's parent).
+func (s *upState) resolveWorkspacesRoot() error {
+	wsRoot, err := workspacesRootFrom(s.cfg, s.opts.RepoDir)
 	if err != nil {
-		return fmt.Errorf("step 7 (workspaces_root): %w", err)
+		return err
 	}
-	style.Detail(out, "workspaces=%s", workspacesRoot)
+	s.workspacesRoot = wsRoot
+	style.Detail(s.out, "workspaces=%s", wsRoot)
+	return nil
+}
 
-	// Step 6b — reconcile app worktrees BEFORE the cluster mounts
-	// workspaces_root: clone any declared app whose source worktree is
-	// missing, so a fresh gitops-repo clone bootstraps in one command.
-	reconcileWorktrees(ctx, opts, cfg, workspacesRoot, out)
+// reconcile materialises app worktrees BEFORE the cluster mounts
+// workspaces_root: clone any declared app whose source worktree is missing, so a
+// fresh gitops-repo clone bootstraps in one command. Best-effort (never aborts).
+func (s *upState) reconcile() error {
+	reconcileWorktrees(s.ctx, s.opts, s.cfg, s.workspacesRoot, s.out)
+	return nil
+}
 
-	// Wrapped so an http/https port taken between the step-5b probe and this bind
-	// self-heals + retries once instead of crashing k3d.
-	if err := createClusterHealOnce(ctx, opts, cfg, func() k3d.CreateClusterOpts {
+// createCluster creates the k3d cluster. Wrapped so an http/https port taken
+// between the heal-host-ports probe and this bind self-heals + retries once
+// instead of crashing k3d.
+func (s *upState) createCluster() error {
+	return createClusterHealOnce(s.ctx, s.opts, s.cfg, func() k3d.CreateClusterOpts {
 		return k3d.CreateClusterOpts{
-			Name:           cfg.Cluster.Name,
-			K3sImage:       cfg.Cluster.K3sImage,
-			Servers:        cfg.Cluster.Servers,
-			Agents:         cfg.Cluster.Agents,
-			RegistryName:   cfg.Cluster.Registry,
-			HttpPort:       cfg.Cluster.HttpPort,
-			HttpsPort:      cfg.Cluster.HttpsPort,
-			WorkspacesRoot: workspacesRoot,
-			GitCommonDir:   layout.CommonDir, // "" for a normal clone; a worktree's shared git dir otherwise
+			Name:           s.cfg.Cluster.Name,
+			K3sImage:       s.cfg.Cluster.K3sImage,
+			Servers:        s.cfg.Cluster.Servers,
+			Agents:         s.cfg.Cluster.Agents,
+			RegistryName:   s.cfg.Cluster.Registry,
+			HttpPort:       s.cfg.Cluster.HttpPort,
+			HttpsPort:      s.cfg.Cluster.HttpsPort,
+			WorkspacesRoot: s.workspacesRoot,
+			GitCommonDir:   s.layout.CommonDir, // "" for a normal clone; a worktree's shared git dir otherwise
 		}
-	}, out); err != nil {
-		return fmt.Errorf("step 7: %w", err)
-	}
+	}, s.out)
+}
 
-	// Step 7b — verify the bind-mount actually bridged. The gitops repo must be
-	// visible in-cluster at /workspaces/<repo>, or self-git-auto-sync can't push
-	// it and the client-* Kustomizations never find their source. On macOS, temp
-	// dirs (/tmp, /var/folders) don't bind-mount into k3d — fail fast with
-	// remediation instead of the cryptic downstream "Source artifact not found".
-	if visible, verr := k3d.WorkspaceVisible(ctx, cfg.Cluster.Name, converge.ResolveRepoBaseName(opts.RepoDir)); verr != nil {
-		style.Warn(out, "could not verify the workspaces mount (%v); continuing", verr)
+// verifyMounts verifies the bind-mounts actually bridged into the cluster. The
+// gitops repo must be visible at /workspaces/<repo>, or self-git-auto-sync can't
+// push it and the client-* Kustomizations never find their source; on macOS,
+// temp dirs (/tmp, /var/folders) don't bind-mount into k3d — fail fast with
+// remediation instead of the cryptic downstream "Source artifact not found". A
+// git worktree additionally needs its shared git dir mounted at its
+// host-absolute path (issue #62), so verify that mount too.
+func (s *upState) verifyMounts() error {
+	repoBaseName := converge.ResolveRepoBaseName(s.opts.RepoDir)
+	if visible, verr := k3d.WorkspaceVisible(s.ctx, s.cfg.Cluster.Name, repoBaseName); verr != nil {
+		style.Warn(s.out, "could not verify the workspaces mount (%v); continuing", verr)
 	} else if !visible {
 		return fmt.Errorf("the gitops repo is not visible in the cluster at /workspaces/%s — workspaces_root %q did not bind-mount into k3d.\n%s",
-			converge.ResolveRepoBaseName(opts.RepoDir), workspacesRoot, hostmount.Remediation())
+			repoBaseName, s.workspacesRoot, hostmount.Remediation())
 	}
-
-	// Step 7b (worktree) — a git worktree also needs its shared git dir mounted at
-	// its host-absolute path, or the git-deploy-controller can't resolve the
-	// checkout. Verify that mount bridged too (issue #62), so we fail fast here
-	// instead of leaving the client-* Kustomizations stuck on "Source artifact
-	// not found".
-	if layout.IsWorktree && layout.CommonDir != "" {
-		if visible, verr := k3d.NodePathExists(ctx, cfg.Cluster.Name, layout.CommonDir); verr != nil {
-			style.Warn(out, "could not verify the worktree git-dir mount (%v); continuing", verr)
+	if s.layout.IsWorktree && s.layout.CommonDir != "" {
+		if visible, verr := k3d.NodePathExists(s.ctx, s.cfg.Cluster.Name, s.layout.CommonDir); verr != nil {
+			style.Warn(s.out, "could not verify the worktree git-dir mount (%v); continuing", verr)
 		} else if !visible {
-			return fmt.Errorf("%s", gitcheckout.UnreachableCommonDirRemediation(layout))
+			return fmt.Errorf("%s", gitcheckout.UnreachableCommonDirRemediation(s.layout))
 		}
 	}
+	return nil
+}
 
-	// Step 8 — inotify handled by privileged DaemonSet in step 11a.
-
-	// Step 9 — mirror each Flywheel image into the cluster's LOCAL registry so
-	// every node pulls it on demand — immune to the per-node scheduling/GC gaps
-	// issue #14 fixed. Each image is resolved (cfg.Flywheel.Images
-	// override or default ghcr.io ref); a registry-hosted ref is copied
-	// registry→registry scoped to the host platform (containerd-store-safe,
-	// issue #50) under its :<version> tag, a local-only dogfood build is
-	// tag+pushed from the docker store under a content-addressed :dogfood-<sha>
-	// tag. EnsureInCluster returns the in-cluster pull ref, written back so
-	// renderBootstrap and applyDevLoop reference the registry path.
-	resolvedImages := imagepin.Resolve(cfg)
-	if !opts.SkipImageLoad {
-		// Pre-flight: dogfood overrides that name no registry can only come
-		// from a local `make images` build. Probe for all of them up front and
-		// stop with build guidance, rather than attempting a doomed pull
-		// mid-mirror (a cryptic Docker Hub "repository does not exist") or
-		// deferring to an in-cluster ImagePullBackOff after the cluster is up.
-		if missing := imagepin.CheckLocalOverrides(ctx, cfg); len(missing) > 0 {
-			return fmt.Errorf("step 9 (dogfood images): %w", imagepin.MissingDogfoodError(missing))
-		}
-		style.Step(out, "mirroring Flywheel images to the local registry")
-		for _, name := range schema.ImageNames {
-			ref := resolvedImages[name]
-			loadName := name
-			source := "dogfood build"
-			if imagepin.IsDefault(name, cfg.Flywheel.Version, ref) {
-				source = "released image, pulled from ghcr"
-			}
-			var served string
-			if err := style.Spin(out,
-				fmt.Sprintf("mirror %s → local registry (%s)", ref, source),
-				func() error {
-					var e error
-					served, e = imagepin.EnsureInCluster(ctx, ref,
-						cfg.Cluster.Registry, cfg.Cluster.RegistryPort, loadName, cfg.Flywheel.Version, out)
-					return e
-				},
-			); err != nil {
-				return fmt.Errorf("step 9 (%s): %w", loadName, err)
-			}
-			resolvedImages[name] = served
-		}
+// mirrorImages mirrors each Flywheel image into the cluster's LOCAL registry so
+// every node pulls it on demand — immune to the per-node scheduling/GC gaps
+// issue #14 fixed. Each image is resolved (cfg.Flywheel.Images override or
+// default ghcr.io ref); a registry-hosted ref is copied registry→registry scoped
+// to the host platform (containerd-store-safe, issue #50) under its :<version>
+// tag, a local-only dogfood build is tag+pushed from the docker store under a
+// content-addressed :dogfood-<sha> tag. EnsureInCluster returns the in-cluster
+// pull ref, written back so render-bootstrap and dev-loop reference the registry
+// path. Resolving the refs happens unconditionally (later steps need them);
+// SkipImageLoad only elides the mirror itself (tests that pre-populate).
+func (s *upState) mirrorImages() error {
+	s.resolvedImages = imagepin.Resolve(s.cfg)
+	if s.opts.SkipImageLoad {
+		return nil
 	}
-
-	a, err := applier.New("", kubeContext)
-	if err != nil {
-		return fmt.Errorf("applier: %w", err)
+	// Pre-flight: dogfood overrides that name no registry can only come from a
+	// local `make images` build. Probe for all of them up front and stop with
+	// build guidance, rather than attempting a doomed pull mid-mirror (a cryptic
+	// Docker Hub "repository does not exist") or deferring to an in-cluster
+	// ImagePullBackOff after the cluster is up.
+	if missing := imagepin.CheckLocalOverrides(s.ctx, s.cfg); len(missing) > 0 {
+		return fmt.Errorf("dogfood images: %w", imagepin.MissingDogfoodError(missing))
 	}
-
-	// Step 10 — Flux install (SSA via fieldManager=flux-controller).
-	if !opts.SkipFluxInstall {
-		if err := style.Spin(out,
-			fmt.Sprintf("installing Flux %s", flux.Version),
-			func() error { return flux.Install(ctx, a, out) },
+	style.Step(s.out, "mirroring Flywheel images to the local registry")
+	for _, name := range schema.ImageNames {
+		ref := s.resolvedImages[name]
+		loadName := name
+		source := "dogfood build"
+		if imagepin.IsDefault(name, s.cfg.Flywheel.Version, ref) {
+			source = "released image, pulled from ghcr"
+		}
+		var served string
+		if err := style.Spin(s.out,
+			fmt.Sprintf("mirror %s → local registry (%s)", ref, source),
+			func() error {
+				var e error
+				served, e = imagepin.EnsureInCluster(s.ctx, ref,
+					s.cfg.Cluster.Registry, s.cfg.Cluster.RegistryPort, loadName, s.cfg.Flywheel.Version, s.out)
+				return e
+			},
 		); err != nil {
-			return fmt.Errorf("step 10: %w", err)
+			return fmt.Errorf("%s: %w", loadName, err)
 		}
-		// 5-minute budget matches a typical `flux install --timeout 5m0s`.
-		// Cold colima pulls the Flux controller images from ghcr.io on
-		// first run, which can exceed 2 minutes.
-		if err := converge.WaitForDeployments(ctx, a, naming.FluxNamespace, []string{
-			"source-controller",
-			"kustomize-controller",
-		}, 5*time.Minute, out); err != nil {
-			return fmt.Errorf("step 10 (Flux ready): %w", err)
-		}
-		// Flux just installed its CRDs (GitRepository, Kustomization,
-		// ImageUpdateAutomation, ...). Invalidate the applier's discovery
-		// cache so the dev-loop + flux-system manifests that reference
-		// those kinds map correctly in 11a/11d.
-		a.ResetMapper()
+		s.resolvedImages[name] = served
 	}
+	return nil
+}
 
-	// Step 11 prelude — render the bootstrap flux-system manifest set
-	// from the binary's embedded templates into a tmpdir using runtime
-	// values (resolved image refs + cache SHA + repo basename). These
-	// resources are bootstrap-only — applied here, then Flux reconciles
-	// their *sourceRef* targets (the Flywheel mirror + the client
-	// builders/apps/infra paths), never this directory. Keeping them
-	// out of the committed gitops repo eliminates the git-auto-sync ↔
-	// refresh-overlay race and makes .local edits flow through on the
-	// next `up` without any explicit refresh.
-	repoBaseName := converge.ResolveRepoBaseName(opts.RepoDir)
-	bootstrapDir, err := converge.RenderBootstrap(cfg, resolvedImages, sha, repoBaseName)
+// newApplier builds the SSA applier bound to the cluster's kube context.
+func (s *upState) newApplier() error {
+	s.kubeContext = k3d.KubeContext(s.cfg.Cluster.Name)
+	a, err := applier.New("", s.kubeContext)
 	if err != nil {
-		return fmt.Errorf("step 11 (render bootstrap): %w", err)
+		return err
 	}
-	defer os.RemoveAll(bootstrapDir)
+	s.a = a
+	return nil
+}
 
-	nsPath := filepath.Join(bootstrapDir, "namespaces.yaml")
-	if err := style.Spin(out, "bootstrap: ensuring namespaces", func() error {
+// fluxInstall installs Flux (SSA via fieldManager=flux-controller) and waits for
+// its controllers Ready. Skipped by SkipFluxInstall (tests with Flux present).
+func (s *upState) fluxInstall() error {
+	if err := style.Spin(s.out,
+		fmt.Sprintf("installing Flux %s", flux.Version),
+		func() error { return flux.Install(s.ctx, s.a, s.out) },
+	); err != nil {
+		return err
+	}
+	// 5-minute budget matches a typical `flux install --timeout 5m0s`. Cold
+	// colima pulls the Flux controller images from ghcr.io on first run, which
+	// can exceed 2 minutes.
+	if err := converge.WaitForDeployments(s.ctx, s.a, naming.FluxNamespace, []string{
+		"source-controller",
+		"kustomize-controller",
+	}, 5*time.Minute, s.out); err != nil {
+		return fmt.Errorf("flux ready: %w", err)
+	}
+	// Flux just installed its CRDs (GitRepository, Kustomization,
+	// ImageUpdateAutomation, ...). Invalidate the applier's discovery cache so
+	// the dev-loop + flux-system manifests that reference those kinds map
+	// correctly in the dev-loop / apply-flux-system steps.
+	s.a.ResetMapper()
+	return nil
+}
+
+// renderBootstrap renders the bootstrap flux-system manifest set from the
+// binary's embedded templates into a tmpdir using runtime values (resolved image
+// refs + cache SHA + repo basename). These resources are bootstrap-only —
+// applied by later steps, then Flux reconciles their *sourceRef* targets (the
+// Flywheel mirror + the client builders/apps/infra paths), never this directory.
+// Keeping them out of the committed gitops repo eliminates the git-auto-sync ↔
+// refresh-overlay race and makes .local edits flow through on the next `up`
+// without any explicit refresh. Run removes bootstrapDir on exit.
+func (s *upState) renderBootstrap() error {
+	s.repoBaseName = converge.ResolveRepoBaseName(s.opts.RepoDir)
+	dir, err := converge.RenderBootstrap(s.cfg, s.resolvedImages, s.sha, s.repoBaseName)
+	if err != nil {
+		return err
+	}
+	s.bootstrapDir = dir
+	return nil
+}
+
+// ensureNamespaces applies the rendered namespaces.yaml so the dev-loop pods
+// have their namespaces before the dev-loop step lands them.
+func (s *upState) ensureNamespaces() error {
+	nsPath := filepath.Join(s.bootstrapDir, "namespaces.yaml")
+	return style.Spin(s.out, "bootstrap: ensuring namespaces", func() error {
 		raw, err := os.ReadFile(nsPath)
 		if err != nil {
 			return fmt.Errorf("read %s: %w", nsPath, err)
 		}
-		return a.ApplyYAML(ctx, raw, out)
-	}); err != nil {
-		return fmt.Errorf("ensure namespaces: %w", err)
-	}
+		return s.a.ApplyYAML(s.ctx, raw, s.out)
+	})
+}
 
-	// Step 11 prelude — regenerate flywheel-config ConfigMap from the
-	// merged flywheel.yaml (closed material gap O3 / plan T1.13). Applied
-	// directly here so the dev-loop pods in 11a can read it immediately;
-	// Flux re-applies the committed copy in 11d (SSA no-op).
-	if err := style.Spin(out, "bootstrap: applying flywheel-config ConfigMap", func() error {
-		return converge.ApplyFlywheelConfig(ctx, a, cfg, repoBaseName, out)
-	}); err != nil {
-		return fmt.Errorf("flywheel-config: %w", err)
-	}
+// flywheelConfig regenerates the flywheel-config ConfigMap from the merged
+// flywheel.yaml (closed material gap O3 / plan T1.13). Applied directly here so
+// the dev-loop pods can read it immediately; Flux re-applies the committed copy
+// in the apply-flux-system step (SSA no-op).
+func (s *upState) flywheelConfig() error {
+	return style.Spin(s.out, "bootstrap: applying flywheel-config ConfigMap", func() error {
+		return converge.ApplyFlywheelConfig(s.ctx, s.a, s.cfg, s.repoBaseName, s.out)
+	})
+}
 
-	// Step 11a — apply dev-loop overlay.
-	devLoopDir := filepath.Join(cacheDir, "manifests", "dev-loop", "overlays", "local")
-	// Rewrite the overlay's image references for THIS client using the
-	// resolved (override-aware) refs from step 9, and patch git-server's
-	// memory limit (cfg.git_server.memory_limit). The same limit is rendered
-	// into the flywheel-dev-loop Flux Kustomization (step 11d) so this direct
-	// apply and Flux's reconcile agree.
-	// keepDevLoop + keepBootstrap (captured at 11d) form the keep set the
-	// orphan prune (step 11e) scans against — the resources THIS run applied.
-	var keepDevLoop []applier.ResourceRef
-	if err := style.Spin(out, "bootstrap 11a: dev-loop overlay", func() error {
-		var e error
-		keepDevLoop, e = converge.ApplyDevLoop(ctx, a, devLoopDir, resolvedImages, cfg.GitServerMemoryLimit(), out)
+// devLoop applies the dev-loop overlay (also where the inotify DaemonSet
+// lands). Rewrites the overlay's image references for THIS
+// client using the resolved (override-aware) refs from mirror-images, and
+// patches git-server's memory limit (cfg.git_server.memory_limit) — the same
+// limit rendered into the flywheel-dev-loop Flux Kustomization by
+// apply-flux-system, so this direct apply and Flux's reconcile agree. keepDevLoop
+// ∪ keepBootstrap form the keep set prune-machinery scans against — the resources
+// THIS run applied.
+func (s *upState) devLoop() error {
+	devLoopDir := filepath.Join(s.cacheDir, "manifests", "dev-loop", "overlays", "local")
+	return style.Spin(s.out, "bootstrap: dev-loop overlay", func() error {
+		keep, e := converge.ApplyDevLoop(s.ctx, s.a, devLoopDir, s.resolvedImages, s.cfg.GitServerMemoryLimit(), s.out)
+		s.keepDevLoop = keep
 		return e
+	})
+}
+
+// waitGitServer waits for the git-server Deployment Ready (the Waiter inside
+// WaitForDeployments renders its own header).
+func (s *upState) waitGitServer() error {
+	return converge.WaitForDeployments(s.ctx, s.a, naming.FlywheelNamespace, []string{"git-server"}, 3*time.Minute, s.out)
+}
+
+// pushMirror pushes the cache into the in-cluster git-server as flywheel.git.
+// Best-effort (non-critical): a Warn surfaces the error, but we continue — Flux's
+// flywheel-source is then unreconciled, which is documented as a known gap.
+func (s *upState) pushMirror() error {
+	if err := style.Spin(s.out, "bootstrap: pushing cache into in-cluster mirror", func() error {
+		return mirror.Push(s.ctx, "", s.kubeContext, naming.FlywheelNamespace, "git-server",
+			"flywheel", s.cacheDir, s.sha, s.out)
 	}); err != nil {
-		return fmt.Errorf("step 11a: %w", err)
+		return fmt.Errorf("%w (Flux flywheel-source won't reconcile until this works)", err)
 	}
+	return nil
+}
 
-	// Step 11b — wait for git-server Ready.
-	// Step 11b: covered by the Waiter inside waitForDeployments — no
-	// step header here, since the Waiter prints its own.
-	if err := converge.WaitForDeployments(ctx, a, naming.FlywheelNamespace, []string{"git-server"}, 3*time.Minute, out); err != nil {
-		return fmt.Errorf("step 11b: %w", err)
-	}
-
-	// Step 11c — push cache into in-cluster git-server as flywheel.git.
-	// Step 11c — best-effort push (a Warn surfaces the error, but we
-	// continue: Flux's flywheel-source will be unreconciled, which is
-	// documented as a known gap).
-	if err := style.Spin(out, "bootstrap 11c: pushing cache into in-cluster mirror", func() error {
-		return mirror.Push(ctx, "", kubeContext, naming.FlywheelNamespace, "git-server",
-			"flywheel", cacheDir, sha, out)
-	}); err != nil {
-		style.Warn(out, "step 11c: %v (Flux flywheel-source won't reconcile until this works)", err)
-	}
-
-	// Step 11d — apply the bootstrap flux-system tree from the tmpdir
-	// rendered above. Flux's Kustomization + GitRepository objects come
-	// into existence here with `spec.images` / `spec.ref.commit` already
-	// matching the resolved refs + cache SHA the rest of `up` is using
-	// — no follow-up refresh needed.
-	var keepBootstrap []applier.ResourceRef
-	bootstrapOK := true
-	if err := style.Spin(out,
-		"bootstrap 11d: applying flux-system (from in-memory bootstrap)",
+// applyFluxSystem applies the bootstrap flux-system tree from the rendered
+// tmpdir. Flux's Kustomization + GitRepository objects come into existence here
+// with `spec.images` / `spec.ref.commit` already matching the resolved refs +
+// cache SHA the rest of `up` is using — no follow-up refresh needed. Best-effort
+// (non-critical): on failure it warns and clears bootstrapOK so prune-machinery
+// is skipped (a resource that failed to apply must not be mistaken for an orphan).
+func (s *upState) applyFluxSystem() error {
+	err := style.Spin(s.out,
+		"bootstrap: applying flux-system (from in-memory bootstrap)",
 		func() error {
-			var e error
-			keepBootstrap, e = a.ApplyKustomizeTracked(ctx, bootstrapDir, out)
+			keep, e := s.a.ApplyKustomizeTracked(s.ctx, s.bootstrapDir, s.out)
+			s.keepBootstrap = keep
 			return e
 		},
-	); err != nil {
-		bootstrapOK = false
-		style.Warn(out, "step 11d: %v", err)
+	)
+	if err != nil {
+		s.bootstrapOK = false
 	}
+	return err
+}
 
-	// Step 11e — prune superseded flywheel machinery (issue #27). Only the
-	// resources THIS run re-applied (keepDevLoop ∪ keepBootstrap) are spared;
-	// any other managed-by=flywheel resource of the same kinds is an orphan
-	// from a prior version and gets removed (e.g. the old git-auto-sync-self
-	// Deployment that the deploy-ref migration superseded). Gated on both 11a
-	// and 11d succeeding so a resource that failed to apply isn't mistaken for
-	// an orphan; app/infra workloads (unlabeled, Flux-managed) and state /
-	// cascade kinds (Namespace, PVC, Secret, Flux Kustomization/GitRepository)
-	// are never touched. Best-effort: failures warn, never abort `up`.
-	if bootstrapOK {
-		keep := make([]applier.ResourceRef, 0, len(keepDevLoop)+len(keepBootstrap))
-		keep = append(keep, keepDevLoop...)
-		keep = append(keep, keepBootstrap...)
-		pruned, err := converge.PruneOrphanedMachinery(ctx, a, keep, out)
-		switch {
-		case err != nil:
-			style.Warn(out, "step 11e (prune): %v", err)
-		case pruned > 0:
-			style.Detail(out, "pruned %d superseded resource(s)", pruned)
-		}
+// pruneMachinery prunes superseded flywheel machinery (issue #27). Only the
+// resources THIS run re-applied (keepDevLoop ∪ keepBootstrap) are spared; any
+// other managed-by=flywheel resource of the same kinds is an orphan from a prior
+// version and gets removed (e.g. the old git-auto-sync-self Deployment the
+// deploy-ref migration superseded). Skipped when bootstrapOK is false (dev-loop
+// aborts the run outright, apply-flux-system clears the flag) so a resource that
+// failed to apply isn't mistaken for an orphan; app/infra workloads (unlabeled,
+// Flux-managed) and state / cascade kinds (Namespace, PVC, Secret, Flux
+// Kustomization/GitRepository) are never touched. Best-effort: failures warn.
+func (s *upState) pruneMachinery() error {
+	keep := make([]applier.ResourceRef, 0, len(s.keepDevLoop)+len(s.keepBootstrap))
+	keep = append(keep, s.keepDevLoop...)
+	keep = append(keep, s.keepBootstrap...)
+	pruned, err := converge.PruneOrphanedMachinery(s.ctx, s.a, keep, s.out)
+	if err != nil {
+		return err
 	}
+	if pruned > 0 {
+		style.Detail(s.out, "pruned %d superseded resource(s)", pruned)
+	}
+	return nil
+}
 
-	// Step 13 — create age-key Secret + (mkcert) local-cert + mkcert-ca Secrets.
-	if err := style.Spin(out, "creating SOPS age Secret", func() error {
-		return createAgeSecret(ctx, a, ageKeyContent, out)
+// createSecrets creates the age-key Secret + (mkcert) local-cert + mkcert-ca
+// Secrets.
+func (s *upState) createSecrets() error {
+	if err := style.Spin(s.out, "creating SOPS age Secret", func() error {
+		return createAgeSecret(s.ctx, s.a, s.ageKeyContent, s.out)
 	}); err != nil {
-		return fmt.Errorf("step 13 (age secret): %w", err)
+		return fmt.Errorf("age secret: %w", err)
 	}
-	if err := style.Spin(out, "creating local-cert Secret", func() error {
-		return createMkcertSecret(ctx, a, opts.RepoDir, out)
+	if err := style.Spin(s.out, "creating local-cert Secret", func() error {
+		return createMkcertSecret(s.ctx, s.a, s.opts.RepoDir, s.out)
 	}); err != nil {
-		return fmt.Errorf("step 13 (mkcert secret): %w", err)
+		return fmt.Errorf("mkcert secret: %w", err)
 	}
-	if err := style.Spin(out, "creating mkcert-ca Secret", func() error {
-		return createMkcertRootSecret(ctx, a, out)
+	if err := style.Spin(s.out, "creating mkcert-ca Secret", func() error {
+		return createMkcertRootSecret(s.ctx, s.a, s.out)
 	}); err != nil {
-		return fmt.Errorf("step 13 (mkcert root secret): %w", err)
+		return fmt.Errorf("mkcert root secret: %w", err)
 	}
+	return nil
+}
 
-	// Step 14 — wait for Flux Kustomizations Ready (best-effort in v0.1.0).
-	// The Waiter inside waitForFluxKustomizations renders its own header.
-	if waitEnabled(opts) {
-		if err := waitForFluxKustomizations(ctx, a, 3*time.Minute, out); err != nil {
-			style.Warn(out, "step 14: %v", err)
-		}
-	}
+// waitFluxKustomizations waits for Flux Kustomizations Ready (best-effort; the
+// Waiter renders its own header). Skipped when --wait=false.
+func (s *upState) waitFluxKustomizations() error {
+	return waitForFluxKustomizations(s.ctx, s.a, 3*time.Minute, s.out)
+}
 
-	// Step 15 — print success. Don't fabricate an app URL here (no app
-	// exists yet, and the bare host would need the published HTTPS port);
-	// point at add-app, which prints the real URL for the name it scaffolds.
-	domain := cfg.Local.Domain
+// printSuccess prints the closing summary. Don't fabricate an app URL here (no
+// app exists yet, and the bare host would need the published HTTPS port); point
+// at add-app, which prints the real URL for the name it scaffolds.
+func (s *upState) printSuccess() error {
+	domain := s.cfg.Local.Domain
 	if domain == "" {
 		domain = "localdev.me"
 	}
 	portSuffix := ""
-	if p := cfg.Cluster.HttpsPort; p != 0 && p != 443 {
+	if p := s.cfg.Cluster.HttpsPort; p != 0 && p != 443 {
 		portSuffix = fmt.Sprintf(":%d", p)
 	}
-	fmt.Fprintln(out)
-	style.Summary(out, "Cluster up. Add an app:  flywheel add app <name>")
-	style.Detail(out, "served at https://<name>.%s%s/", domain, portSuffix)
+	fmt.Fprintln(s.out)
+	style.Summary(s.out, "Cluster up. Add an app:  flywheel add app <name>")
+	style.Detail(s.out, "served at https://<name>.%s%s/", domain, portSuffix)
 	return nil
 }
 

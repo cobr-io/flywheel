@@ -1,6 +1,6 @@
 // Package mirror pushes the cached Flywheel clone into the in-cluster
-// git-server as a second bare repo `flywheel.git`. This is `flywheel up`
-// step 11c — the move that makes the dev loop truly offline after first
+// git-server as a second bare repo `flywheel.git`. This is `flywheel up`'s
+// push-mirror step — the move that makes the dev loop truly offline after first
 // bootstrap (per design § Architecture: "neither GitRepository points
 // at GitHub at runtime").
 //
