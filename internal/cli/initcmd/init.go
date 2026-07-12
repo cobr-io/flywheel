@@ -18,6 +18,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/dockerports"
 	"github.com/cobr-io/flywheel/internal/cli/embedcache"
 	"github.com/cobr-io/flywheel/internal/cli/render"
+	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/execx"
 	"github.com/cobr-io/flywheel/internal/naming"
 )
@@ -213,7 +214,7 @@ func Run(opts Options) (*Result, error) {
 	if err != nil {
 		return nil, fmt.Errorf("age keypair: %w", err)
 	}
-	values := buildValues(opts, triple, tag, sha, kp.PublicKey)
+	values := buildValues(opts, triple, tag, kp.PublicKey)
 	if err := render.Tree(opts.SkeletonFS, ".", repoDir, values); err != nil {
 		return nil, fmt.Errorf("render skeleton: %w", err)
 	}
@@ -422,32 +423,55 @@ func loadOrGenerateAge(opts Options) (age.Keypair, string, error) {
 	return kp, keyPath, nil
 }
 
-// buildValues constructs the map passed to the Go-template renderer.
-// Field names mirror the template placeholders in
-// templates/client-skeleton/*.tmpl and manifests/per-app-template/*.tmpl.
-func buildValues(opts Options, triple allocator.Triple, tag, sha, agePub string) map[string]any {
-	// RepoBaseName is the actual filesystem basename of the client repo
-	// — used wherever a path like /workspaces/<basename> or the bare repo
-	// URL <basename>.git needs to match what git-auto-sync-self mounts.
-	// Distinct from ClientName: legacy `flywheel new acme` produced repo dir
-	// `acme-gitops` but ClientName=acme. `init` lets these differ
-	// freely, so the templates pull from RepoBaseName here.
-	repoBaseName := filepath.Base(triple.RepoPath)
-	return map[string]any{
-		"ClientName":        opts.Name,
-		"RepoBaseName":      repoBaseName,
-		"Org":               opts.Org,
-		"Domain":            opts.Domain,
-		"ClusterName":       opts.Name + "-local",
-		"Registry":          opts.Name + "-local-registry",
-		"RegistryPort":      triple.RegistryPort,
-		"HttpPort":          triple.HttpPort,
-		"HttpsPort":         triple.HttpsPort,
-		"FlywheelVersion":   tag,
-		"FlywheelSHA":       sha,
-		"FlywheelRepoURL":   opts.FlywheelRepoURL,
-		"FluxIntervalLocal": opts.FluxIntervalLocal,
-		"AgePublicKey":      agePub,
+// skeletonContext is the typed render context for the client-skeleton tree.
+// It embeds the shared schema.Core projection and adds the init-only extras
+// (cluster identity + published ports + the flywheel pin + the age recipient).
+type skeletonContext struct {
+	schema.Core
+	// RepoBaseName is the actual filesystem basename of the client repo — used
+	// wherever a path like /workspaces/<basename> or the bare repo URL
+	// <basename>.git must match what git-auto-sync-self mounts. Distinct from
+	// ClientName: legacy `flywheel new acme` produced repo dir `acme-gitops` but
+	// ClientName=acme. `init` lets these differ freely. Not derivable from cfg
+	// (a filesystem fact), so it is a skeleton extra rather than a Core field.
+	RepoBaseName    string
+	Org             string
+	ClusterName     string
+	Registry        string
+	RegistryPort    int
+	HttpPort        int
+	HttpsPort       int
+	FlywheelVersion string
+	FlywheelRepoURL string
+	AgePublicKey    string
+}
+
+// buildValues constructs the render context for the client-skeleton templates.
+//
+// init is the one render path with no parsed flywheel.yaml to project — it is
+// about to *render* the very flywheel.yaml the other paths later load. So it
+// synthesises the schema.File it will write (the fields schema.Core reads) and
+// runs it through the same schema.NewCore projection, keeping the shared
+// context single-sourced (no hand-rolled cfg→Core mapping that could drift
+// from the bootstrap / add-app paths).
+func buildValues(opts Options, triple allocator.Triple, tag, agePub string) skeletonContext {
+	core := schema.NewCore(&schema.File{
+		Client: schema.Client{Name: opts.Name},
+		Local:  schema.Local{Domain: opts.Domain},
+		Flux:   schema.Flux{IntervalLocal: opts.FluxIntervalLocal},
+	})
+	return skeletonContext{
+		Core:            core,
+		RepoBaseName:    filepath.Base(triple.RepoPath),
+		Org:             opts.Org,
+		ClusterName:     opts.Name + "-local",
+		Registry:        opts.Name + "-local-registry",
+		RegistryPort:    triple.RegistryPort,
+		HttpPort:        triple.HttpPort,
+		HttpsPort:       triple.HttpsPort,
+		FlywheelVersion: tag,
+		FlywheelRepoURL: opts.FlywheelRepoURL,
+		AgePublicKey:    agePub,
 	}
 }
 

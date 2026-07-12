@@ -25,7 +25,7 @@ namespaces:
   apps: apps
 
 flux:
-  interval_local: 10s
+  interval_local: {{ .FluxIntervalLocal }}
   # Reconcile cadence for the client-infra tier (infra/overlays/local). Infra
   # changes less often than app code, so you can raise this to poll slower.
   iac_interval: 10s

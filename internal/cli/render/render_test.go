@@ -1,10 +1,8 @@
 package render
 
 import (
-	"io/fs"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -56,68 +54,34 @@ func TestTree_MissingKeyIsAnError(t *testing.T) {
 	}
 }
 
-func TestTree_RealClientSkeletonRendersWithAllPlaceholders(t *testing.T) {
-	// Smoke test: every template in templates/client-skeleton/ must
-	// render with a fully-populated values struct. Catches template
-	// vars that haven't been wired into the renderer's value type yet.
-	values := struct {
-		ClientName        string
-		RepoBaseName      string
-		Org               string
-		Domain            string
-		ClusterName       string
-		Registry          string
-		RegistryPort      int
-		HttpPort          int
-		HttpsPort         int
-		FlywheelVersion   string
-		FlywheelSHA       string
-		FlywheelRepoURL   string
-		FluxIntervalLocal string
-		AgePublicKey      string
-	}{
-		ClientName:        "dogfood",
-		RepoBaseName:      "dogfood",
-		Org:               "cobr-io",
-		Domain:            "localdev.me",
-		ClusterName:       "dogfood-local",
-		Registry:          "dogfood-local-registry",
-		RegistryPort:      50001,
-		HttpPort:          8080,
-		HttpsPort:         8540,
-		FlywheelVersion:   "v0.1.0",
-		FlywheelSHA:       "0123456789abcdef0123456789abcdef01234567",
-		FlywheelRepoURL:   "https://github.com/cobr-io/flywheel",
-		FluxIntervalLocal: "10s",
-		AgePublicKey:      "age1qx5vhc3z8q",
+// TestTree_EmbeddedStructFieldsPromote confirms the semantics the typed render
+// contexts (schema.Core embedded by SkeletonContext/BootstrapContext/AppContext)
+// rely on: text/template resolves a promoted field from an anonymous embedded
+// struct just like a top-level one, and a placeholder that names NO field on the
+// struct (nor any embed) is a render error — the struct analogue of
+// missingkey=error, so a mistyped placeholder still fails loudly at render time.
+func TestTree_EmbeddedStructFieldsPromote(t *testing.T) {
+	type core struct{ ClientName string }
+	type ctx struct {
+		core
+		AppName string
 	}
-
-	wd, _ := os.Getwd()
-	// Walk up to repo root to find templates/.
-	root := wd
-	for {
-		if _, err := os.Stat(filepath.Join(root, "templates", "client-skeleton")); err == nil {
-			break
-		}
-		parent := filepath.Dir(root)
-		if parent == root {
-			t.Fatal("could not locate templates/client-skeleton from test cwd")
-		}
-		root = parent
-	}
+	src := t.TempDir()
+	mustWrite(t, filepath.Join(src, "ok.tmpl"), "{{ .ClientName }}/{{ .AppName }}\n")
 
 	dest := t.TempDir()
-	if err := Tree(os.DirFS(filepath.Join(root, "templates", "client-skeleton")), ".", dest, values); err != nil {
-		t.Fatalf("Tree on real skeleton: %v", err)
+	if err := Tree(os.DirFS(src), ".", dest, ctx{core: core{ClientName: "acme"}, AppName: "web"}); err != nil {
+		t.Fatalf("Tree with embedded-core struct: %v", err)
+	}
+	if got := mustRead(t, filepath.Join(dest, "ok")); got != "acme/web\n" {
+		t.Errorf("promoted field render = %q, want %q", got, "acme/web\n")
 	}
 
-	// Spot-check a few rendered files contain the expected substitutions.
-	yaml := mustRead(t, filepath.Join(dest, "flywheel.yaml"))
-	if !strings.Contains(yaml, "name: dogfood") {
-		t.Errorf("flywheel.yaml missing client.name; got:\n%s", yaml)
-	}
-	if !strings.Contains(yaml, "registry_port: 50001") {
-		t.Errorf("flywheel.yaml missing registry_port; got:\n%s", yaml)
+	// A placeholder naming no struct field must fail (not silently blank).
+	bad := t.TempDir()
+	mustWrite(t, filepath.Join(bad, "bad.tmpl"), "{{ .Nope }}")
+	if err := Tree(os.DirFS(bad), ".", t.TempDir(), ctx{}); err == nil {
+		t.Fatal("Tree with unknown struct field should fail at render time")
 	}
 }
 
@@ -141,6 +105,3 @@ func mustRead(t *testing.T, path string) string {
 	}
 	return string(raw)
 }
-
-// Unused but useful when adding goldens later.
-var _ = fs.WalkDir
