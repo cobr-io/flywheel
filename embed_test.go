@@ -3,7 +3,6 @@ package flywheel
 import (
 	"io/fs"
 	"os"
-	"path"
 	"testing"
 )
 
@@ -33,17 +32,5 @@ func TestEmbedMirrorsDisk(t *testing.T) {
 				t.Fatalf("walk %s: %v", root, err)
 			}
 		})
-	}
-}
-
-// TestEmbedSkeletonDotfiles is an explicit, named guard for the two
-// skeleton dotfiles whose absence was the original bug, so a regression
-// reads clearly in test output rather than only as a generic mirror miss.
-func TestEmbedSkeletonDotfiles(t *testing.T) {
-	for _, name := range []string{".gitignore.tmpl", ".sops.yaml.tmpl"} {
-		p := path.Join("templates", "client-skeleton", name)
-		if _, err := fs.Stat(Assets, p); err != nil {
-			t.Errorf("skeleton dotfile %q not embedded: %v", p, err)
-		}
 	}
 }
