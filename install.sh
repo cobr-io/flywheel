@@ -191,6 +191,9 @@ esac
 # script for the detected login shell ($SHELL) to that shell's canonical
 # autoload dir; overwriting with `>` keeps re-runs idempotent. Never fails the
 # install: an unwritable dir warns and continues. Opt out: SKIP_COMPLETIONS=true.
+# The three destination paths below are inlined by design (see above) but must
+# stay byte-identical to scripts/install-completions.sh's `dest_for` — CI runs
+# scripts/check-completion-paths-drift.sh to catch drift as a test failure.
 COMPLETION_HINT=""
 setup_completions() {
   [ "$SKIP_COMPLETIONS" = "true" ] && return 0
