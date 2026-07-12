@@ -77,6 +77,7 @@ func main() {
 		ClusterName:      envOrFlag(clusterFlag, "CLUSTER_NAME"),
 		ClientName:       envOrFlag(clientFlag, "CLIENT_NAME"),
 		BuildKitAddr:     envOrFlag(buildKitAddrFlag, "BUILDKIT_ADDR"),
+		BuildKitClientImage: os.Getenv("BUILDKIT_CLIENT_IMAGE"),
 	}
 
 	if err := cfg.Validate(); err != nil {

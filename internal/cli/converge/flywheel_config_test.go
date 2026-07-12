@@ -77,7 +77,7 @@ func consumerConfigMapKeys(t *testing.T, manifestPath string) []string {
 // never writes would leave the controller pod stuck in CreateContainerConfigError
 // on a live cluster — this catches that drift at `go test` time.
 func TestFlywheelConfig_ConsumersAgreeWithProducer(t *testing.T) {
-	produced := FlywheelConfigData(flywheelConfigTestCfg(), "acme-gitops")
+	produced := FlywheelConfigData(flywheelConfigTestCfg(), "acme-gitops", "")
 
 	consumers := []string{
 		"manifests/dev-loop/base/image-builder-controller.yaml",
@@ -144,13 +144,13 @@ func renderedFlywheelConfigData(t *testing.T, dir string) map[string]string {
 // "apps"/"flywheel-system"), proving the two writers can't diverge.
 func TestFlywheelConfig_TemplateRendersFromProducer(t *testing.T) {
 	cfg := flywheelConfigTestCfg()
-	dir, err := RenderBootstrap(cfg, flywheelConfigTestRefs(), "abc123def456abc123def456abc123def456abcd", "acme-gitops")
+	dir, err := RenderBootstrap(cfg, flywheelConfigTestRefs(), "abc123def456abc123def456abc123def456abcd", "acme-gitops", "")
 	if err != nil {
 		t.Fatalf("RenderBootstrap: %v", err)
 	}
 	defer os.RemoveAll(dir)
 
-	want := FlywheelConfigData(cfg, "acme-gitops")
+	want := FlywheelConfigData(cfg, "acme-gitops", "")
 	got := renderedFlywheelConfigData(t, dir)
 
 	if len(got) != len(want) {

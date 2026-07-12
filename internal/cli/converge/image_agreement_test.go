@@ -35,7 +35,7 @@ func TestBootstrapImages_TemplateUnionMatchesSchema(t *testing.T) {
 		refs[name] = "flywheel-dev/" + name + ":dogfood"
 	}
 
-	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops")
+	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops", "")
 	if err != nil {
 		t.Fatalf("RenderBootstrap: %v", err)
 	}

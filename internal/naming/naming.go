@@ -91,6 +91,18 @@ const ImageOrg = "ghcr.io/cobr-io"
 // (task T28).
 const InClusterRegistryPort = "5000"
 
+// BuildKitClientImage is the upstream image for the thin buildkit CLIENT that
+// each build Job runs (the build itself executes in the shared warm buildkitd
+// daemon). `up` mirrors this image into the cluster's local registry and hands
+// the in-cluster ref to the controller via the flywheel-config key
+// `images.buildkit_client`, so the first build Job scheduled on each node
+// pulls it from the LAN registry (~2s) instead of Docker Hub (~15-30s) — the
+// per-node cold pull behind the bimodal early-bump latency (issue #107). The
+// controller falls back to this Hub ref when the key is absent or the mirror
+// was skipped (offline host). Bump this in lockstep with the buildkitd
+// daemon's image in manifests/dev-loop/base/buildkitd.yaml.
+const BuildKitClientImage = "moby/buildkit:v0.16.0-rootless"
+
 // ManagedByLabels returns the managed-by label set as a fresh map (a new map
 // per call, since callers that hand it to unstructured objects store it by
 // reference).

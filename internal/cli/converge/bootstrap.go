@@ -30,7 +30,7 @@ import (
 // extra "refresh" step.
 //
 // Caller owns the returned path and must os.RemoveAll it.
-func RenderBootstrap(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName string) (string, error) {
+func RenderBootstrap(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName, buildKitClientRef string) (string, error) {
 	tmp, err := os.MkdirTemp("", "flywheel-bootstrap-")
 	if err != nil {
 		return "", fmt.Errorf("mkdir tmp bootstrap dir: %w", err)
@@ -40,7 +40,7 @@ func RenderBootstrap(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		os.RemoveAll(tmp)
 		return "", fmt.Errorf("embed bootstrap missing: %w", err)
 	}
-	values, err := bootstrapValues(cfg, refs, flywheelSHA, repoBaseName)
+	values, err := bootstrapValues(cfg, refs, flywheelSHA, repoBaseName, buildKitClientRef)
 	if err != nil {
 		os.RemoveAll(tmp)
 		return "", err
@@ -139,7 +139,7 @@ type bootstrapContext struct {
 // splitting each resolved ref into a bootstrapImage and bucketing it into
 // DevLoopImages or ClientBuilderImages per bootstrapImageOwners. The two
 // `images:` template blocks range over their respective slice.
-func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName string) (bootstrapContext, error) {
+func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelSHA, repoBaseName, buildKitClientRef string) (bootstrapContext, error) {
 	// The client-infra tier reconciles at flux.iac_interval; infra changes
 	// less often than app code, so it can poll slower than interval_local.
 	// Optional — fall back to interval_local when unset (older repos).
@@ -178,7 +178,7 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 		FluxIacInterval:      iacInterval,
 		FlywheelSHA:          flywheelSHA,
 		GitServerMemoryLimit: cfg.GitServerMemoryLimit(),
-		FlywheelConfigData:   FlywheelConfigData(cfg, repoBaseName),
+		FlywheelConfigData:   FlywheelConfigData(cfg, repoBaseName, buildKitClientRef),
 		DevLoopImages:        devLoopImages,
 		ClientBuilderImages:  clientBuilderImages,
 	}, nil

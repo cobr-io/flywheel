@@ -381,8 +381,12 @@ type renderCtx struct {
 	ClientName    string
 	ClusterName   string
 	BuildKitAddr  string
-	Secrets       []renderSecret
-	SecretVolumes []secretSource
+	// BuildKitClientImage is the thin client container image the Job runs —
+	// Config.BuildKitClientImageOrDefault(): the mirrored in-cluster ref, or
+	// the upstream Hub ref as fallback (issue #107).
+	BuildKitClientImage string
+	Secrets             []renderSecret
+	SecretVolumes       []secretSource
 }
 
 // gitContextURL builds the remote git context buildkitd fetches directly,
@@ -410,23 +414,24 @@ func (r *GitRepositoryBuildReconciler) renderJob(jobName string, gr sourcev1.Git
 	}
 	var buf strings.Builder
 	if err := tmpl.Execute(&buf, renderCtx{
-		JobName:       jobName,
-		Repo:          gr.Name,
-		Image:         b.Image,
-		Context:       b.Context,
-		Dockerfile:    b.Dockerfile,
-		Target:        b.Target,
-		GitContextURL: gitContextURL(gr.Spec.URL, fullSHA, b.Context),
-		Destination:   fmt.Sprintf("%s/%s/%s:%d-%s", r.Config.RegistryURL(), r.Config.ClientName, b.Image, ts, shortSHA),
-		FullSHA:       fullSHA,
-		ShortSHA:      shortSHA,
-		Timestamp:     ts,
-		Namespace:     r.Config.Namespace,
-		ClientName:    r.Config.ClientName,
-		ClusterName:   r.Config.ClusterName,
-		BuildKitAddr:  r.Config.BuildKitAddrOrDefault(),
-		Secrets:       secs,
-		SecretVolumes: secVols,
+		JobName:             jobName,
+		Repo:                gr.Name,
+		Image:               b.Image,
+		Context:             b.Context,
+		Dockerfile:          b.Dockerfile,
+		Target:              b.Target,
+		GitContextURL:       gitContextURL(gr.Spec.URL, fullSHA, b.Context),
+		Destination:         fmt.Sprintf("%s/%s/%s:%d-%s", r.Config.RegistryURL(), r.Config.ClientName, b.Image, ts, shortSHA),
+		FullSHA:             fullSHA,
+		ShortSHA:            shortSHA,
+		Timestamp:           ts,
+		Namespace:           r.Config.Namespace,
+		ClientName:          r.Config.ClientName,
+		ClusterName:         r.Config.ClusterName,
+		BuildKitAddr:        r.Config.BuildKitAddrOrDefault(),
+		BuildKitClientImage: r.Config.BuildKitClientImageOrDefault(),
+		Secrets:             secs,
+		SecretVolumes:       secVols,
 	}); err != nil {
 		return nil, err
 	}

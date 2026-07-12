@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
@@ -88,6 +89,12 @@ type upState struct {
 
 	workspacesRoot string
 	resolvedImages map[string]string
+
+	// buildKitClientRef is what the build Jobs' thin client container should
+	// run: the in-cluster registry ref after mirror-buildkit-client succeeds,
+	// or naming.BuildKitClientImage (Docker Hub) as the fallback. Flows to the
+	// controller via the flywheel-config key images.buildkit_client.
+	buildKitClientRef string
 
 	a *applier.Applier
 
@@ -175,6 +182,7 @@ func Run(ctx context.Context, opts Options) error {
 		{name: "create-cluster", critical: true, run: (*upState).createCluster},
 		{name: "verify-mounts", critical: true, run: (*upState).verifyMounts},
 		{name: "mirror-images", critical: true, run: (*upState).mirrorImages},
+		{name: "mirror-buildkit-client", run: (*upState).mirrorBuildKitClient},
 		{name: "new-applier", critical: true, run: (*upState).newApplier},
 		{name: "flux-install", critical: true, skip: skipFluxInstall, run: (*upState).fluxInstall},
 		{name: "render-bootstrap", critical: true, run: (*upState).renderBootstrap},
@@ -432,6 +440,50 @@ func (s *upState) mirrorImages() error {
 	return nil
 }
 
+// mirrorBuildKitClient pre-seeds the buildkit CLIENT image — the thin per-Job
+// container; the build itself runs in the shared warm buildkitd daemon — into
+// the cluster's local registry, so the first build Job scheduled on each node
+// pulls it over the LAN (~2s) instead of from Docker Hub (~15-30s). That
+// per-node cold pull is the cause of the bimodal early-bump dev-loop latency
+// (issue #107; docs/dev/dev-loop-latency.md).
+//
+// Best-effort by design (non-critical step, never returns an error): on any
+// failure — offline host, Hub outage — s.buildKitClientRef keeps the upstream
+// Hub ref and build Jobs pull per node exactly as before this step existed.
+// The host docker store caches the image across down/up cycles, so only the
+// first-ever run pays the Hub download.
+func (s *upState) mirrorBuildKitClient() error {
+	s.buildKitClientRef = naming.BuildKitClientImage // fallback: per-node Hub pulls
+	if s.opts.SkipImageLoad {
+		return nil
+	}
+	// EnsureInCluster's local-mirror path tags+pushes from the host docker
+	// store; make sure the image is there first (no-op when already cached).
+	if err := exec.CommandContext(s.ctx, "docker", "image", "inspect", naming.BuildKitClientImage).Run(); err != nil {
+		if out, perr := exec.CommandContext(s.ctx, "docker", "pull", naming.BuildKitClientImage).CombinedOutput(); perr != nil {
+			style.Warn(s.out, "buildkit client pre-seed skipped (docker pull %s: %v); builds will pull it per node\n%s",
+				naming.BuildKitClientImage, perr, strings.TrimSpace(string(out)))
+			return nil
+		}
+	}
+	if err := style.Spin(s.out,
+		fmt.Sprintf("mirror %s → local registry (build-client pre-seed)", naming.BuildKitClientImage),
+		func() error {
+			ref, e := imagepin.EnsureInCluster(s.ctx, naming.BuildKitClientImage,
+				s.cfg.Cluster.Registry, s.cfg.Cluster.RegistryPort, "moby/buildkit", s.cfg.Flywheel.Version, s.out)
+			if e != nil {
+				return e
+			}
+			s.buildKitClientRef = ref
+			return nil
+		},
+	); err != nil {
+		style.Warn(s.out, "buildkit client pre-seed failed (%v); builds will pull %s per node",
+			err, naming.BuildKitClientImage)
+	}
+	return nil
+}
+
 // newApplier builds the SSA applier bound to the cluster's kube context.
 func (s *upState) newApplier() error {
 	s.kubeContext = k3d.KubeContext(s.cfg.Cluster.Name)
@@ -479,7 +531,7 @@ func (s *upState) fluxInstall() error {
 // without any explicit refresh. Run removes bootstrapDir on exit.
 func (s *upState) renderBootstrap() error {
 	s.repoBaseName = converge.ResolveRepoBaseName(s.opts.RepoDir)
-	dir, err := converge.RenderBootstrap(s.cfg, s.resolvedImages, s.sha, s.repoBaseName)
+	dir, err := converge.RenderBootstrap(s.cfg, s.resolvedImages, s.sha, s.repoBaseName, s.buildKitClientRef)
 	if err != nil {
 		return err
 	}
@@ -506,7 +558,7 @@ func (s *upState) ensureNamespaces() error {
 // in the apply-flux-system step (SSA no-op).
 func (s *upState) flywheelConfig() error {
 	return style.Spin(s.out, "bootstrap: applying flywheel-config ConfigMap", func() error {
-		return converge.ApplyFlywheelConfig(s.ctx, s.a, s.cfg, s.repoBaseName, s.out)
+		return converge.ApplyFlywheelConfig(s.ctx, s.a, s.cfg, s.repoBaseName, s.buildKitClientRef, s.out)
 	})
 }
 

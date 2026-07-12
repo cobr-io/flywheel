@@ -36,7 +36,7 @@ func renderBootstrapForAgreement(t *testing.T) string {
 		"image-builder-controller": "flywheel-dev/image-builder-controller:dogfood",
 		"git-deploy-controller":    "flywheel-dev/git-deploy-controller:dogfood",
 	}
-	dir, err := RenderBootstrap(cfg, refs, "abc123def456abc123def456abc123def456abcd", "acme-gitops")
+	dir, err := RenderBootstrap(cfg, refs, "abc123def456abc123def456abc123def456abcd", "acme-gitops", "")
 	if err != nil {
 		t.Fatalf("RenderBootstrap: %v", err)
 	}

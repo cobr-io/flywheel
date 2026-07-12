@@ -143,8 +143,22 @@ func splitImageRef(ref string) (string, string) {
 // Nothing under paths.* or sops.* is included — those are host-only or
 // secret-only. Values are strings so both consumers (kubelet valueFrom, YAML
 // render) see the identical bytes.
-func FlywheelConfigData(cfg *flywheelSchema.File, repoBaseName string) map[string]string {
+// buildKitClientRef is the buildkit client image the build Jobs should run:
+// the in-cluster registry ref when `up`'s mirror-buildkit-client step
+// succeeded, or the upstream naming.BuildKitClientImage as the fallback when
+// the mirror was skipped (offline host, SkipImageLoad). Only `up` knows which
+// happened, which is why the value is threaded here rather than derived by
+// the controller (a derived registry ref would ImagePullBackOff when the
+// mirror never ran).
+func FlywheelConfigData(cfg *flywheelSchema.File, repoBaseName, buildKitClientRef string) map[string]string {
+	if buildKitClientRef == "" {
+		buildKitClientRef = naming.BuildKitClientImage
+	}
 	return map[string]string{
+		// Read by image-builder-controller: the image for the thin buildkit
+		// client each build Job runs (issue #107 — mirrored so per-node cold
+		// pulls come from the LAN registry, not Docker Hub).
+		"images.buildkit_client": buildKitClientRef,
 		"client.name":           cfg.Client.Name,
 		"cluster.name":          cfg.Cluster.Name,
 		"cluster.registry":      cfg.Cluster.Registry,
@@ -168,8 +182,8 @@ func FlywheelConfigData(cfg *flywheelSchema.File, repoBaseName string) map[strin
 // from FlywheelConfigData (the single producer), so this direct apply and the
 // bootstrap-tree copy (flywheel-config.yaml.tmpl, applied by up's apply-flux-system step) agree by
 // construction. (Closed material gap O3 / T1.13.)
-func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelSchema.File, repoBaseName string, out io.Writer) error {
-	kv := FlywheelConfigData(cfg, repoBaseName)
+func ApplyFlywheelConfig(ctx context.Context, a *applier.Applier, cfg *flywheelSchema.File, repoBaseName, buildKitClientRef string, out io.Writer) error {
+	kv := FlywheelConfigData(cfg, repoBaseName, buildKitClientRef)
 	data := make(map[string]interface{}, len(kv))
 	for k, v := range kv {
 		data[k] = v

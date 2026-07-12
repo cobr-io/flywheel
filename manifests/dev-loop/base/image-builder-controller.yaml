@@ -64,6 +64,17 @@ spec:
                 configMapKeyRef:
                   name: flywheel-config
                   key: client.name
+            # The buildkit CLIENT image build Jobs run: the in-cluster registry
+            # ref `up` mirrored (issue #107 — per-node first pulls come from
+            # the LAN, not Docker Hub). Optional so a stale flywheel-config
+            # from an older CLI doesn't wedge the pod; the controller then
+            # falls back to the upstream Hub ref (naming.BuildKitClientImage).
+            - name: BUILDKIT_CLIENT_IMAGE
+              valueFrom:
+                configMapKeyRef:
+                  name: flywheel-config
+                  key: images.buildkit_client
+                  optional: true
           ports:
             - containerPort: 8080
               name: metrics

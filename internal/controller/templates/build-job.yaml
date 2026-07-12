@@ -40,7 +40,7 @@ spec:
         # client — the actual build runs in the warm buildkitd daemon, where
         # the layer cache lives.
         - name: build
-          image: moby/buildkit:v0.16.0-rootless
+          image: {{ .BuildKitClientImage }}
           # buildctl is the entrypoint; no daemon in this pod.
           command: [buildctl]
           args:
