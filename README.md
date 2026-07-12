@@ -36,6 +36,15 @@ machine:
 The cluster converges the same way Flux would converge production from a git
 push; only the image build happens in-cluster instead of in your CI.
 
+**What speed to expect:** a warm edit→served cycle — commit, in-cluster image
+rebuild, deploy, new pod serving — is **~10 seconds** (measured 7–13s in CI and
+locally). The very first bump after `add app` can take up to ~40s about half
+the time ([#107](https://github.com/cobr-io/flywheel/issues/107)); a fresh
+`flywheel up` is minutes, not seconds. If your loop is slower than this,
+something is wrong — see
+[docs/dev/dev-loop-latency.md](docs/dev/dev-loop-latency.md) for the per-hop
+budget and how to find the stall.
+
 ### The same loop for your manifests
 
 The gitops repo itself iterates the same way: edit `apps/`, `infra/`, or
