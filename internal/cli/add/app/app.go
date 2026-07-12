@@ -28,6 +28,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/sourcemode"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	wt "github.com/cobr-io/flywheel/internal/cli/worktree"
+	"github.com/cobr-io/flywheel/internal/cli/yamledit"
 	"github.com/cobr-io/flywheel/internal/naming"
 )
 
@@ -546,80 +547,63 @@ func readConfig(repoDir string) (*schema.File, error) {
 }
 
 // preflightResources verifies path is an appendable kustomization: it exists,
-// is readable, and has a top-level `resources:` key. It mirrors appendResource's
-// preconditions so the commit tail is unlikely to fail after the repo has been
-// mutated. Kept as a separate read-only check (rather than folded into
-// appendResource) so T24's yaml-editing consolidation can replace both without a
-// merge conflict here.
+// is readable, and has a top-level `resources:` key (present as a block/flow
+// sequence or a bare/empty key). It mirrors appendResource's precondition —
+// both now route through internal/cli/yamledit, so a valid key with a line
+// comment (`resources:  # keep sorted`) or 4-space indent passes here exactly
+// when appendResource can edit it. Kept as a separate read-only check so the
+// commit tail is unlikely to fail after the repo has been mutated.
 func preflightResources(path string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	for _, line := range strings.Split(string(raw), "\n") {
-		switch strings.TrimRight(line, " \t") {
-		case "resources:", "resources: []":
-			return nil
-		}
+	ok, err := yamledit.HasSequenceKey(raw, []string{"resources"})
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
 	}
-	return fmt.Errorf("%s missing a `resources:` key", path)
+	if !ok {
+		return fmt.Errorf("%s missing a `resources:` key", path)
+	}
+	return nil
 }
 
-// appendResource inserts `  - ./<name>` under the `resources:` key of
-// the given kustomization.yaml file. The file may ship with
-// `resources: []` (rewritten to a block sequence on first add) or an
-// existing block sequence (appended to). Idempotent: a re-add of the
-// same name is a no-op (already in resources).
+// appendResource inserts `- ./<name>` under the `resources:` key of the given
+// kustomization.yaml. Delegates the surgical, comment-preserving edit to
+// internal/cli/yamledit: an empty `resources: []` becomes a block sequence, an
+// existing block is appended to at ITS OWN indent (2- or 4-space), inline
+// comments and CRLF survive, and a re-add of the same name is a no-op.
 func appendResource(path, name string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		return err
 	}
-	entry := "  - ./" + name
-	if hasResourceLine(string(raw), entry) {
-		return nil
-	}
-
-	lines := strings.Split(string(raw), "\n")
-	idx := -1
-	for i, line := range lines {
-		// Look for the resources: key at column 0. (kustomize spec doesn't
-		// allow it nested.)
-		trim := strings.TrimRight(line, " \t")
-		if trim == "resources:" || trim == "resources: []" {
-			idx = i
-			break
-		}
-	}
-	if idx < 0 {
+	out, err := yamledit.AppendListItem(raw, []string{"resources"}, "./"+name)
+	if errors.Is(err, yamledit.ErrNoSequenceKey) {
 		return fmt.Errorf("%s missing a `resources:` key", path)
 	}
-
-	switch strings.TrimRight(lines[idx], " \t") {
-	case "resources: []":
-		// First app: rewrite the empty inline list as a block sequence.
-		lines[idx] = "resources:"
-		lines = insertAfter(lines, idx, entry)
-	default:
-		// Block sequence already; append after the last `  - ` line that
-		// belongs to this key.
-		end := lastResourceEntry(lines, idx)
-		lines = insertAfter(lines, end, entry)
+	if err != nil {
+		return fmt.Errorf("append to %s: %w", path, err)
 	}
-
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	return os.WriteFile(path, out, 0o644)
 }
 
 // ensureNamespace appends a Namespace document for `ns` to the managed
 // apps/base/namespaces.yaml stream if absent, creating the file when missing.
 // Idempotent (mirrors appendResource): re-adding the same namespace is a no-op,
-// so apps sharing a namespace produce exactly one Namespace object.
+// so apps sharing a namespace produce exactly one Namespace object. The
+// presence check parses each document (via yamledit.HasNamespace) rather than
+// line-scanning `name:`, so an unrelated same-indent `name:` cannot spoof it.
 func ensureNamespace(path, ns string) error {
 	raw, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	if hasNamespaceDoc(string(raw), ns) {
+	has, err := yamledit.HasNamespace(raw, ns)
+	if err != nil {
+		return fmt.Errorf("%s: %w", path, err)
+	}
+	if has {
 		return nil
 	}
 	doc := fmt.Sprintf("---\napiVersion: v1\nkind: Namespace\nmetadata:\n  name: %s\n  labels:\n    kubernetes.io/metadata.name: %s\n", ns, ns)
@@ -628,60 +612,4 @@ func ensureNamespace(path, ns string) error {
 		content += "\n"
 	}
 	return os.WriteFile(path, []byte(content+doc), 0o644)
-}
-
-// hasNamespaceDoc reports whether the stream already declares a Namespace named
-// `ns` (the `  name: <ns>` line; the 4-space-indented metadata.name label won't
-// match). Line scan mirrors hasResourceLine.
-func hasNamespaceDoc(content, ns string) bool {
-	want := "  name: " + ns
-	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimRight(line, " \t") == want {
-			return true
-		}
-	}
-	return false
-}
-
-// hasResourceLine returns true if `entry` (e.g. "  - ./foo") already
-// appears verbatim in the kustomization file.
-func hasResourceLine(content, entry string) bool {
-	for _, line := range strings.Split(content, "\n") {
-		if strings.TrimRight(line, " \t") == entry {
-			return true
-		}
-	}
-	return false
-}
-
-func insertAfter(lines []string, i int, entry string) []string {
-	out := make([]string, 0, len(lines)+1)
-	out = append(out, lines[:i+1]...)
-	out = append(out, entry)
-	out = append(out, lines[i+1:]...)
-	return out
-}
-
-// lastResourceEntry returns the index of the last `  - ...` line that
-// belongs to the resources: key starting at `start`. If none yet, returns
-// `start` so the caller inserts immediately after the key line.
-func lastResourceEntry(lines []string, start int) int {
-	last := start
-	for i := start + 1; i < len(lines); i++ {
-		line := lines[i]
-		if strings.HasPrefix(line, "  - ") {
-			last = i
-			continue
-		}
-		// Comment or blank within the block — keep scanning.
-		trim := strings.TrimSpace(line)
-		if trim == "" || strings.HasPrefix(trim, "#") {
-			continue
-		}
-		// Hit another top-level key (column 0 non-space, non-comment); stop.
-		if line != "" && line[0] != ' ' && line[0] != '\t' {
-			break
-		}
-	}
-	return last
 }
