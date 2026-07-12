@@ -24,6 +24,7 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 	cfg.Cluster.RegistryPort = 50001
 	cfg.Flux.IntervalLocal = "10s"
 	cfg.Local.Domain = "localdev.me"
+	cfg.Namespaces.Apps = "apps" // loader-defaulted in production; set explicitly here
 
 	refs := map[string]string{
 		"git-server":               "flywheel-dev/git-server:dogfood",
@@ -112,6 +113,7 @@ func TestRenderBootstrap_GitServerMemoryLimit(t *testing.T) {
 	cfg.Cluster.RegistryPort = 50001
 	cfg.Flux.IntervalLocal = "10s"
 	cfg.Local.Domain = "localdev.me"
+	cfg.Namespaces.Apps = "apps" // loader-defaulted in production; set explicitly here
 	cfg.GitServer.MemoryLimit = "512Mi"
 
 	refs := map[string]string{
@@ -143,6 +145,7 @@ func TestRenderBootstrap_RejectsUntaggedOverride(t *testing.T) {
 	cfg.Cluster.RegistryPort = 50001
 	cfg.Flux.IntervalLocal = "10s"
 	cfg.Local.Domain = "localdev.me"
+	cfg.Namespaces.Apps = "apps" // loader-defaulted in production; set explicitly here
 
 	refs := map[string]string{
 		"git-server":               "flywheel-dev/git-server", // no tag!
@@ -175,6 +178,7 @@ func TestRenderBootstrap_EveryResourceLabeledManagedBy(t *testing.T) {
 	cfg.Cluster.RegistryPort = 50001
 	cfg.Flux.IntervalLocal = "10s"
 	cfg.Local.Domain = "localdev.me"
+	cfg.Namespaces.Apps = "apps" // loader-defaulted in production; set explicitly here
 
 	refs := map[string]string{
 		"git-server":               "ghcr.io/cobr-io/git-server:v0.1.0",
@@ -218,6 +222,56 @@ func TestRenderBootstrap_EveryResourceLabeledManagedBy(t *testing.T) {
 		if !kinds[want] {
 			t.Errorf("expected the bootstrap build to include a %s (got kinds %v)", want, kinds)
 		}
+	}
+}
+
+// TestRenderBootstrap_CreatesConfiguredAppsNamespace proves the global default
+// apps namespace is a real knob (task T15): a non-"apps" namespaces.apps in cfg
+// must make the bootstrap CREATE that namespace (namespaces.yaml.tmpl) — not the
+// literal "apps" — so workloads `add app` scaffolds into cfg.Namespaces.Apps
+// land in a namespace something actually creates. It also confirms the same
+// value reaches the flywheel-config ConfigMap in one render (the two templated
+// apps-namespace sites agree).
+func TestRenderBootstrap_CreatesConfiguredAppsNamespace(t *testing.T) {
+	cfg := &flywheelSchema.File{}
+	cfg.Client.Name = "acme"
+	cfg.Cluster.Name = "acme-local"
+	cfg.Cluster.Registry = "acme-local-registry"
+	cfg.Cluster.RegistryPort = 50001
+	cfg.Flux.IntervalLocal = "10s"
+	cfg.Local.Domain = "localdev.me"
+	cfg.Namespaces.Apps = "myapps"
+
+	refs := map[string]string{
+		"git-server":               "ghcr.io/cobr-io/git-server:v0.1.0",
+		"git-auto-sync":            "ghcr.io/cobr-io/git-auto-sync:v0.1.0",
+		"image-builder-controller": "ghcr.io/cobr-io/image-builder-controller:v0.1.0",
+		"git-deploy-controller":    "ghcr.io/cobr-io/git-deploy-controller:v0.1.0",
+	}
+	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops")
+	if err != nil {
+		t.Fatalf("RenderBootstrap: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	// (a) the Namespace object the bootstrap creates is the configured one.
+	ns := mustRead(t, filepath.Join(dir, "namespaces.yaml"))
+	for _, want := range []string{"name: myapps", "kubernetes.io/metadata.name: myapps"} {
+		if !strings.Contains(ns, want) {
+			t.Errorf("namespaces.yaml missing %q — bootstrap didn't create the configured apps namespace:\n%s", want, ns)
+		}
+	}
+	// The old hardcoded "apps" namespace must be gone. "name: myapps" does not
+	// contain the substring "name: apps", so this catches a stale literal.
+	if strings.Contains(ns, "name: apps") {
+		t.Errorf("namespaces.yaml still creates the hardcoded \"apps\" namespace:\n%s", ns)
+	}
+
+	// (b) the same value reaches the flywheel-config ConfigMap (the other
+	// templated apps-namespace site) in this render.
+	cm := renderedFlywheelConfigData(t, dir)
+	if cm["namespaces.apps"] != "myapps" {
+		t.Errorf("flywheel-config namespaces.apps = %q, want \"myapps\"", cm["namespaces.apps"])
 	}
 }
 

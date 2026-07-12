@@ -6,9 +6,14 @@ metadata:
   labels:
     kubernetes.io/metadata.name: {{ .FlywheelNamespace }}
 ---
+# The default apps namespace (namespaces.apps in flywheel.yaml, a real knob —
+# task T15). `add app` scaffolds workloads into cfg.Namespaces.Apps and SKIPS
+# writing a Namespace doc for that default precisely because the bootstrap
+# creates it here; a non-default per-app namespace gets its own managed doc in
+# apps/base/namespaces.yaml instead.
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: apps
+  name: {{ .AppsNamespace }}
   labels:
-    kubernetes.io/metadata.name: apps
+    kubernetes.io/metadata.name: {{ .AppsNamespace }}
