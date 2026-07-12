@@ -31,22 +31,13 @@ echo "==> [1/5] flywheel doctor coverage (cluster-free host-prereq checks)"
 bash "$REPO_ROOT/testdata/scenarios/scenario-doctor.sh"
 
 echo "==> [2/5] building runtime images (flywheel-dev/*:$TAG)"
-# The two controller images COPY a host-built binary rather than compiling Go
-# in-image (issue #46). Cross-compile them for GOOS=linux/$(host arch) — the
-# arch docker builds by default here — into a throwaway context dir; the
-# script-only images still build from the repo root.
-CTRL_CTX="$(mktemp -d)"
-for c in image-builder-controller git-deploy-controller; do
-	(cd "$REPO_ROOT" && CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o "$CTRL_CTX/$c" "./cmd/$c")
-done
-for img in git-server git-auto-sync image-builder-controller git-deploy-controller; do
-	case "$img" in
-		image-builder-controller|git-deploy-controller) bctx="$CTRL_CTX" ;;
-		*) bctx="$REPO_ROOT" ;;
-	esac
-	docker build -q -t "flywheel-dev/$img:$TAG" -f "$REPO_ROOT/Dockerfile.$img" "$bctx" >/dev/null
-done
-rm -rf "$CTRL_CTX"
+# `make images` is the single build recipe, shared with the CI e2e recipe
+# (.github/workflows/e2e-recipe.yml) and `make install`, so the image build
+# can't drift between local and CI. It host-builds the two controller binaries
+# and COPYs them in (issue #46 — no in-image QEMU Go build) and builds the four
+# flywheel-dev/<name> images. IMAGE_TAG=$TAG matches the flywheel.yaml.local
+# override written below.
+make -C "$REPO_ROOT" images IMAGE_TAG="$TAG"
 
 # Warm the docker daemon before `up`'s step-2 prereq ping (mirrors the recipe's
 # "Wait for docker daemon to settle" step): the builds above leave dockerd

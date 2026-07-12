@@ -56,7 +56,10 @@ type Flywheel struct {
 }
 
 // ImageNames are the known image keys for flywheel.images. Any other key in
-// the map is a schema violation.
+// the map is a schema violation. Adding image N+1 touches several
+// non-derivable sites (Dockerfiles, goreleaser, dependabot, …) plus the
+// bootstrap wiring that IS derived from this slice — the ordered checklist is
+// docs/dev/add-controller-image.md.
 var ImageNames = []string{"git-server", "git-auto-sync", "image-builder-controller", "git-deploy-controller"}
 
 type Client struct {

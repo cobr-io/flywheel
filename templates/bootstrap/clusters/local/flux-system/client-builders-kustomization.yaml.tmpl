@@ -27,9 +27,16 @@ spec:
   # (add app writes imagepin.DefaultRef), so this rewrite — rendered fresh on
   # every `up` — keeps the sidecar pointing at the current image without the
   # committed manifest ever pinning a digest that goes stale on the next
-  # dogfood rebuild. Mirrors flywheel-dev-loop's spec.images for git-server /
-  # image-builder-controller.
+  # dogfood rebuild.
+  #
+  # This is the client-builders Kustomization's subset of the image rewrites.
+  # Which images land here vs. the flywheel-dev-loop Kustomization (and why) is
+  # decided by the bootstrapImageOwners table in
+  # internal/cli/converge/bootstrap.go; this template ranges over the
+  # .ClientBuilderImages slice that table produces (empty-safe).
   images:
-    - name: ghcr.io/cobr-io/git-auto-sync
-      newName: {{ .GitAutoSyncImageName }}
-      newTag: {{ .GitAutoSyncImageTag }}
+{{- range .ClientBuilderImages }}
+    - name: ghcr.io/cobr-io/{{ .Name }}
+      newName: {{ .ImageName }}
+      newTag: {{ .ImageTag }}
+{{- end }}

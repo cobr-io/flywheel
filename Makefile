@@ -11,7 +11,11 @@ VERSION := $(shell git describe --tags --always --dirty 2>/dev/null || echo v0.0
 LDFLAGS := -X github.com/cobr-io/flywheel.BuildVersion=$(VERSION)
 
 # The four runtime images, built from Dockerfile.<name> in the repo root and
-# tagged flywheel-dev/<name>:$(IMAGE_TAG). Keep in sync with schema.ImageNames.
+# tagged flywheel-dev/<name>:$(IMAGE_TAG). This mirrors schema.ImageNames;
+# adding image N+1 is a documented checklist (docs/dev/add-controller-image.md),
+# and converge's image-agreement test fails if the bootstrap templates and
+# schema.ImageNames disagree. `make images` is the single build recipe — the CI
+# e2e recipe (.github/workflows/e2e-recipe.yml) and scripts/e2e.sh call it too.
 # IMAGE_TAG defaults to `dogfood` to match the `flywheel-dev/<img>:dogfood`
 # pins in a per-developer flywheel.yaml.local. `flywheel up` content-
 # addresses the imported image by its build digest at deploy time, so the
