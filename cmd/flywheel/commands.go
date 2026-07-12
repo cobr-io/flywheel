@@ -23,6 +23,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/up"
 	"github.com/cobr-io/flywheel/internal/cli/usecmd"
 	"github.com/cobr-io/flywheel/internal/cli/worktree"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 func newVersionCmd() *cobra.Command {
@@ -207,7 +208,9 @@ func newCleanCmd() *cobra.Command {
 				return err
 			}
 			return clean.Run(cmd.Context(), a, clean.Options{
-				FlywheelNamespace: cfg.Namespaces.Flywheel,
+				// flywheel's namespace is fixed (naming.FlywheelNamespace), not
+				// read from cfg — the schema knob is deprecated (task T14).
+				FlywheelNamespace: naming.FlywheelNamespace,
 				Orphaned:          orphaned,
 			}, os.Stdout)
 		},

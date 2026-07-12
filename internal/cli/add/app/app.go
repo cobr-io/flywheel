@@ -341,6 +341,10 @@ func buildValues(opts Options, cfg *schema.File, worktree, gitAutoSyncRef string
 		"AppsNamespace":     opts.Namespace,
 		"ClientName":        cfg.Client.Name,
 		"FluxIntervalLocal": cfg.Flux.IntervalLocal,
+		// flywheel's namespace is fixed (naming.FlywheelNamespace); the per-app
+		// scaffolds (GitRepository, build-config, git-auto-sync) reference it as
+		// a placeholder rather than a baked literal (task T14).
+		"FlywheelNamespace": naming.FlywheelNamespace,
 		"GitServerURL":      naming.GitServerURL(naming.FlywheelNamespace),
 		"GitAutoSyncImage":  gitAutoSyncRef,
 		"RegistryURL":       fmt.Sprintf("k3d-%s:5000", cfg.Cluster.Registry),

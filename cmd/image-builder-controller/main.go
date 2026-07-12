@@ -11,6 +11,7 @@ package main
 
 import (
 	"flag"
+	"fmt"
 	"os"
 
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
@@ -22,6 +23,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/cobr-io/flywheel/internal/controller"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 var scheme = runtime.NewScheme()
@@ -59,7 +61,7 @@ func main() {
 	flag.StringVar(&portFlag, "registry-port", "", "k3d registry port (override env CLUSTER_REGISTRY_PORT)")
 	flag.StringVar(&clusterFlag, "cluster-name", "", "k3d cluster name (override env CLUSTER_NAME)")
 	flag.StringVar(&clientFlag, "client-name", "", "client name; used as label prefix (override env CLIENT_NAME)")
-	flag.StringVar(&buildKitAddrFlag, "buildkit-addr", "", "buildkitd gRPC address (override env BUILDKIT_ADDR; default tcp://buildkitd.flywheel-system:1234)")
+	flag.StringVar(&buildKitAddrFlag, "buildkit-addr", "", fmt.Sprintf("buildkitd gRPC address (override env BUILDKIT_ADDR; default tcp://buildkitd.%s:1234)", naming.FlywheelNamespace))
 
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)

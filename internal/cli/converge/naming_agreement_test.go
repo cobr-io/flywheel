@@ -82,3 +82,36 @@ func TestNamingAgreement_IUAManifest(t *testing.T) {
 		t.Errorf("image-update-automation.yaml is out of agreement with naming.DeployBranch (%q):\n%s", naming.DeployBranch, string(raw))
 	}
 }
+
+// TestNamingAgreement_StaticDevLoopNamespace pins the flywheel-namespace
+// literal in the static dev-loop base manifests to naming.FlywheelNamespace.
+// These files are plain YAML (Flux/kustomize apply them verbatim — they can't
+// be templated like the bootstrap tree), so a rename of the constant that isn't
+// mirrored into them (or vice versa) must fail `go test` here rather than
+// ImagePullBackOff / cross-namespace-RBAC-denial on a live cluster. The field
+// checked is enumerated per file (pragmatic, not a generic YAML walker): every
+// flywheel-owned resource here declares the namespace, and source-controller-np
+// selects it by the metadata.name label.
+func TestNamingAgreement_StaticDevLoopNamespace(t *testing.T) {
+	cases := []struct {
+		file string
+		want string
+	}{
+		{"manifests/dev-loop/base/buildkitd.yaml", "namespace: " + naming.FlywheelNamespace},
+		{"manifests/dev-loop/base/git-deploy-controller.yaml", "namespace: " + naming.FlywheelNamespace},
+		{"manifests/dev-loop/base/git-server.yaml", "namespace: " + naming.FlywheelNamespace},
+		{"manifests/dev-loop/base/image-builder-controller.yaml", "namespace: " + naming.FlywheelNamespace},
+		{"manifests/dev-loop/base/inotify-bump.yaml", "namespace: " + naming.FlywheelNamespace},
+		{"manifests/dev-loop/base/rbac.yaml", "namespace: " + naming.FlywheelNamespace},
+		{"manifests/dev-loop/base/source-controller-np.yaml", "kubernetes.io/metadata.name: " + naming.FlywheelNamespace},
+	}
+	for _, tc := range cases {
+		raw, err := flywheel.Assets.ReadFile(tc.file)
+		if err != nil {
+			t.Fatalf("%s: %v", tc.file, err)
+		}
+		if !strings.Contains(string(raw), tc.want) {
+			t.Errorf("%s is out of agreement with naming.FlywheelNamespace: no %q found", tc.file, tc.want)
+		}
+	}
+}

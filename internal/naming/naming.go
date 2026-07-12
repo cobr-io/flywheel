@@ -55,12 +55,14 @@ const ReconcileRequestAnnotation = "reconcile.fluxcd.io/requestedAt"
 // independent of the client-configurable flywheel/apps namespaces.
 const FluxNamespace = "flux-system"
 
-// FlywheelNamespace is the default namespace for flywheel's in-cluster
-// machinery (git-server, the build jobs, the controllers). The namespace is
-// client-configurable (cfg.Namespaces.Flywheel); this constant is only the
-// hardcoded default/fallback. Threading the configured value through every
-// remaining hardcoded site is a follow-up (task T14), so this migrates only the
-// sites that already used the bare literal.
+// FlywheelNamespace is THE namespace for flywheel's in-cluster machinery
+// (git-server, buildkitd, the build jobs, the controllers). It is fixed, not
+// client-configurable: this constant is the single global definition every Go
+// call site, rendered template (via the render value builders), and static
+// manifest (via the agreement tests in internal/cli/converge) derives from or
+// is checked against. The `namespaces.flywheel` flywheel.yaml key is
+// deprecated — schema.Validate accepts it only when it equals this value (task
+// T14).
 const FlywheelNamespace = "flywheel-system"
 
 // Config + state file names, relative to a client repo root.

@@ -9,12 +9,15 @@ import (
 
 	flywheel "github.com/cobr-io/flywheel"
 	flywheelSchema "github.com/cobr-io/flywheel/internal/cli/schema"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // flywheelConfigTestCfg is a representative merged config for the
-// flywheel-config producer/render tests. Namespaces are set to NON-default
-// values so a test asserting cfg values flow through can't pass vacuously
-// against the old hardcoded "flywheel-system"/"apps" literals.
+// flywheel-config producer/render tests. namespaces.apps is a NON-default value
+// so a test asserting the cfg value flows through can't pass vacuously against
+// the old hardcoded "apps" literal. namespaces.flywheel is set to a bogus value
+// on purpose: it is deprecated (task T14) and the producer must IGNORE it,
+// always emitting naming.FlywheelNamespace.
 func flywheelConfigTestCfg() *flywheelSchema.File {
 	cfg := &flywheelSchema.File{}
 	cfg.Client.Name = "acme"
@@ -23,7 +26,7 @@ func flywheelConfigTestCfg() *flywheelSchema.File {
 	cfg.Cluster.RegistryPort = 50001
 	cfg.Flux.IntervalLocal = "10s"
 	cfg.Local.Domain = "localdev.me"
-	cfg.Namespaces.Flywheel = "custom-flywheel"
+	cfg.Namespaces.Flywheel = "ignored-deprecated" // deprecated knob; producer ignores it (T14)
 	cfg.Namespaces.Apps = "custom-apps"
 	return cfg
 }
@@ -162,13 +165,15 @@ func TestFlywheelConfig_TemplateRendersFromProducer(t *testing.T) {
 		}
 	}
 
-	// Explicit non-default-namespace assertions: the template no longer
-	// hardcodes these, so cfg's values must appear verbatim.
+	// namespaces.apps is a real knob: the template no longer hardcodes it, so
+	// cfg's value must appear verbatim.
 	if got["namespaces.apps"] != "custom-apps" {
 		t.Errorf("namespaces.apps = %q, want the cfg value \"custom-apps\" — template still hardcoding?", got["namespaces.apps"])
 	}
-	if got["namespaces.flywheel"] != "custom-flywheel" {
-		t.Errorf("namespaces.flywheel = %q, want the cfg value \"custom-flywheel\" — template still hardcoding?", got["namespaces.flywheel"])
+	// namespaces.flywheel is fixed (T14): the producer ignores the deprecated
+	// cfg knob and always emits naming.FlywheelNamespace.
+	if got["namespaces.flywheel"] != naming.FlywheelNamespace {
+		t.Errorf("namespaces.flywheel = %q, want the fixed %q (deprecated cfg knob must be ignored)", got["namespaces.flywheel"], naming.FlywheelNamespace)
 	}
 }
 

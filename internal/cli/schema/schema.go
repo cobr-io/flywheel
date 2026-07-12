@@ -10,6 +10,8 @@ import (
 	"strings"
 
 	"sigs.k8s.io/yaml"
+
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // NativeLabel is the schema label the CLI natively understands.
@@ -79,6 +81,10 @@ type Cluster struct {
 }
 
 type Namespaces struct {
+	// Flywheel is DEPRECATED and no longer read: flywheel's namespace is fixed
+	// at naming.FlywheelNamespace (task T14). The field is retained so strict
+	// parsing still accepts older client files that carry it; Validate rejects a
+	// value that differs from the fixed namespace.
 	Flywheel string `json:"flywheel"`
 	Apps     string `json:"apps"`
 }
@@ -315,8 +321,17 @@ func Validate(f *File) error {
 	if f.Cluster.HttpsPort == 0 {
 		es = append(es, ValidateError{"cluster.https_port", "required and non-zero"})
 	}
-	if f.Namespaces.Flywheel == "" {
-		es = append(es, ValidateError{"namespaces.flywheel", "required"})
+	// namespaces.flywheel is NOT client-configurable: flywheel's own machinery
+	// always lives in naming.FlywheelNamespace. The key is optional — older
+	// client files that still carry `flywheel: flywheel-system` keep validating
+	// (strict parsing rejects unknown keys, not deprecated ones) — but a value
+	// that DIFFERS from the fixed namespace is a silent no-op that would mislead,
+	// so it's a hard error with a fix-it message. (Task T14.)
+	if ns := f.Namespaces.Flywheel; ns != "" && ns != naming.FlywheelNamespace {
+		es = append(es, ValidateError{
+			"namespaces.flywheel",
+			fmt.Sprintf("flywheel's namespace is fixed at %s; remove `namespaces.flywheel` from flywheel.yaml (got %q)", naming.FlywheelNamespace, ns),
+		})
 	}
 	if f.Namespaces.Apps == "" {
 		es = append(es, ValidateError{"namespaces.apps", "required"})

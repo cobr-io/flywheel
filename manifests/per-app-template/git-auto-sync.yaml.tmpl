@@ -7,7 +7,7 @@ metadata:
   # daemon. It patches its per-app GitRepository (also in flywheel-system, see
   # GITREPOSITORY_NAMESPACE below) on branch switches, using the flywheel-system
   # git-auto-sync Role from dev-loop rbac.yaml.
-  namespace: flywheel-system
+  namespace: {{ .FlywheelNamespace }}
   labels:
     app: git-auto-sync
     worktree: {{ .Worktree }}
@@ -36,7 +36,7 @@ spec:
             - name: GITREPOSITORY_NAME
               value: {{ .AppName }}
             - name: GITREPOSITORY_NAMESPACE
-              value: flywheel-system
+              value: {{ .FlywheelNamespace }}
           volumeMounts:
             - name: workspaces
               mountPath: /workspaces
