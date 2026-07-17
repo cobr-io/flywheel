@@ -25,7 +25,7 @@ behavior yet.
       to `BUILDER_NAMESPACE`, leader election off, scheme = core + apps +
       sourcev1, healthz/readyz via manager checks (image-builder-controller
       idiom).
-- [ ] `internal/appsync` skeleton: `Ticker`, `TickResult`, `FluxPatcher`
+- [x] `internal/appsync` skeleton: `Ticker`, `TickResult`, `FluxPatcher`
       interface, git runner (duplicated from selfsync per Q2) with per-exec
       context timeout (default 30s).
 - [ ] `Dockerfile.git-auto-sync`: binary-COPY pattern (issue #46 style like
