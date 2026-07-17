@@ -333,11 +333,11 @@ func (t *Ticker) postVerify(ctx context.Context, B string, snap map[string]strin
 // whatever refs/heads/B happens to be by the time the push runs). expect is the
 // bare head the force-with-lease guards against; "" pushes plain (a brand-new
 // branch has no remote ref to lease). A lease miss or other failure retries
-// plain, matching sync.sh's fallback. The developer's git hooks are disabled —
-// they must not run in the container.
+// plain, matching sync.sh's fallback. Hook neutralization (pre-push must not
+// run in the container) is inherited from output(), like every git exec here.
 func (t *Ticker) pushExplicit(ctx context.Context, branch, sha, expect string) error {
 	dst := sha + ":refs/heads/" + branch
-	args := []string{"-c", "core.hooksPath=/dev/null", "push"}
+	args := []string{"push"}
 	if expect != "" {
 		args = append(args, "--force-with-lease="+branch+":"+expect)
 	}
@@ -351,7 +351,7 @@ func (t *Ticker) pushExplicit(ctx context.Context, branch, sha, expect string) e
 	// against): retry plain. A plain push only creates the branch or
 	// fast-forwards it — a non-fast-forward is rejected by the remote, so this
 	// fallback can never clobber the commits the lease was meant to protect.
-	return t.run(ctx, "-c", "core.hooksPath=/dev/null", "push", t.BareURL, dst)
+	return t.run(ctx, "push", t.BareURL, dst)
 }
 
 // rebaseDivergence handles genuine divergence (neither L nor R is an ancestor of
@@ -465,7 +465,13 @@ func (t *Ticker) run(ctx context.Context, args ...string) error {
 }
 
 // output executes `git args...` in t.Dir and returns stdout, bounded by
-// t.ExecTimeout (default defaultExecTimeout).
+// t.ExecTimeout (default defaultExecTimeout). Every invocation neutralizes the
+// developer's git hooks (`-c core.hooksPath=/dev/null`): the worktree's .git is
+// host-owned and this process runs as root in the container, so a hook firing
+// here (pre-rebase/post-rewrite on the divergence path, pre-push on pushes)
+// would execute host-authored code as root. sync.sh disabled hooks globally
+// (`git config --global core.hooksPath /dev/null`); this is the same guarantee,
+// applied per-exec.
 func (t *Ticker) output(ctx context.Context, args ...string) (string, error) {
 	timeout := t.ExecTimeout
 	if timeout <= 0 {
@@ -473,7 +479,7 @@ func (t *Ticker) output(ctx context.Context, args ...string) (string, error) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	return execx.GitAuto(cctx, t.Dir, args...)
+	return execx.GitAuto(cctx, t.Dir, append([]string{"-c", "core.hooksPath=/dev/null"}, args...)...)
 }
 
 func (t *Ticker) logf(format string, args ...any) {
