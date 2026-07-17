@@ -97,8 +97,9 @@ poison cannot reach a push:
    `spec.ref.branch = B` (same monotonic intent signal as today; the spec
    value arrives free with the reconciled object, so no LAST_BRANCH state).
 3. **Fetch** bare `B` → remote head `R`. Objects only; no local ref update.
-4. **Integrate** (bare strictly ahead: `L` ancestor of `R`) — the only
-   worktree-mutating path:
+4. **Integrate** (bare strictly ahead: `L` ancestor of `R`) — one of the two
+   worktree-mutating paths (with divergence-rebase, step 7); both share the
+   same post-verify + rollback guard:
    - dirty-guard (same data-loss semantics as sync.sh, including the
      issue-#4 exit-code>1 distinction);
    - re-verify `symbolic-ref == B` immediately before `reset --hard R`;
@@ -114,7 +115,10 @@ poison cannot reach a push:
    changed (our push, or a fast-forward we integrated) — parity with
    sync.sh's `trigger_reconcile`.
 7. **Genuine divergence** (neither ancestor): rebase, abort-on-conflict,
-   loud log, long requeue — parity with today's stall behavior.
+   loud log, long requeue — parity with today's stall behavior. The rebase
+   mutates the worktree, so it carries the same re-verify + post-verify guard
+   as integrate (step 4): a checkout racing the rebase would move the wrong
+   branch, and the post-verify rolls it back and aborts before the push.
 
 ### Hygiene / permissions
 

@@ -169,4 +169,7 @@ branch; PR merged.
 
 ## Re-planning log
 
-- (empty)
+- 2026-07-17 — orchestrator review of Phase 2 found the divergence-rebase path
+  mutates the worktree without the post-verify guard (design had declared
+  integrate the only mutating path); extended the shared post-verify to the
+  rebase path + race test (e). User approved.
