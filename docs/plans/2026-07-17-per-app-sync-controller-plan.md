@@ -74,7 +74,7 @@ deterministic race tests.
 - [x] Unit tests on real on-disk git repos: follow/patch, push-guard idle
       no-op, worktree-ahead push, bare-ahead fast-forward, divergence rebase,
       conflict stall, corrupt-index heal, dirty-guard refusal.
-- [ ] Race-injection tests: (a) checkout between snapshot and fetch → no-op;
+- [x] Race-injection tests: (a) checkout between snapshot and fetch → no-op;
       (b) checkout before reset → re-verify skips integrate; (c) checkout
       after reset (hook moves HEAD) → post-verify rolls back and aborts;
       (d) file modes: root-written files remain writable cross-uid

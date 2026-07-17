@@ -4,7 +4,9 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -85,7 +87,8 @@ func advanceBare(t *testing.T, bare, branch string, edit func(dir string)) strin
 	testgit.Git(t, c, "config", "user.name", "ci")
 	testgit.Git(t, c, "checkout", "-q", "-B", branch, "origin/"+branch)
 	edit(c)
-	testgit.Git(t, c, "commit", "-q", "-am", "ci change")
+	testgit.Git(t, c, "add", "-A") // stage new files too (the modes test adds one)
+	testgit.Git(t, c, "commit", "-q", "-m", "ci change")
 	testgit.Git(t, c, "push", "-q", "origin", branch+":refs/heads/"+branch)
 	return testgit.Out(t, c, "rev-parse", "HEAD")
 }
@@ -351,5 +354,164 @@ func TestTick_DirtyGuardRefusal(t *testing.T) {
 	}
 	if got := bareRef(t, bare, "main"); got != R {
 		t.Errorf("bare main changed under the dirty guard: want %s got %s", R, got)
+	}
+}
+
+// --- race-injection tests ----------------------------------------------------
+//
+// The testHook lands a `git checkout` at one of the tick's guard points,
+// deterministically simulating the developer racing the sync loop. These are
+// the acceptance core: they prove the issue-#86 bare-repo poison is impossible.
+
+// addOtherBranch creates a second branch `other` at a distinct commit and
+// leaves the worktree back on main. Returns other's sha.
+func addOtherBranch(t *testing.T, wt string) string {
+	t.Helper()
+	testgit.Git(t, wt, "switch", "-q", "-c", "other")
+	writeFile(t, wt, "app.txt", "other-content\n")
+	testgit.Git(t, wt, "commit", "-q", "-am", "other commit")
+	o := localRef(t, wt, "other")
+	testgit.Git(t, wt, "switch", "-q", "main")
+	return o
+}
+
+// (a) A checkout landing between the snapshot and the fetch cannot make an idle
+// tick mutate anything: every decision was computed against refs/heads/main
+// (L == R here), so the tick no-ops even though HEAD is now on `other`. The
+// pre-fix sync.sh would re-read HEAD, see other != bare-main, and misfire.
+func TestTick_RaceCheckoutAtSnapshotNoOp(t *testing.T) {
+	bare := bareRepo(t, "v0\n")
+	wt := cloneWorktree(t, bare)
+	addOtherBranch(t, wt)
+	beforeRefs := localRefs(t, wt)
+	beforeBare := bareRef(t, bare, "main")
+
+	flux := &fakeFlux{}
+	tk := newTicker(t, bare, wt, flux)
+	tk.testHook = func(stage string) {
+		if stage == "post-snapshot" {
+			testgit.Git(t, wt, "checkout", "-q", "other")
+		}
+	}
+	res, err := tk.Tick(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if res.Pushed || res.Integrated || res.Poked {
+		t.Fatalf("race no-op tick mutated something, got %+v", res)
+	}
+	if flux.pokes != 0 {
+		t.Errorf("idle race tick poked Flux (%d)", flux.pokes)
+	}
+	if after := localRefs(t, wt); !reflect.DeepEqual(beforeRefs, after) {
+		t.Errorf("no local ref may move: %v -> %v", beforeRefs, after)
+	}
+	if got := bareRef(t, bare, "main"); got != beforeBare {
+		t.Errorf("bare main moved: %s -> %s", beforeBare, got)
+	}
+}
+
+// (b) In a bare-ahead setup, a checkout at post-snapshot flips HEAD to `other`
+// before the integrate re-verify (step 5c) runs; the re-verify sees HEAD != B
+// and skips the reset entirely. No ref moves, the bare is untouched.
+func TestTick_RaceCheckoutBeforeResetReverifySkips(t *testing.T) {
+	bare := bareRepo(t, "v0\n")
+	wt := cloneWorktree(t, bare)
+	addOtherBranch(t, wt)
+	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
+	beforeRefs := localRefs(t, wt)
+
+	flux := &fakeFlux{}
+	tk := newTicker(t, bare, wt, flux)
+	tk.testHook = func(stage string) {
+		if stage == "post-snapshot" {
+			testgit.Git(t, wt, "checkout", "-q", "other")
+		}
+	}
+	res, err := tk.Tick(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if res.Integrated || res.Pushed || res.Poked {
+		t.Fatalf("re-verify should have skipped integrate, got %+v", res)
+	}
+	if flux.pokes != 0 {
+		t.Errorf("skipped tick poked Flux (%d)", flux.pokes)
+	}
+	if after := localRefs(t, wt); !reflect.DeepEqual(beforeRefs, after) {
+		t.Errorf("no local ref may move: %v -> %v", beforeRefs, after)
+	}
+	if got := bareRef(t, bare, "main"); got != R {
+		t.Errorf("bare main moved: want %s got %s", R, got)
+	}
+}
+
+// (c) THE issue-#86 test. The checkout lands at pre-reset — AFTER the re-verify
+// passed — so reset --hard R fires while HEAD is on `other`, moving the WRONG
+// branch's ref to R. Post-verify detects that refs/heads/other moved, rolls it
+// back to its pre-tick sha, and aborts the tick: no push, bare untouched. Absent
+// the rollback, `other` would point at main's content and the next push would
+// poison the bare repo.
+func TestTick_RaceCheckoutAtPreResetRollsBack(t *testing.T) {
+	bare := bareRepo(t, "v0\n")
+	wt := cloneWorktree(t, bare)
+	other := addOtherBranch(t, wt)
+	mainSHA := localRef(t, wt, "main")
+	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
+
+	flux := &fakeFlux{}
+	tk := newTicker(t, bare, wt, flux)
+	tk.testHook = func(stage string) {
+		if stage == "pre-reset" {
+			testgit.Git(t, wt, "checkout", "-q", "other")
+		}
+	}
+	res, err := tk.Tick(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if !res.RolledBack || res.Integrated || res.Pushed || res.Poked {
+		t.Fatalf("expected post-verify rollback + abort, got %+v", res)
+	}
+	if flux.pokes != 0 {
+		t.Errorf("poisoned tick poked Flux (%d)", flux.pokes)
+	}
+	if got := localRef(t, wt, "other"); got != other {
+		t.Errorf("the wrong branch was NOT rolled back: other = %s, want its pre-tick sha %s", got, other)
+	}
+	if got := localRef(t, wt, "main"); got != mainSHA {
+		t.Errorf("refs/heads/main moved unexpectedly: %s -> %s", mainSHA, got)
+	}
+	if got := bareRef(t, bare, "main"); got != R {
+		t.Errorf("bare main was poisoned: %s (want untouched %s)", got, R)
+	}
+}
+
+// (d) Root-written files stay host-writable. Under umask 0 (what cmd main sets,
+// applied here around the tick since the test binary doesn't run that main), an
+// integrate's reset --hard recreates a file group+other-writable (0666), so the
+// host user can edit and commit it afterward — the EACCES class this controller
+// exists to fix.
+func TestTick_IntegrateModesRootWritable(t *testing.T) {
+	bare := bareRepo(t, "v0\n")
+	wt := cloneWorktree(t, bare)
+	advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "newfile.txt", "created-by-integrate\n") })
+
+	flux := &fakeFlux{}
+	old := syscall.Umask(0)
+	res, err := newTicker(t, bare, wt, flux).Tick(context.Background(), "main")
+	syscall.Umask(old)
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if !res.Integrated {
+		t.Fatalf("expected integrate, got %+v", res)
+	}
+	info, err := os.Stat(filepath.Join(wt, "newfile.txt"))
+	if err != nil {
+		t.Fatalf("reset --hard did not create the file: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm&0o022 != 0o022 {
+		t.Errorf("integrate-recreated file mode = %o, want group+other writable (0666 under umask 0)", perm)
 	}
 }
