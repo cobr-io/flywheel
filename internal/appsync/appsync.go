@@ -20,7 +20,10 @@ package appsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -72,7 +75,12 @@ type Ticker struct {
 // ran, whether the worktree was pushed or fast-forwarded, and whether the
 // tick stalled on a rebase conflict).
 type TickResult struct {
-	Branch string // checked-out branch B this tick observed, or "" if detached/empty (tick skipped)
+	// Branch is the checked-out branch B this tick observed, or "" when the
+	// worktree is detached / on an unborn branch (tick skipped, no error).
+	Branch string
+	// Healed is set when heal_index_if_corrupt rebuilt a corrupt .git/index this
+	// tick (issue #4).
+	Healed bool
 }
 
 // Tick performs one race-free sync pass against trackedBranch, the GR's current
@@ -102,6 +110,14 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 	L, ok := refsSnapshot[B]
 	if !ok || L == "" {
 		return res, nil
+	}
+
+	// Rebuild a corrupt .git/index before any index-reading op (the integrate
+	// path's dirty classification), so a transient corruption self-heals instead
+	// of wedging the loop — run early, matching sync.sh's placement before the
+	// branch-compare block (issue #4).
+	if t.healIndexIfCorrupt(ctx) {
+		res.Healed = true
 	}
 
 	// L and refsSnapshot are the only inputs to every later decision; the
@@ -188,6 +204,64 @@ func (t *Ticker) revParse(ctx context.Context, rev string) (string, error) {
 // `if git merge-base --is-ancestor ...`.
 func (t *Ticker) isAncestor(ctx context.Context, a, b string) bool {
 	return t.run(ctx, "merge-base", "--is-ancestor", a, b) == nil
+}
+
+// healIndexIfCorrupt rebuilds a corrupt/unreadable .git/index from HEAD, port
+// of sync.sh's heal_index_if_corrupt (issue #4). The worktree's .git is a host
+// bind-mount written by both this container (root) and the developer; a
+// concurrent or interrupted index write can truncate/garble .git/index, and git
+// then aborts every index-reading op with "index file corrupt". Left unhealed
+// that wedges the loop (the dirty guard misreads the error as uncommitted work).
+// Rebuilding only rewrites .git/index from the committed tree — working-tree
+// file *contents* are untouched. Best-effort: it never errors, so the tick
+// continues and retries. Returns whether a rebuild was attempted.
+func (t *Ticker) healIndexIfCorrupt(ctx context.Context) bool {
+	// ls-files reads the index and nothing else; a clean index (nil err)
+	// short-circuits. Only the specific corruption messages trigger a rebuild —
+	// any other failure (e.g. the worktree isn't mounted yet) is left for the
+	// tick's normal retry paths, exactly as sync.sh's case default.
+	if _, err := t.output(ctx, "ls-files"); err == nil || !isIndexCorrupt(err) {
+		return false
+	}
+	// Resolve the real index path (`--git-path` is correct even for linked
+	// worktrees, where .git is a file) and delete it, then rebuild from HEAD.
+	if idx, err := t.output(ctx, "rev-parse", "--git-path", "index"); err == nil {
+		_ = os.Remove(strings.TrimSpace(idx))
+	}
+	if err := t.run(ctx, "reset", "-q"); err != nil {
+		t.logf("heal index: rebuild failed (no commits yet?); will retry next tick: %v", err)
+	} else {
+		t.logf("heal index: .git/index was corrupt; rebuilt from HEAD (working-tree files preserved)")
+	}
+	return true
+}
+
+// isIndexCorrupt matches the exact git error strings sync.sh keyed on, so a
+// corrupt index is healed but an unrelated ls-files failure is not.
+func isIndexCorrupt(err error) bool {
+	m := err.Error()
+	return strings.Contains(m, "index file corrupt") ||
+		strings.Contains(m, "index file smaller than expected") ||
+		strings.Contains(m, "bad index file") ||
+		strings.Contains(m, "unknown index")
+}
+
+// diffQuietCode runs a `git diff [--cached] --quiet` and returns its exit code:
+// 0 (clean), 1 (real changes), or >1 (git error, e.g. an index too corrupt for
+// this round's heal to have rebuilt). Preserving the >1 distinction is the
+// issue-#4 fix: the old `! git diff --quiet` collapsed >1 into "dirty" and
+// stalled forever on a transient corruption. A non-exit failure (context
+// cancelled, git not runnable) is returned as an error for the caller to surface.
+func (t *Ticker) diffQuietCode(ctx context.Context, args ...string) (int, error) {
+	_, err := t.output(ctx, args...)
+	if err == nil {
+		return 0, nil
+	}
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
+		return ee.ExitCode(), nil
+	}
+	return 0, err
 }
 
 func short(sha string) string {

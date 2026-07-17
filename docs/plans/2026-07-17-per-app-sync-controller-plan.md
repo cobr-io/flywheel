@@ -52,7 +52,7 @@ deterministic race tests.
 - [x] Snapshot helpers: `symbolic-ref --short HEAD` (branch `B`; detached →
       skip), `for-each-ref` snapshot of all `refs/heads/*`, resolve
       `L = refs/heads/B`. All later decisions take `L`, never `HEAD`.
-- [ ] Port `heal_index_if_corrupt` (issue #4) and the exit-code-aware dirty
+- [x] Port `heal_index_if_corrupt` (issue #4) and the exit-code-aware dirty
       classification (`diff --quiet` 0/1/>1 semantics).
 - [ ] Branch-follow: when `trackedBranch != B`, `FluxPatcher` ensures the
       `kustomize.toolkit.fluxcd.io/reconcile: disabled` annotation then
