@@ -57,7 +57,7 @@ deterministic race tests.
 - [x] Branch-follow: when `trackedBranch != B`, `FluxPatcher` ensures the
       `kustomize.toolkit.fluxcd.io/reconcile: disabled` annotation then
       patches `spec.ref.branch = B` (monotonic; no LAST_BRANCH state).
-- [ ] Fetch bare `B` (objects only) → remote head `R`; ancestry decisions
+- [x] Fetch bare `B` (objects only) → remote head `R`; ancestry decisions
       against `L`.
 - [ ] Integrate path: dirty-guard → re-verify `symbolic-ref == B` →
       `reset --hard R` → **post-verify** (re-read symbolic-ref + diff ref

@@ -141,6 +141,34 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 		}
 	}
 
+	// Step 3: fetch the bare repo's view of B. Objects only — never a refspec
+	// that updates a local ref — so FETCH_HEAD is the only thing that moves and
+	// no branch ref is rewritten out from under the snapshot.
+	if err := t.run(ctx, "fetch", "--no-tags", t.BareURL, B); err != nil {
+		// The branch is not in the bare repo yet (first push): a plain push
+		// creates it. Wired in the push task.
+		return res, nil
+	}
+	R, err := t.revParse(ctx, "FETCH_HEAD")
+	if err != nil {
+		return res, fmt.Errorf("resolve FETCH_HEAD: %w", err)
+	}
+
+	// Step 4: compare the bare head R against L (the step-1 snapshot of B),
+	// NEVER a re-read of HEAD. This is where sync.sh sampled HEAD and could
+	// apply a stale branch's decision to a worktree a checkout had already moved.
+	switch {
+	case L == R:
+		// idle push-guard — already in sync, nothing to do (issue #6).
+	case t.isAncestor(ctx, R, L):
+		// worktree ahead of bare — push L. Wired in the push task.
+	case t.isAncestor(ctx, L, R):
+		// bare strictly ahead — integrate (the only worktree-mutating path).
+		// Wired in the integrate task.
+	default:
+		// genuine divergence — rebase worktree on R. Wired in the divergence task.
+	}
+
 	return res, nil
 }
 
