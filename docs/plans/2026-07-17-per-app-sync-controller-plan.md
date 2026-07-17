@@ -95,7 +95,7 @@ is functionally complete.
 - [x] Legacy interlock: skip + warn-once while Deployment
       `git-auto-sync-<app>` exists in `BUILDER_NAMESPACE`.
 - [x] Missing worktree / absent GR → requeue with backoff, no crash loops.
-- [ ] Fake-client tests: discovery + URL filtering, RequeueAfter value,
+- [x] Fake-client tests: discovery + URL filtering, RequeueAfter value,
       interlock skip + single warn, missing-worktree backoff, stall requeue.
 - [ ] Wire Reconciler into `cmd/git-auto-sync`; readyz tracks cache sync.
 
