@@ -7,9 +7,10 @@
 // mid-iteration can apply a stale branch's decisions to a worktree that has
 // already moved on, poisoning the bare repo.
 //
-// This file is Phase 1 scaffolding only (see docs/plans/2026-07-17-per-app-sync-
-// controller-plan.md): the manager boots with no Reconciler registered yet.
-// internal/appsync.Ticker (Phase 2) and the Reconciler (Phase 3) land later.
+// See docs/plans/2026-07-17-per-app-sync-controller-plan.md: Phase 1 built
+// this scaffolding, Phase 2 implemented internal/appsync.Ticker, and Phase 3
+// (this file's manager wiring) drives it via internal/appsync.Reconciler,
+// one Ticker per per-app GitRepository discovered in BuilderNamespace.
 //
 // Configuration is entirely via environment (set by the Deployment, mirroring
 // git-deploy-controller's pattern):
@@ -23,7 +24,9 @@
 package main
 
 import (
+	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -38,6 +41,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
+	"github.com/cobr-io/flywheel/internal/appsync"
 	"github.com/cobr-io/flywheel/internal/naming"
 )
 
@@ -102,14 +106,34 @@ func main() {
 		log.Fatalf("unable to start manager: %v", err)
 	}
 
-	// No Reconciler registered yet (Phase 1): the manager starts and idles.
-	// Phase 3 wires internal/appsync's Reconciler here, using workspacesMount,
-	// gitServerURL, poll and maxConcurrent above.
+	rec := &appsync.Reconciler{
+		Client:                  mgr.GetClient(),
+		WorkspacesMount:         workspacesMount,
+		GitServerURLPrefix:      gitServerURL,
+		BuilderNamespace:        builderNamespace,
+		PollInterval:            poll,
+		MaxConcurrentReconciles: maxConcurrent,
+		Logf:                    log.Printf,
+	}
+	if err := rec.SetupWithManager(mgr); err != nil {
+		log.Fatalf("unable to create git-auto-sync reconciler: %v", err)
+	}
 
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		log.Fatalf("unable to set up health check: %v", err)
 	}
-	if err := mgr.AddReadyzCheck("readyz", healthz.Ping); err != nil {
+	// readyz tracks informer-cache sync, not any one app's tick outcome
+	// (design "Error handling / observability"): a single wedged app must
+	// not flip readiness for the whole process, since a pod restart would
+	// just land every app back in the same state. WaitForCacheSync returns
+	// immediately (true) once the initial sync has completed, so this is
+	// cheap on every probe after startup.
+	if err := mgr.AddReadyzCheck("readyz", func(req *http.Request) error {
+		if !mgr.GetCache().WaitForCacheSync(req.Context()) {
+			return fmt.Errorf("informer cache not yet synced")
+		}
+		return nil
+	}); err != nil {
 		log.Fatalf("unable to set up readiness check: %v", err)
 	}
 
