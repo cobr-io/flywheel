@@ -13,6 +13,7 @@ package appsync
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"path/filepath"
 	"strings"
@@ -133,9 +134,27 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 		return ctrl.Result{}, err
 	}
 
-	dir := worktreeDir(r.WorkspacesMount, gr.Spec.URL)
+	// A GitRepository that matched the URL prefix but whose path has no usable
+	// basename (e.g. spec.url == the prefix with nothing after it) can't be
+	// mapped to any worktree directory — a permanent misconfiguration, not a
+	// transient condition the poll interval would ever resolve. Return the
+	// error so controller-runtime backs off this one app with increasing
+	// delay instead of hammering it every PollInterval forever.
+	dir, err := worktreeDir(r.WorkspacesMount, gr.Spec.URL)
+	if err != nil {
+		log.Error(err, "cannot derive a worktree directory from spec.url")
+		return ctrl.Result{}, err
+	}
 	t := r.tickerFor(req.NamespacedName, dir, gr.Spec.URL)
 
+	// A worktree directory that doesn't exist yet (the clone step hasn't run)
+	// or exists but isn't a git repo is NOT a Tick error: Tick's first step
+	// (`git symbolic-ref --short HEAD`) fails exactly the same way a detached
+	// HEAD does — err != nil at the very first check — and Tick treats that
+	// as "nothing to sync yet", returning (TickResult{}, nil). So there is no
+	// special case to write here: the branch below already maps that skip
+	// onto a normal PollInterval requeue, which self-heals as soon as the
+	// worktree appears, with no crash loop and no error in the interim.
 	res, err := t.Tick(ctx, trackedBranch(&gr))
 	if err != nil {
 		log.Error(err, "sync tick failed; backing off this app only", "dir", dir)
@@ -225,8 +244,14 @@ func trackedBranch(gr *sourcev1.GitRepository) string {
 // under mount. This is deliberately the URL's basename, NOT the
 // GitRepository's own metadata.name — the two may differ (the GR is named
 // after the app; its source is the worktree's bare repo, keyed by directory
-// basename — see manifests/per-app-template/gitrepository.yaml.tmpl).
-func worktreeDir(mount, rawURL string) string {
+// basename — see manifests/per-app-template/gitrepository.yaml.tmpl). Errors
+// only on a degenerate basename ("", ".", "/") — a URL with nothing after the
+// GitServerURLPrefix — since joining that with mount would point the Ticker
+// at the mount root itself rather than any one app's worktree.
+func worktreeDir(mount, rawURL string) (string, error) {
 	base := strings.TrimSuffix(path.Base(rawURL), ".git")
-	return filepath.Join(mount, base)
+	if base == "" || base == "." || base == "/" {
+		return "", fmt.Errorf("spec.url %q has no usable path basename", rawURL)
+	}
+	return filepath.Join(mount, base), nil
 }
