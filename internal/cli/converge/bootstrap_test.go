@@ -40,8 +40,9 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	// builders-kustomization.yaml: the ghcr.io refs that have a Deployment
-	// under the dev-loop overlay (git-server, image-builder-controller)
-	// rewrite to the resolved name+tag, no k3d-registry form anywhere.
+	// under the dev-loop overlay (git-server, image-builder-controller,
+	// git-deploy-controller, git-auto-sync) rewrite to the resolved
+	// name+tag, no k3d-registry form anywhere.
 	bk := mustRead(t, filepath.Join(dir, "builders-kustomization.yaml"))
 	for _, want := range []string{
 		"newName: flywheel-dev/git-server",
@@ -50,17 +51,22 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 		// Must be rewritten on the Flux path too, or its pod ErrImagePulls the
 		// base ghcr ref while up's dev-loop step applies the local one (two-apply-paths).
 		"newName: flywheel-dev/git-deploy-controller",
+		// git-auto-sync joined this bucket in the Go-port design (its Deployment
+		// moved from the per-app builders tree into dev-loop/base — see
+		// docs/designs/2026-07-17-per-app-sync-controller-design.md); a missing
+		// rewrite here would leave the placeholder tag on the cluster.
+		"newName: flywheel-dev/git-auto-sync",
 	} {
 		if !strings.Contains(bk, want) {
 			t.Errorf("builders-kustomization.yaml missing %q:\n%s", want, bk)
 		}
 	}
-	// git-auto-sync has no Deployment under this overlay, so it must NOT be
-	// rewritten here — its override flows through the per-app builders and the
-	// self sync instead (asserted below). A rewrite entry here would be a
-	// silent no-op.
-	if strings.Contains(bk, "ghcr.io/cobr-io/git-auto-sync") {
-		t.Errorf("builders-kustomization.yaml has a dead git-auto-sync image rewrite:\n%s", bk)
+	// client-builders-kustomization.yaml's images: block is presently empty
+	// (no schema.ImageNames image is per-app-only anymore); assert it stays
+	// that way rather than silently reacquiring a stale rewrite.
+	cbk := mustRead(t, filepath.Join(dir, "client-builders-kustomization.yaml"))
+	if strings.Contains(cbk, "ghcr.io/cobr-io/") {
+		t.Errorf("client-builders-kustomization.yaml should render no image rewrites, got:\n%s", cbk)
 	}
 	// The flywheel-dev-loop Kustomization patches git-server's memory limit so
 	// Flux's reconcile agrees with the step-11a direct apply. cfg leaves
