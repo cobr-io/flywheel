@@ -92,7 +92,7 @@ is functionally complete.
       derivation (URL path basename under `WORKSPACES_MOUNT`), per-app
       Ticker cache, `RequeueAfter = POLL_INTERVAL`,
       `MaxConcurrentReconciles = MAX_CONCURRENT`.
-- [ ] Legacy interlock: skip + warn-once while Deployment
+- [x] Legacy interlock: skip + warn-once while Deployment
       `git-auto-sync-<app>` exists in `BUILDER_NAMESPACE`.
 - [ ] Missing worktree / absent GR → requeue with backoff, no crash loops.
 - [ ] Fake-client tests: discovery + URL filtering, RequeueAfter value,

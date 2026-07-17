@@ -20,6 +20,7 @@ import (
 	"time"
 
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	appsv1 "k8s.io/api/apps/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -31,6 +32,15 @@ import (
 // rebase conflict) — parity with sync.sh's 30s sleep on the same condition
 // (design step 7 / plan Q4).
 const defaultStallInterval = 30 * time.Second
+
+// legacyDeploymentPrefix names the per-app git-auto-sync sidecar Deployment
+// this controller replaces: `git-auto-sync-<gr.Name>` in BuilderNamespace
+// (manifests/per-app-template/git-auto-sync.yaml.tmpl — deleted for new apps
+// in Phase 4, but still present in any client repo that hasn't migrated yet).
+// Note this is keyed by the GitRepository's metadata.name (the app name), NOT
+// the worktree basename worktreeDir derives from spec.url — the legacy
+// template names the Deployment after AppName, same as the GR itself.
+const legacyDeploymentPrefix = "git-auto-sync-"
 
 // Reconciler drives one Ticker per per-app GitRepository in BuilderNamespace
 // (design "Reconciler on per-app GitRepositories"). The controller-runtime
@@ -68,6 +78,7 @@ type Reconciler struct {
 
 	mu      sync.Mutex
 	tickers map[types.NamespacedName]*Ticker
+	warned  map[types.NamespacedName]bool // legacy-interlock warn-once, forever
 }
 
 // SetupWithManager registers the Reconciler to watch GitRepository objects,
@@ -100,6 +111,26 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 
 	if !strings.HasPrefix(gr.Spec.URL, r.GitServerURLPrefix) {
 		return ctrl.Result{}, nil
+	}
+
+	// Legacy interlock (design "Legacy interlock"): a Deployment from the old
+	// bash sidecar still exists for this app. Two writers on one worktree is
+	// the exact hazard this controller exists to remove, so skip entirely
+	// until the client repo's migration deletes builders/base/<app>/
+	// git-auto-sync.yaml (Flux prunes the Deployment). Warn once so the
+	// operator can see WHY an app isn't being driven by the new controller,
+	// without spamming a line every poll interval forever.
+	depName := legacyDeploymentPrefix + gr.Name
+	var dep appsv1.Deployment
+	switch err := r.Get(ctx, types.NamespacedName{Namespace: r.BuilderNamespace, Name: depName}, &dep); {
+	case err == nil:
+		if r.markWarnedOnce(req.NamespacedName) {
+			log.Info("legacy git-auto-sync sidecar Deployment still present; skipping until it is removed from the gitops repo",
+				"deployment", depName)
+		}
+		return ctrl.Result{RequeueAfter: r.PollInterval}, nil
+	case !apierrors.IsNotFound(err):
+		return ctrl.Result{}, err
 	}
 
 	dir := worktreeDir(r.WorkspacesMount, gr.Spec.URL)
@@ -151,6 +182,23 @@ func (r *Reconciler) appLogf(name string) func(string, ...any) {
 	return func(format string, args ...any) {
 		r.Logf(name+": "+format, args...)
 	}
+}
+
+// markWarnedOnce records that the legacy-interlock warning has fired for key
+// and reports whether this call is the first (i.e. whether the caller should
+// actually log). Forever-once: once warned, an app never warns again for the
+// life of this process, even if the Deployment flaps in and out of existence.
+func (r *Reconciler) markWarnedOnce(key types.NamespacedName) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.warned == nil {
+		r.warned = make(map[types.NamespacedName]bool)
+	}
+	if r.warned[key] {
+		return false
+	}
+	r.warned[key] = true
+	return true
 }
 
 func (r *Reconciler) stallInterval() time.Duration {
