@@ -62,7 +62,7 @@ deterministic race tests.
 - [x] Integrate path: dirty-guard → re-verify `symbolic-ref == B` →
       `reset --hard R` → **post-verify** (re-read symbolic-ref + diff ref
       snapshot; roll back any moved ref ≠ `refs/heads/B`, abort tick).
-- [ ] Push path: `push --force-with-lease=B:R <url> L:refs/heads/B`; plain
+- [x] Push path: `push --force-with-lease=B:R <url> L:refs/heads/B`; plain
       push fallback for a brand-new bare branch.
 - [ ] Divergence path: rebase; on conflict abort + loud log; tick returns a
       stall marker → reconciler requeues at ~30s (Q4 parity).

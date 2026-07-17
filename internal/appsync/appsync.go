@@ -87,6 +87,10 @@ type TickResult struct {
 	// requeues normally; it is surfaced here for observability, not returned.
 	Followed  bool
 	FollowErr error
+	// Pushed is set when the worktree's commits were pushed to the bare repo:
+	// worktree-ahead, a successful divergence rebase, or a brand-new-branch
+	// create.
+	Pushed bool
 	// Integrated is set when the bare repo was strictly ahead and the worktree
 	// was fast-forwarded onto it (reset --hard R).
 	Integrated bool
@@ -153,8 +157,14 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 	// that updates a local ref — so FETCH_HEAD is the only thing that moves and
 	// no branch ref is rewritten out from under the snapshot.
 	if err := t.run(ctx, "fetch", "--no-tags", t.BareURL, B); err != nil {
-		// The branch is not in the bare repo yet (first push): a plain push
-		// creates it. Wired in the push task.
+		// The branch is not in the bare repo yet (first push): a plain push of
+		// the explicit sha L creates it. sync.sh parity, plus a poke (tail) so
+		// Flux sees the branch's first appearance now.
+		if perr := t.pushExplicit(ctx, B, L, ""); perr != nil {
+			t.logf("create branch %s in bare: %v", B, perr)
+			return res, nil
+		}
+		res.Pushed = true
 		return res, nil
 	}
 	R, err := t.revParse(ctx, "FETCH_HEAD")
@@ -169,7 +179,12 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 	case L == R:
 		// idle push-guard — already in sync, nothing to do (issue #6).
 	case t.isAncestor(ctx, R, L):
-		// worktree ahead of bare — push L. Wired in the push task.
+		// worktree ahead of bare — push the explicit sha L, leasing against R.
+		if err := t.pushExplicit(ctx, B, L, R); err != nil {
+			t.logf("push %s: %v", B, err) // warn-and-continue, sync.sh parity
+		} else {
+			res.Pushed = true
+		}
 	case t.isAncestor(ctx, L, R):
 		// bare strictly ahead — integrate (the only worktree-mutating path).
 		res, err = t.integrate(ctx, B, L, R, refsSnapshot, res)
@@ -270,6 +285,31 @@ func (t *Ticker) integrate(ctx context.Context, B, L, R string, snap map[string]
 	// the fast-forward integrated cleanly.
 	res.Integrated = true
 	return res, nil
+}
+
+// pushExplicit pushes the explicit sha (NOT a ref name) to the bare repo's
+// branch, so a state change after the step-1 snapshot cannot substitute content
+// (design step 5 — the source refspec is the sha L captured up front, not
+// whatever refs/heads/B happens to be by the time the push runs). expect is the
+// bare head the force-with-lease guards against; "" pushes plain (a brand-new
+// branch has no remote ref to lease). A lease miss or other failure retries
+// plain, matching sync.sh's fallback. The developer's git hooks are disabled —
+// they must not run in the container.
+func (t *Ticker) pushExplicit(ctx context.Context, branch, sha, expect string) error {
+	dst := sha + ":refs/heads/" + branch
+	args := []string{"-c", "core.hooksPath=/dev/null", "push"}
+	if expect != "" {
+		args = append(args, "--force-with-lease="+branch+":"+expect)
+	}
+	args = append(args, t.BareURL, dst)
+	if err := t.run(ctx, args...); err == nil {
+		return nil
+	} else if expect == "" {
+		return err // already a plain push — nothing to fall back to
+	}
+	// Lease miss / brand-new remote ref (nothing to compare the lease against):
+	// retry plain, which creates or force-updates the branch.
+	return t.run(ctx, "-c", "core.hooksPath=/dev/null", "push", t.BareURL, dst)
 }
 
 // run/output duplicate internal/selfsync's Worktree helpers of the same name
