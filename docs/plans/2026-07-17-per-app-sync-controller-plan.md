@@ -18,7 +18,7 @@ selfsync (Q2), new nightly-only `scenario-6` (Q3), 30s conflict-stall requeue
 `cmd/git-auto-sync` exists and builds into the existing image lane; no
 behavior yet.
 
-- [ ] `cmd/git-auto-sync/main.go`: env config (`WORKSPACES_MOUNT`,
+- [x] `cmd/git-auto-sync/main.go`: env config (`WORKSPACES_MOUNT`,
       `GIT_SERVER_URL`, `BUILDER_NAMESPACE`, `POLL_INTERVAL`,
       `MAX_CONCURRENT`, `HEALTH_PROBE_ADDR` — defaults per design),
       `syscall.Umask(0)` first, controller-runtime manager with cache scoped
