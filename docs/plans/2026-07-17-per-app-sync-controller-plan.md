@@ -173,3 +173,11 @@ branch; PR merged.
   mutates the worktree without the post-verify guard (design had declared
   integrate the only mutating path); extended the shared post-verify to the
   rebase path + race test (e). User approved.
+- 2026-07-17 — PR #115's per-PR e2e caught a Phase-4 regression: emptying the
+  client-builders images bucket rendered a bare `images:` key (YAML null),
+  which the Flux Kustomization CRD rejects — the whole client-builders
+  Kustomization was silently dropped from the bootstrap apply (up only WARNs)
+  and no per-app builders ever reconciled. Fixed by guarding the template
+  (`{{ if }}` omits the key when empty) + a render-test assertion; the
+  template's old "(empty-safe)" claim was untested folklore. First three
+  e2e-full dispatches were on the broken sha and failed; re-dispatched.

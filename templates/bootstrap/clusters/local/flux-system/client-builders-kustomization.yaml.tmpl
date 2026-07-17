@@ -35,10 +35,16 @@ spec:
   # Which images land here vs. the flywheel-dev-loop Kustomization (and why) is
   # decided by the bootstrapImageOwners table in
   # internal/cli/converge/bootstrap.go; this template ranges over the
-  # .ClientBuilderImages slice that table produces (empty-safe).
+  # .ClientBuilderImages slice that table produces. The whole `images:` key is
+  # OMITTED when the slice is empty: a bare `images:` parses as YAML null, and
+  # the Flux Kustomization CRD rejects an explicit null for the array field
+  # ("spec.images in body must be of type array"), which silently dropped this
+  # entire Kustomization from the bootstrap apply.
+{{- if .ClientBuilderImages }}
   images:
 {{- range .ClientBuilderImages }}
     - name: ghcr.io/cobr-io/{{ .Name }}
       newName: {{ .ImageName }}
       newTag: {{ .ImageTag }}
+{{- end }}
 {{- end }}

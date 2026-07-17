@@ -3,6 +3,7 @@ package converge
 import (
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -61,12 +62,21 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 			t.Errorf("builders-kustomization.yaml missing %q:\n%s", want, bk)
 		}
 	}
-	// client-builders-kustomization.yaml's images: block is presently empty
+	// client-builders-kustomization.yaml's images bucket is presently empty
 	// (no schema.ImageNames image is per-app-only anymore); assert it stays
 	// that way rather than silently reacquiring a stale rewrite.
 	cbk := mustRead(t, filepath.Join(dir, "client-builders-kustomization.yaml"))
 	if strings.Contains(cbk, "ghcr.io/cobr-io/") {
 		t.Errorf("client-builders-kustomization.yaml should render no image rewrites, got:\n%s", cbk)
+	}
+	// With the bucket empty the `images:` KEY must be omitted entirely, not
+	// rendered bare: a bare `images:` parses as YAML null, the Flux CRD rejects
+	// an explicit null for the array ("spec.images in body must be of type
+	// array"), and the bootstrap apply then silently drops the whole
+	// client-builders Kustomization — no per-app builders ever reconcile
+	// (caught live by PR #115's per-PR e2e).
+	if regexp.MustCompile(`(?m)^\s*images:`).MatchString(cbk) {
+		t.Errorf("client-builders-kustomization.yaml renders a bare images: key (YAML null; Flux CRD rejects it):\n%s", cbk)
 	}
 	// The flywheel-dev-loop Kustomization patches git-server's memory limit so
 	// Flux's reconcile agrees with the step-11a direct apply. cfg leaves
