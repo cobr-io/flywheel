@@ -88,7 +88,7 @@ including all four race cases.
 The controller discovers apps from GitRepositories and drives Ticker; binary
 is functionally complete.
 
-- [ ] `Reconciler`: URL prefix filter (`GIT_SERVER_URL`-based, Q1), worktree
+- [x] `Reconciler`: URL prefix filter (`GIT_SERVER_URL`-based, Q1), worktree
       derivation (URL path basename under `WORKSPACES_MOUNT`), per-app
       Ticker cache, `RequeueAfter = POLL_INTERVAL`,
       `MaxConcurrentReconciles = MAX_CONCURRENT`.

@@ -51,6 +51,19 @@ const DeployBranch = "flywheel/local-deploy"
 // by scripts/git-auto-sync/sync.sh (bash copy).
 const ReconcileRequestAnnotation = "reconcile.fluxcd.io/requestedAt"
 
+// KustomizeReconcileDisabledAnnotation, set to KustomizeReconcileDisabledValue,
+// stops kustomize-controller from reconciling (and so re-applying a stale
+// spec.ref.branch from the source manifest over) a GitRepository that is
+// patched imperatively instead — the per-app branch-follow race (design doc
+// 2026-07-17-per-app-sync-controller-design.md, Open Issue #11). Present in
+// the source manifest it also blocks Flux's own creation/prune of the
+// resource, so it must only ever be added after first apply. Also used by
+// scripts/git-auto-sync/sync.sh (bash copy).
+const (
+	KustomizeReconcileDisabledAnnotation = "kustomize.toolkit.fluxcd.io/reconcile"
+	KustomizeReconcileDisabledValue      = "disabled"
+)
+
 // FluxNamespace is the Flux install namespace. It is fixed by convention,
 // independent of the client-configurable flywheel/apps namespaces.
 const FluxNamespace = "flux-system"
