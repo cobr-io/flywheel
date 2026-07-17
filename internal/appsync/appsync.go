@@ -251,7 +251,7 @@ func (t *Ticker) integrate(ctx context.Context, B, L, R string, snap map[string]
 		// (at R) back over R's commits to L. Once the developer commits, the
 		// worktree has a local commit ahead and the next tick integrates via the
 		// dirty-safe divergence rebase instead. sync.sh parity (its `continue`).
-		t.logf("integrate %s: bare advanced to %s but worktree has uncommitted changes; NOT hard-resetting (commit to integrate)", B, short(R))
+		t.logf("integrate %s: bare advanced to %s but worktree (at %s) has uncommitted changes; NOT hard-resetting (commit to integrate)", B, short(R), short(L))
 		return res, nil
 	}
 
@@ -347,8 +347,10 @@ func (t *Ticker) pushExplicit(ctx context.Context, branch, sha, expect string) e
 	} else if expect == "" {
 		return err // already a plain push — nothing to fall back to
 	}
-	// Lease miss / brand-new remote ref (nothing to compare the lease against):
-	// retry plain, which creates or force-updates the branch.
+	// Lease miss / brand-new remote ref (nothing for the lease to compare
+	// against): retry plain. A plain push only creates the branch or
+	// fast-forwards it — a non-fast-forward is rejected by the remote, so this
+	// fallback can never clobber the commits the lease was meant to protect.
 	return t.run(ctx, "-c", "core.hooksPath=/dev/null", "push", t.BareURL, dst)
 }
 
