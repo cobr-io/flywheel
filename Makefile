@@ -51,21 +51,21 @@ uninstall:
 	@INSTALL_DIR="$(GOBIN)" USE_SUDO=false bash uninstall.sh
 
 ## images: build the four runtime images as flywheel-dev/<name>:$(IMAGE_TAG)
-# The two controller images COPY a host-built binary instead of compiling Go
+# The three controller images COPY a host-built binary instead of compiling Go
 # in-image (issue #46 — the in-image build compiled under QEMU at release). We
 # cross-compile them for GOOS=linux/$(host arch) — matching docker's default
 # build platform here — into a throwaway context dir and build from that; the
-# script-only images (git-server, git-auto-sync) still build from the repo root.
+# script-only image (git-server) still builds from the repo root.
 images:
 	@tag="$(IMAGE_TAG)"; \
 	ctx="$$(mktemp -d)"; trap 'rm -rf "$$ctx"' EXIT; \
-	for c in image-builder-controller git-deploy-controller; do \
+	for c in image-builder-controller git-deploy-controller git-auto-sync; do \
 		CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o "$$ctx/$$c" "./cmd/$$c"; \
 	done; \
 	for img in $(IMAGES); do \
 		echo "==> building flywheel-dev/$$img:$$tag"; \
 		case "$$img" in \
-			image-builder-controller|git-deploy-controller) bctx="$$ctx" ;; \
+			image-builder-controller|git-deploy-controller|git-auto-sync) bctx="$$ctx" ;; \
 			*) bctx="." ;; \
 		esac; \
 		docker build -q -t "flywheel-dev/$$img:$$tag" -f "Dockerfile.$$img" "$$bctx" >/dev/null; \

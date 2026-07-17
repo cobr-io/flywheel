@@ -31,7 +31,7 @@ behavior yet.
 - [x] `Dockerfile.git-auto-sync`: binary-COPY pattern (issue #46 style like
       the other controllers) — keep `git`, drop `kubectl` and the sync.sh
       COPY. (sync.sh itself is deleted in Phase 4.)
-- [ ] `Makefile`: move `git-auto-sync` from the script-only bucket into the
+- [x] `Makefile`: move `git-auto-sync` from the script-only bucket into the
       cross-compiled controllers loop (`go build ./cmd/git-auto-sync` into
       the throwaway context).
 - [ ] `.goreleaser.yaml`: new build id for `cmd/git-auto-sync`; switch both
