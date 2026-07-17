@@ -99,6 +99,10 @@ type TickResult struct {
 	// that ref was restored from the step-1 snapshot and the tick aborted (no
 	// push, no poke). Near-never in production; logged at WARNING.
 	RolledBack bool
+	// Stalled is set when a genuine divergence hit a rebase conflict: the rebase
+	// was aborted, the worktree left pristine, and the reconciler should requeue
+	// on the long stall interval (design step 7 / plan Q4). No push, no poke.
+	Stalled bool
 }
 
 // Tick performs one race-free sync pass against trackedBranch, the GR's current
@@ -192,7 +196,11 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 			return res, err
 		}
 	default:
-		// genuine divergence — rebase worktree on R. Wired in the divergence task.
+		// genuine divergence (neither ancestor) — rebase worktree on R.
+		res, err = t.rebaseDivergence(ctx, B, R, res)
+		if err != nil {
+			return res, err
+		}
 	}
 
 	return res, nil
@@ -310,6 +318,44 @@ func (t *Ticker) pushExplicit(ctx context.Context, branch, sha, expect string) e
 	// Lease miss / brand-new remote ref (nothing to compare the lease against):
 	// retry plain, which creates or force-updates the branch.
 	return t.run(ctx, "-c", "core.hooksPath=/dev/null", "push", t.BareURL, dst)
+}
+
+// rebaseDivergence handles genuine divergence (neither L nor R is an ancestor of
+// the other): replay the worktree's unique commits on top of R. A conflict means
+// the developer touched the same lines an out-of-band bare update did — abort,
+// log the resolve-manually instructions, and mark the tick stalled (the
+// reconciler requeues on the long interval; sync.sh's 30s sleep). On success the
+// worktree advanced to a new head on top of R; push that explicit sha (a
+// fast-forward from R, leased against R). Never pokes — the caller's poke rule
+// fires on res.Pushed.
+func (t *Ticker) rebaseDivergence(ctx context.Context, B, R string, res TickResult) (TickResult, error) {
+	// A checkout landing between the compare and here would make `git rebase`
+	// replay onto the wrong branch; re-verify first (once it starts, git itself
+	// refuses a checkout while a rebase is in progress).
+	if cur, err := t.symbolicRef(ctx); err != nil || cur != B {
+		t.logf("divergence %s: worktree switched to %q before rebase; skipping", B, cur)
+		return res, nil
+	}
+	t.logf("rebasing %s on %s", B, short(R))
+	if err := t.run(ctx, "rebase", R); err != nil {
+		_ = t.run(ctx, "rebase", "--abort")
+		t.logf("REBASE CONFLICT: %s and the bare repo diverge.", B)
+		t.logf("  Resolve manually: cd %s && git pull --rebase %s %s", t.Dir, t.BareURL, B)
+		res.Stalled = true
+		return res, nil
+	}
+	// The rebase advanced refs/heads/B to a new head; read the NAMED ref (never
+	// HEAD) and push that explicit sha — a fast-forward from R.
+	head, err := t.revParse(ctx, "refs/heads/"+B)
+	if err != nil {
+		return res, fmt.Errorf("resolve %s after rebase: %w", B, err)
+	}
+	if err := t.pushExplicit(ctx, B, head, R); err != nil {
+		t.logf("push %s after rebase: %v", B, err) // warn-and-continue, sync.sh parity
+		return res, nil
+	}
+	res.Pushed = true
+	return res, nil
 }
 
 // run/output duplicate internal/selfsync's Worktree helpers of the same name

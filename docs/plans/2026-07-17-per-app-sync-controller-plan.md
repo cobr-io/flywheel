@@ -64,7 +64,7 @@ deterministic race tests.
       snapshot; roll back any moved ref ≠ `refs/heads/B`, abort tick).
 - [x] Push path: `push --force-with-lease=B:R <url> L:refs/heads/B`; plain
       push fallback for a brand-new bare branch.
-- [ ] Divergence path: rebase; on conflict abort + loud log; tick returns a
+- [x] Divergence path: rebase; on conflict abort + loud log; tick returns a
       stall marker → reconciler requeues at ~30s (Q4 parity).
 - [ ] Reconcile poke: `reconcile.fluxcd.io/requestedAt` on the GR whenever
       the bare head changed (push or integrated fast-forward) — mirror
