@@ -70,9 +70,9 @@ type Ticker struct {
 	Logf func(string, ...any) // optional
 
 	// testHook is a test-only injection point (nil in production), invoked at
-	// exactly three stages — "post-snapshot", "pre-reset", "post-reset" — so
-	// race tests can land a `git checkout` in the precise window each guard
-	// defends against.
+	// exactly four stages — "post-snapshot", "pre-reset", "post-reset",
+	// "pre-rebase" — so race tests can land a `git checkout` in the precise
+	// window each guard defends against.
 	testHook func(stage string)
 }
 
@@ -211,7 +211,7 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 		}
 	default:
 		// genuine divergence (neither ancestor) — rebase worktree on R.
-		res, err = t.rebaseDivergence(ctx, B, R, res)
+		res, err = t.rebaseDivergence(ctx, B, refsSnapshot, R, res)
 		if err != nil {
 			return res, err
 		}
@@ -353,29 +353,63 @@ func (t *Ticker) pushExplicit(ctx context.Context, branch, sha, expect string) e
 }
 
 // rebaseDivergence handles genuine divergence (neither L nor R is an ancestor of
-// the other): replay the worktree's unique commits on top of R. A conflict means
-// the developer touched the same lines an out-of-band bare update did — abort,
-// log the resolve-manually instructions, and mark the tick stalled (the
-// reconciler requeues on the long interval; sync.sh's 30s sleep). On success the
-// worktree advanced to a new head on top of R; push that explicit sha (a
-// fast-forward from R, leased against R). Never pokes — the caller's poke rule
-// fires on res.Pushed.
-func (t *Ticker) rebaseDivergence(ctx context.Context, B, R string, res TickResult) (TickResult, error) {
+// the other): replay the worktree's unique commits on top of R. This is a
+// worktree-mutating path — `git rebase` moves whatever branch HEAD points at — so
+// it is guarded exactly like integrate: re-verify HEAD == B, then post-verify
+// (after the rebase) that only refs/heads/B moved, rolling back and aborting
+// otherwise. Without the post-verify a `git checkout` landing between the
+// re-verify and the rebase exec would fast-forward the wrong branch (an ancestor
+// of R) onto R, and the push below would then read the still-unchanged B and
+// force-push it with a lease that MATCHES — rewinding the bare repo over the
+// out-of-band commits (issue #86 through the rebase path; bare repos keep no
+// reflog). A conflict means the developer touched the same lines an out-of-band
+// bare update did: abort, log the resolve-manually instructions, and mark the
+// tick stalled (the reconciler requeues on the long interval; sync.sh's 30s
+// sleep). On success push the rebased head — a fast-forward from R, leased
+// against R. Never pokes — the caller's poke rule fires on res.Pushed.
+func (t *Ticker) rebaseDivergence(ctx context.Context, B string, snap map[string]string, R string, res TickResult) (TickResult, error) {
 	// A checkout landing between the compare and here would make `git rebase`
-	// replay onto the wrong branch; re-verify first (once it starts, git itself
-	// refuses a checkout while a rebase is in progress).
+	// replay onto the wrong branch; re-verify first, and the post-verify below
+	// closes the residual window (a checkout after this check but before the
+	// rebase exec; once the rebase starts, git itself refuses a checkout).
 	if cur, err := t.symbolicRef(ctx); err != nil || cur != B {
 		t.logf("divergence %s: worktree switched to %q before rebase; skipping", B, cur)
 		return res, nil
 	}
+
+	t.hook("pre-rebase")
+
 	t.logf("rebasing %s on %s", B, short(R))
 	if err := t.run(ctx, "rebase", R); err != nil {
 		_ = t.run(ctx, "rebase", "--abort")
 		t.logf("REBASE CONFLICT: %s and the bare repo diverge.", B)
 		t.logf("  Resolve manually: cd %s && git pull --rebase %s %s", t.Dir, t.BareURL, B)
+		// The abort restored pre-rebase state, so post-verify should pass; run it
+		// anyway for uniformity — it also catches a checkout that raced the abort.
+		aborted, rolled, verr := t.postVerify(ctx, B, snap)
+		if verr != nil {
+			return res, verr
+		}
+		if aborted {
+			res.RolledBack = rolled > 0
+			return res, nil
+		}
 		res.Stalled = true
 		return res, nil
 	}
+
+	// The rebase mutated the worktree — post-verify BEFORE reading refs/heads/B or
+	// pushing, exactly like integrate. If a checkout raced the rebase, the wrong
+	// branch moved; roll it back and abort with no push, no poke.
+	aborted, rolled, err := t.postVerify(ctx, B, snap)
+	if err != nil {
+		return res, err
+	}
+	if aborted {
+		res.RolledBack = rolled > 0
+		return res, nil
+	}
+
 	// The rebase advanced refs/heads/B to a new head; read the NAMED ref (never
 	// HEAD) and push that explicit sha — a fast-forward from R.
 	head, err := t.revParse(ctx, "refs/heads/"+B)
@@ -449,8 +483,8 @@ func (t *Ticker) logf(format string, args ...any) {
 // hook invokes the test-only injection point (nil in production) at the named
 // stage. Race tests use it to land a `git checkout` at the exact window each of
 // the tick's guards defends: "post-snapshot" (snapshot taken, no decision yet),
-// "pre-reset" (re-verify passed, about to mutate), "post-reset" (mutated, about
-// to post-verify).
+// "pre-reset" and "pre-rebase" (re-verify passed, about to mutate the worktree),
+// "post-reset" (mutated, about to post-verify).
 func (t *Ticker) hook(stage string) {
 	if t.testHook != nil {
 		t.testHook(stage)
