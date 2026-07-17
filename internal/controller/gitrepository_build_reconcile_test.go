@@ -53,6 +53,17 @@ func gitRepoWithArtifact(name string, ts int64) *sourcev1.GitRepository {
 	}
 }
 
+// gitRepoTrackingBranch is gitRepoWithArtifact plus an explicit spec.ref.branch
+// (trackedBranch) and an artifact whose revision is on artifactBranch. It models
+// the stale-branch race: git-auto-sync has moved spec.ref.branch to trackedBranch
+// while Flux's source still presents an artifact from artifactBranch.
+func gitRepoTrackingBranch(name string, ts int64, trackedBranch, artifactBranch string) *sourcev1.GitRepository {
+	gr := gitRepoWithArtifact(name, ts)
+	gr.Spec.Reference = &sourcev1.GitRepositoryRef{Branch: trackedBranch}
+	gr.Status.Artifact.Revision = artifactBranch + "@sha1:" + reconcileSHA40
+	return gr
+}
+
 func buildConfigCM(repo, buildsYAML string) *corev1.ConfigMap {
 	return &corev1.ConfigMap{
 		ObjectMeta: metav1.ObjectMeta{Name: repo + buildConfigSuffix, Namespace: reconcileAppsNS},
@@ -112,6 +123,83 @@ func TestReconcile_CreatesBuildJob(t *testing.T) {
 	}
 	if jobs[0].Namespace != reconcileControllerNS {
 		t.Errorf("build Job namespace = %q, want %q", jobs[0].Namespace, reconcileControllerNS)
+	}
+}
+
+// TestReconcile_BuildsWhenArtifactBranchMatchesTracked is the branch-tracking
+// happy path: spec.ref.branch and the artifact's branch agree, so the build
+// dispatches normally (regression guard that the stale-branch check does not
+// block legitimate builds on a branch-tracking GitRepository).
+func TestReconcile_BuildsWhenArtifactBranchMatchesTracked(t *testing.T) {
+	const ts = int64(1780399472)
+	const repo = "sample-app"
+
+	c := fake.NewClientBuilder().
+		WithScheme(reconcileScheme(t)).
+		WithObjects(
+			gitRepoTrackingBranch(repo, ts, "main", "main"),
+			buildConfigCM(repo, "builds:\n  - image: sample-app\n"),
+		).
+		Build()
+	r := &GitRepositoryBuildReconciler{Client: c, Config: reconcileConfig()}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: reconcileAppsNS, Name: repo},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if jobs := listBuildJobs(t, c); len(jobs) != 1 {
+		t.Fatalf("expected exactly 1 build Job when branches agree, got %d", len(jobs))
+	}
+}
+
+// TestReconcile_SkipsStaleBranchArtifact locks in the issue #86 / Open Issue #11
+// fix: git-auto-sync has already moved spec.ref.branch to "main", but Flux's
+// source still presents an artifact from the just-abandoned "feat/both" branch.
+// Building it would mint a fresh, higher-`<ts>` tag for the old branch's content
+// that the ImagePolicy (numerical, highest-ts) would then latch onto forever. So
+// no Job is created for the stale revision.
+func TestReconcile_SkipsStaleBranchArtifact(t *testing.T) {
+	const ts = int64(1780399472)
+	const repo = "sample-app"
+
+	c := fake.NewClientBuilder().
+		WithScheme(reconcileScheme(t)).
+		WithObjects(
+			gitRepoTrackingBranch(repo, ts, "main", "feat/both"),
+			buildConfigCM(repo, "builds:\n  - image: sample-app\n"),
+		).
+		Build()
+	r := &GitRepositoryBuildReconciler{Client: c, Config: reconcileConfig()}
+
+	if _, err := r.Reconcile(context.Background(), ctrl.Request{
+		NamespacedName: types.NamespacedName{Namespace: reconcileAppsNS, Name: repo},
+	}); err != nil {
+		t.Fatalf("Reconcile: %v", err)
+	}
+
+	if jobs := listBuildJobs(t, c); len(jobs) != 0 {
+		names := make([]string, 0, len(jobs))
+		for _, j := range jobs {
+			names = append(names, j.Name)
+		}
+		t.Errorf("expected no Job for a stale-branch artifact (tracked=main, artifact=feat/both), got %v", names)
+	}
+}
+
+// TestParseBranch covers the revision-format parsing the stale-branch guard
+// relies on, including the bare-`sha1:` shape that must return "" (guard off).
+func TestParseBranch(t *testing.T) {
+	for _, tc := range []struct{ revision, want string }{
+		{"main@sha1:" + reconcileSHA40, "main"},
+		{"feat/both@sha1:" + reconcileSHA40, "feat/both"},
+		{"sha1:" + reconcileSHA40, ""}, // no branch prefix -> guard disabled
+		{"", ""},
+	} {
+		if got := parseBranch(tc.revision); got != tc.want {
+			t.Errorf("parseBranch(%q) = %q, want %q", tc.revision, got, tc.want)
+		}
 	}
 }
 

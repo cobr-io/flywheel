@@ -1101,6 +1101,22 @@ running on stable releases.
     switches branches *while* IAC is pushing a tag bump to the bare repo,
     what happens? The rebase logic should handle it (the fix is in commit
     `5a999a9` already), but manual stress test before v1.0.
+    - **Image-selection facet — RESOLVED (issue #86).** A second facet
+      surfaced as an intermittent nightly failure of e2e scenario 4: on a
+      worktree switch *back* to `main`, Flux's source can briefly still
+      present the abandoned feature branch's artifact (or a late in-flight
+      reconcile of it lands *after* the new branch's fetch). The build
+      controller then minted a build with a fresh — hence numerically higher
+      — `<ts>` tag for the *old* branch's content; the ImagePolicy
+      (`numerical`, highest-`ts`) latched onto it and never recovered, because
+      the now-idle branch produced no higher-`ts` build to overtake it. Fix:
+      the build controller now refuses to build any artifact whose branch
+      (parsed from the `<branch>@sha1:<sha>` revision) differs from the
+      GitRepository's tracked `spec.ref.branch` — which git-auto-sync moves
+      *monotonically*, so it is the authoritative signal of developer intent,
+      whereas `Status.Artifact` can reorder. See
+      `gitrepository_build_controller.go` (stale-branch guard) and
+      `TestReconcile_SkipsStaleBranchArtifact`.
 12. **Multi-developer age key sharing.** v0.1 generates a per-client age
     key on `flywheel init` and stores it host-only in `~/.config/flywheel/`.
     Teams with multiple developers currently must pass the key around
