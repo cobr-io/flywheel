@@ -1,6 +1,6 @@
 # Design: per-app sync controller (git-auto-sync Go port)
 
-**Status:** draft
+**Status:** accepted
 **Author:** Matthijs van der Kroon (with Claude)
 **Date:** 2026-07-17
 
