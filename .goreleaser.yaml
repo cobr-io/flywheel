@@ -75,6 +75,20 @@ builds:
       - -trimpath
     ldflags:
       - -s -w
+  - id: git-auto-sync
+    main: ./cmd/git-auto-sync
+    binary: git-auto-sync
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w
 
 archives:
   - id: flywheel
@@ -129,8 +143,10 @@ dockers:
       - "--label=org.opencontainers.image.source=https://github.com/cobr-io/flywheel"
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
-    extra_files:
-      - scripts/git-auto-sync
+    # COPY the host-built binary (see the git-auto-sync build) into the
+    # context instead of building Go in-image under QEMU (issue #46).
+    ids:
+      - git-auto-sync
   - id: git-auto-sync-arm64
     image_templates:
       - "ghcr.io/cobr-io/git-auto-sync:{{ .Tag }}-arm64"
@@ -142,8 +158,8 @@ dockers:
       - "--label=org.opencontainers.image.version={{ .Version }}"
       - "--label=org.opencontainers.image.revision={{ .FullCommit }}"
     goarch: arm64
-    extra_files:
-      - scripts/git-auto-sync
+    ids:
+      - git-auto-sync
 
   - id: image-builder-controller-amd64
     image_templates:

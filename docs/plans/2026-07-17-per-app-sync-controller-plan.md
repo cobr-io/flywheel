@@ -34,7 +34,7 @@ behavior yet.
 - [x] `Makefile`: move `git-auto-sync` from the script-only bucket into the
       cross-compiled controllers loop (`go build ./cmd/git-auto-sync` into
       the throwaway context).
-- [ ] `.goreleaser.yaml`: new build id for `cmd/git-auto-sync`; switch both
+- [x] `.goreleaser.yaml`: new build id for `cmd/git-auto-sync`; switch both
       `git-auto-sync-{amd64,arm64}` docker ids from
       `extra_files: scripts/git-auto-sync` to the controller binary pattern.
       Follow `docs/dev/add-controller-image.md`; image name and `{{ .Tag }}`
