@@ -487,6 +487,56 @@ func TestTick_RaceCheckoutAtPreResetRollsBack(t *testing.T) {
 	}
 }
 
+// (e) The rebase path's analogue of (c). Divergence sends the tick into
+// rebaseDivergence; a checkout to `other` (positioned at the pre-divergence base
+// commit, an ancestor of R) lands at pre-rebase, so `git rebase R` fast-forwards
+// the WRONG branch (other) onto R. Post-verify detects it, rolls other back, and
+// aborts. Absent the guard the push would read the unchanged refs/heads/main and
+// force-push it over R with a matching lease — rewinding the bare repo (#86).
+func TestTick_RaceCheckoutAtPreRebaseRollsBack(t *testing.T) {
+	const base = "top\na\nb\nc\nd\ne\nf\ng\nbottom\n"
+	bare := bareRepo(t, base)
+	wt := cloneWorktree(t, bare)
+	testgit.Git(t, wt, "branch", "other") // at the base commit, an ancestor of R
+	writeFile(t, wt, "app.txt", strings.Replace(base, "top\n", "dev-top\n", 1))
+	testgit.Git(t, wt, "commit", "-q", "-am", "dev edits top")
+	R := advanceBare(t, bare, "main", func(dir string) {
+		writeFile(t, dir, "app.txt", strings.Replace(base, "bottom\n", "ci-bottom\n", 1))
+	})
+	otherSHA := localRef(t, wt, "other")
+	mainSHA := localRef(t, wt, "main")
+
+	flux := &fakeFlux{}
+	tk := newTicker(t, bare, wt, flux)
+	tk.testHook = func(stage string) {
+		if stage == "pre-rebase" {
+			testgit.Git(t, wt, "checkout", "-q", "other")
+		}
+	}
+	res, err := tk.Tick(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if !res.RolledBack || res.Pushed || res.Poked || res.Stalled {
+		t.Fatalf("expected post-verify rollback + abort on the rebase path, got %+v", res)
+	}
+	if flux.pokes != 0 {
+		t.Errorf("poisoned rebase tick poked Flux (%d)", flux.pokes)
+	}
+	if got := localRef(t, wt, "other"); got != otherSHA {
+		t.Errorf("the wrong branch was NOT rolled back: other = %s, want its pre-tick sha %s", got, otherSHA)
+	}
+	if got := localRef(t, wt, "main"); got != mainSHA {
+		t.Errorf("refs/heads/main moved unexpectedly: %s -> %s", mainSHA, got)
+	}
+	if got := bareRef(t, bare, "main"); got != R {
+		t.Errorf("bare main was poisoned via the rebase path: %s (want untouched %s)", got, R)
+	}
+	if _, err := os.Stat(filepath.Join(wt, ".git", "rebase-merge")); !os.IsNotExist(err) {
+		t.Errorf("rebase state left behind after the aborted rebase tick")
+	}
+}
+
 // (d) Root-written files stay host-writable. Under umask 0 (what cmd main sets,
 // applied here around the tick since the test binary doesn't run that main), an
 // integrate's reset --hard recreates a file group+other-writable (0666), so the
