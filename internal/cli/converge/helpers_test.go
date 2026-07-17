@@ -1,6 +1,7 @@
 package converge
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"sigs.k8s.io/kustomize/api/krusty"
 	ktypes "sigs.k8s.io/kustomize/api/types"
 	"sigs.k8s.io/kustomize/kyaml/filesys"
+
+	flywheel "github.com/cobr-io/flywheel"
 )
 
 // baseGitServerManifest is a minimal stand-in for manifests/dev-loop/base:
@@ -196,6 +199,57 @@ data:
 	}
 	if !strings.Contains(out, "marker-overlay") {
 		t.Errorf("overlay-only resource missing from render — the overlay is being ignored:\n%s", out)
+	}
+}
+
+// TestApplyDevLoop_RealManifests_RewriteByName confirms the two-apply-paths
+// invariant (docs/plans/2026-07-17-per-app-sync-controller-plan.md Phase 4
+// checkbox 4) against the REAL manifests/dev-loop tree, not a fixture
+// stand-in: renderDevLoopKustomization's `images:` block matches every
+// schema.ImageNames entry by image NAME (`ghcr.io/cobr-io/<name>`), so
+// git-auto-sync.yaml's Deployment — newly added in dev-loop/base alongside
+// git-server, image-builder-controller and git-deploy-controller — gets its
+// placeholder tag rewritten exactly like the others, with no per-image
+// special-casing needed on the SSA direct-apply path (up step 11a). The Flux
+// flywheel-dev-loop Kustomization's spec.images rewrite (the other apply
+// path) is proven equivalent by TestBootstrapImages_TemplateUnionMatchesSchema
+// + TestRenderBootstrap_ResolvesImageRefs: both derive their image list from
+// the same schema.ImageNames / bootstrapImageOwners source, just rendered
+// into a Kustomization's spec.images instead of a kustomize transformer.
+func TestApplyDevLoop_RealManifests_RewriteByName(t *testing.T) {
+	root := t.TempDir()
+	sub, err := fs.Sub(flywheel.Assets, "manifests/dev-loop")
+	if err != nil {
+		t.Fatalf("embed manifests/dev-loop missing: %v", err)
+	}
+	if err := os.CopyFS(root, sub); err != nil {
+		t.Fatalf("copy embedded dev-loop tree: %v", err)
+	}
+
+	// Sibling of base/ and overlays/, exactly like ApplyDevLoop's
+	// os.MkdirTemp(devLoopRoot, ".flywheel-tmp-overlay-").
+	transient := filepath.Join(root, "transient")
+	if err := os.Mkdir(transient, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	refs := map[string]string{
+		"git-server":               "flywheel-dev/git-server:dogfood",
+		"git-auto-sync":            "flywheel-dev/git-auto-sync:dogfood",
+		"image-builder-controller": "flywheel-dev/image-builder-controller:dogfood",
+		"git-deploy-controller":    "flywheel-dev/git-deploy-controller:dogfood",
+	}
+	k := renderDevLoopKustomization(refs, "128Mi")
+	if err := os.WriteFile(filepath.Join(transient, "kustomization.yaml"), []byte(k), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	out := buildKustomizeForTest(t, transient)
+	if !strings.Contains(out, "image: flywheel-dev/git-auto-sync:dogfood") {
+		t.Errorf("git-auto-sync.yaml's placeholder image was not rewritten by name on the real dev-loop tree:\n%s", out)
+	}
+	if strings.Contains(out, "ghcr.io/cobr-io/git-auto-sync:rewritten-by-flywheel-up") {
+		t.Errorf("git-auto-sync.yaml still carries the unrewritten fail-loud placeholder:\n%s", out)
 	}
 }
 
