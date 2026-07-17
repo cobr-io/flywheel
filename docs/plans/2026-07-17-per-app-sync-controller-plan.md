@@ -69,7 +69,7 @@ deterministic race tests.
 - [x] Reconcile poke: `reconcile.fluxcd.io/requestedAt` on the GR whenever
       the bare head changed (push or integrated fast-forward) — mirror
       `naming.ReconcileRequestAnnotation`.
-- [ ] Test-hook seam (`testHook func(stage string)`) at post-snapshot,
+- [x] Test-hook seam (`testHook func(stage string)`) at post-snapshot,
       pre-reset, post-reset.
 - [ ] Unit tests on real on-disk git repos: follow/patch, push-guard idle
       no-op, worktree-ahead push, bare-ahead fast-forward, divergence rebase,

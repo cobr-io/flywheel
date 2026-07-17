@@ -67,6 +67,12 @@ type Ticker struct {
 	ExecTimeout time.Duration
 
 	Logf func(string, ...any) // optional
+
+	// testHook is a test-only injection point (nil in production), invoked at
+	// exactly three stages — "post-snapshot", "pre-reset", "post-reset" — so
+	// race tests can land a `git checkout` in the precise window each guard
+	// defends against.
+	testHook func(stage string)
 }
 
 // TickResult reports what a single Tick did. Phase 1 stub: Tick always
@@ -137,6 +143,8 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 	if !ok || L == "" {
 		return res, nil
 	}
+
+	t.hook("post-snapshot")
 
 	// Rebuild a corrupt .git/index before any index-reading op (the integrate
 	// path's dirty classification), so a transient corruption self-heals instead
@@ -253,10 +261,14 @@ func (t *Ticker) integrate(ctx context.Context, B, L, R string, snap map[string]
 		return res, nil
 	}
 
+	t.hook("pre-reset")
+
 	// Fast-forward the worktree onto the bare head.
 	if err := t.run(ctx, "reset", "--hard", R); err != nil {
 		return res, fmt.Errorf("reset --hard %s: %w", short(R), err)
 	}
+
+	t.hook("post-reset")
 
 	// POST-VERIFY. reset --hard moves whatever branch HEAD points at and rewrites
 	// the worktree; if a checkout won the microsecond window after the re-verify,
@@ -415,6 +427,17 @@ func (t *Ticker) output(ctx context.Context, args ...string) (string, error) {
 func (t *Ticker) logf(format string, args ...any) {
 	if t.Logf != nil {
 		t.Logf(format, args...)
+	}
+}
+
+// hook invokes the test-only injection point (nil in production) at the named
+// stage. Race tests use it to land a `git checkout` at the exact window each of
+// the tick's guards defends: "post-snapshot" (snapshot taken, no decision yet),
+// "pre-reset" (re-verify passed, about to mutate), "post-reset" (mutated, about
+// to post-verify).
+func (t *Ticker) hook(stage string) {
+	if t.testHook != nil {
+		t.testHook(stage)
 	}
 }
 
