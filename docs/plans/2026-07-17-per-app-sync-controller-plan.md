@@ -28,7 +28,7 @@ behavior yet.
 - [x] `internal/appsync` skeleton: `Ticker`, `TickResult`, `FluxPatcher`
       interface, git runner (duplicated from selfsync per Q2) with per-exec
       context timeout (default 30s).
-- [ ] `Dockerfile.git-auto-sync`: binary-COPY pattern (issue #46 style like
+- [x] `Dockerfile.git-auto-sync`: binary-COPY pattern (issue #46 style like
       the other controllers) — keep `git`, drop `kubectl` and the sync.sh
       COPY. (sync.sh itself is deleted in Phase 4.)
 - [ ] `Makefile`: move `git-auto-sync` from the script-only bucket into the

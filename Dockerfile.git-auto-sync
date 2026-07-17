@@ -1,18 +1,26 @@
+# Runtime image for the git-auto-sync controller.
+#
+# No golang build stage: the arm64 variant used to compile the full Go module
+# under QEMU emulation and dominated release wall-clock (issue #46). The binary
+# is now cross-compiled natively on the host (CGO_ENABLED=0, GOOS=linux,
+# per-arch) and passed into the build context, then COPY'd here.
+#   - release:  goreleaser `git-auto-sync` build + docker `ids:` in
+#               .goreleaser.yaml drop the arch-matched binary into the context.
+#   - local/CI: `go build -o <ctx>/git-auto-sync \
+#               ./cmd/git-auto-sync` then `docker build \
+#               -f Dockerfile.git-auto-sync <ctx>`
+#               (see the Makefile `images` target, scripts/e2e.sh, and the CI
+#               workflows).
+#
+# Like git-deploy-controller (and unlike image-builder-controller), this one
+# shells out to `git` against a hostPath-mounted worktree, so it can't use
+# distroless/static — base on debian with git. No kubectl: it talks to the API
+# via the in-cluster Go client (client-go / controller-runtime) instead.
+# Runs as root so it can read/write the developer's hostPath worktrees.
 FROM debian:stable-slim
-
-# Keep kubectl loosely in sync with the k3s_image pin: the default in
-# internal/cli/schema/schema.go (~:75) and the default emitted into
-# templates/client-skeleton/flywheel.yaml.tmpl.
-ARG KUBECTL_VERSION=v1.34.1
-
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git curl ca-certificates && \
-    curl -fsSLO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/$(dpkg --print-architecture)/kubectl" && \
-    install -m 0755 kubectl /usr/local/bin/kubectl && \
-    rm kubectl && \
-    apt-get clean && rm -rf /var/lib/apt/lists/*
-
-COPY scripts/git-auto-sync/sync.sh /usr/local/bin/git-auto-sync.sh
-RUN chmod +x /usr/local/bin/git-auto-sync.sh
-
-CMD ["/usr/local/bin/git-auto-sync.sh"]
+    apt-get install -y --no-install-recommends git ca-certificates && \
+    apt-get clean && rm -rf /var/lib/apt/lists/* && \
+    git config --system --add safe.directory '*'
+COPY git-auto-sync /usr/local/bin/git-auto-sync
+ENTRYPOINT ["/usr/local/bin/git-auto-sync"]
