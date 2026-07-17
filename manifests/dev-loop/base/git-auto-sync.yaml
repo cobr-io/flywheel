@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: git-auto-sync
+  namespace: flywheel-system
+  labels:
+    app: git-auto-sync
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: git-auto-sync
+  template:
+    metadata:
+      labels:
+        app: git-auto-sync
+    spec:
+      serviceAccountName: git-auto-sync
+      containers:
+        - name: controller
+          # Tag is a placeholder: rewritten to the per-client local-registry
+          # ref by `flywheel up` (renderDevLoopKustomization, keyed on
+          # schema.ImageNames) and by the flywheel-dev-loop Kustomization's
+          # spec.images on the Flux path — both match by image NAME, so this
+          # should never reach the cluster. If it does, the rewrite didn't
+          # run — fail loudly instead of silently running a stale pin.
+          image: ghcr.io/cobr-io/git-auto-sync:rewritten-by-flywheel-up
+          imagePullPolicy: IfNotPresent
+          # No env is set: cmd/git-auto-sync's defaults (WORKSPACES_MOUNT,
+          # GIT_SERVER_URL, BUILDER_NAMESPACE) already resolve to the fixed,
+          # non-client-configurable in-cluster values this Deployment lives
+          # under (naming.FlywheelNamespace, naming.GitServerURL) — unlike
+          # git-deploy-controller's REPO_BASE_NAME/DEFAULT_BRANCH, there is no
+          # per-repo value flywheel-config needs to inject here.
+          ports:
+            - containerPort: 8081
+              name: health
+          # Liveness = process up (mirrors git-deploy-controller: a hung git
+          # call against one app must not restart the whole process into the
+          # same stuck state — the per-app backoff lives in the reconciler,
+          # not the pod). Readiness = informer cache synced (cmd/git-auto-sync);
+          # a single wedged app's tick failure does not flip this, since a
+          # restart would just land every app back in the same state.
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8081
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8081
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          volumeMounts:
+            - name: workspaces
+              mountPath: /workspaces
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 200m
+              memory: 128Mi
+      volumes:
+        # The developer's app worktrees, bind-mounted into k3d at /workspaces —
+        # same hostPath every per-app git-auto-sync sidecar used to mount
+        # individually; one shared controller now walks all of them.
+        - name: workspaces
+          hostPath:
+            path: /workspaces
+            type: Directory

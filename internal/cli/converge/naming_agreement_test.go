@@ -98,6 +98,7 @@ func TestNamingAgreement_StaticDevLoopNamespace(t *testing.T) {
 		want string
 	}{
 		{"manifests/dev-loop/base/buildkitd.yaml", "namespace: " + naming.FlywheelNamespace},
+		{"manifests/dev-loop/base/git-auto-sync.yaml", "namespace: " + naming.FlywheelNamespace},
 		{"manifests/dev-loop/base/git-deploy-controller.yaml", "namespace: " + naming.FlywheelNamespace},
 		{"manifests/dev-loop/base/git-server.yaml", "namespace: " + naming.FlywheelNamespace},
 		{"manifests/dev-loop/base/image-builder-controller.yaml", "namespace: " + naming.FlywheelNamespace},
