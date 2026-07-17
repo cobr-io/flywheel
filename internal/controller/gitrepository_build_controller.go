@@ -225,6 +225,34 @@ func (r *GitRepositoryBuildReconciler) Reconcile(ctx context.Context, req ctrl.R
 		log.Info("revision missing sha component", "revision", revision)
 		return ctrl.Result{}, nil
 	}
+
+	// Stale-branch guard (design Open Issue #11: "branch switch with stale IAC
+	// commit in flight"). git-auto-sync moves spec.ref.branch MONOTONICALLY on a
+	// worktree branch switch (e.g. feat/x -> main, and holds), but Flux's source
+	// can still momentarily present the OLD branch's artifact, or a late
+	// in-flight reconcile of the old branch can land its artifact AFTER the new
+	// branch's fetch. Building that stale revision mints a tag with a FRESH (and
+	// therefore higher) `<ts>` prefix for the abandoned branch's content — and
+	// the ImagePolicy selects the numerically-highest `<ts>`, so it would latch
+	// onto the wrong branch's image and never recover (the now-idle new branch
+	// produces no higher-ts build to overtake it). This is exactly the
+	// intermittent scenario-4 nightly failure (issue #86): a checkout back to
+	// main kept serving the just-abandoned feature branch.
+	//
+	// So build only when the artifact's branch matches the branch the
+	// GitRepository is configured to track. spec.ref.branch is the authoritative,
+	// monotonic signal of developer intent (the worktree HEAD), whereas
+	// Status.Artifact can reorder. Guard engages only for branch-tracking
+	// GitRepositories (the dev-loop app repos); a tag/commit/semver ref, or a
+	// revision without a parseable branch, is left to build as before.
+	if ref := gr.Spec.Reference; ref != nil && ref.Branch != "" {
+		if artifactBranch := parseBranch(revision); artifactBranch != "" && artifactBranch != ref.Branch {
+			log.Info("artifact branch does not match tracked branch; skipping stale build",
+				"artifactBranch", artifactBranch, "trackedBranch", ref.Branch, "revision", revision)
+			return ctrl.Result{}, nil
+		}
+	}
+
 	shortSHA := fullSHA[:7]
 	ts := gr.Status.Artifact.LastUpdateTime.Unix()
 
@@ -470,14 +498,22 @@ func (r *GitRepositoryBuildReconciler) reapJobsForRepo(ctx context.Context, repo
 	return nil
 }
 
-// parseSHA extracts the 40-char SHA from Flux's revision format `<branch>@sha1:<full-sha>`.
-func parseSHA(revision string) string {
-	idx := strings.Index(revision, "sha1:")
-	if idx < 0 {
+// parseBranch extracts the branch (or ref) name from Flux's revision format
+// `<branch>@sha1:<full-sha>`. Returns "" when the revision has no `<branch>@`
+// prefix (some ref types produce a bare `sha1:<sha>`), so the stale-branch
+// guard treats an unparseable branch as "don't apply the guard".
+func parseBranch(revision string) string {
+	branch, _, found := strings.Cut(revision, "@sha1:")
+	if !found {
 		return ""
 	}
-	sha := revision[idx+len("sha1:"):]
-	if len(sha) != 40 {
+	return branch
+}
+
+// parseSHA extracts the 40-char SHA from Flux's revision format `<branch>@sha1:<full-sha>`.
+func parseSHA(revision string) string {
+	_, sha, found := strings.Cut(revision, "sha1:")
+	if !found || len(sha) != 40 {
 		return ""
 	}
 	return sha
