@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -75,11 +76,12 @@ type Ticker struct {
 	testHook func(stage string)
 }
 
-// TickResult reports what a single Tick did. Phase 1 stub: Tick always
-// returns the zero value. Phase 2 populates it per the design's tick
-// algorithm (the checked-out branch observed, whether the branch-follow patch
-// ran, whether the worktree was pushed or fast-forwarded, and whether the
-// tick stalled on a rebase conflict).
+// TickResult reports what a single Tick did: the checked-out branch observed,
+// whether the branch-follow patch ran, whether the worktree was pushed or
+// fast-forwarded, whether a post-verify rollback fired, and whether the tick
+// stalled on a rebase conflict. A stalled tick returns (result, nil) with
+// Stalled set so the reconciler can pick a long requeue without treating it as
+// an error.
 type TickResult struct {
 	// Branch is the checked-out branch B this tick observed, or "" when the
 	// worktree is detached / on an unborn branch (tick skipped, no error).
@@ -509,8 +511,14 @@ func (t *Ticker) healIndexIfCorrupt(ctx context.Context) bool {
 	}
 	// Resolve the real index path (`--git-path` is correct even for linked
 	// worktrees, where .git is a file) and delete it, then rebuild from HEAD.
+	// --git-path prints relative to the git invocation's cwd (t.Dir), so anchor
+	// it there — os.Remove runs in the process cwd, not t.Dir.
 	if idx, err := t.output(ctx, "rev-parse", "--git-path", "index"); err == nil {
-		_ = os.Remove(strings.TrimSpace(idx))
+		p := strings.TrimSpace(idx)
+		if !filepath.IsAbs(p) {
+			p = filepath.Join(t.Dir, p)
+		}
+		_ = os.Remove(p)
 	}
 	if err := t.run(ctx, "reset", "-q"); err != nil {
 		t.logf("heal index: rebuild failed (no commits yet?); will retry next tick: %v", err)
