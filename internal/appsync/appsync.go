@@ -272,38 +272,14 @@ func (t *Ticker) integrate(ctx context.Context, B, L, R string, snap map[string]
 
 	t.hook("post-reset")
 
-	// POST-VERIFY. reset --hard moves whatever branch HEAD points at and rewrites
-	// the worktree; if a checkout won the microsecond window after the re-verify,
-	// it moved the WRONG branch. The only ref allowed to differ from the step-1
-	// snapshot is refs/heads/B (now == R). Restore any other moved ref from the
-	// snapshot and abort — this is the guard that makes the issue-#86 bare poison
-	// impossible, so it logs loudly if it ever fires.
-	cur, curErr := t.symbolicRef(ctx)
-	after, err := t.snapshotHeads(ctx)
+	// POST-VERIFY that the reset moved only refs/heads/B; roll back and abort if
+	// a checkout raced it (the issue-#86 guard, shared with the divergence path).
+	aborted, rolled, err := t.postVerify(ctx, B, snap)
 	if err != nil {
-		return res, fmt.Errorf("post-verify snapshot: %w", err)
+		return res, err
 	}
-	var rolled []string
-	for name, before := range snap {
-		if name == B {
-			continue // the one ref allowed to have moved (to R)
-		}
-		// reset --hard only MOVES an existing ref, never deletes one, so a
-		// vanished ref is an unrelated external delete we must not fight.
-		if now, ok := after[name]; ok && now != before {
-			if uerr := t.run(ctx, "update-ref", "refs/heads/"+name, before); uerr != nil {
-				t.logf("post-verify: WARNING failed to roll back refs/heads/%s %s->%s: %v", name, short(now), short(before), uerr)
-			} else {
-				t.logf("post-verify: WARNING refs/heads/%s moved to %s during reset (checkout race); rolled back to %s", name, short(now), short(before))
-			}
-			rolled = append(rolled, name)
-		}
-	}
-	if curErr != nil || cur != B || len(rolled) > 0 {
-		// A checkout raced the reset. Abort: no push, no poke. The next tick
-		// re-runs cleanly on whatever branch is now checked out.
-		res.RolledBack = len(rolled) > 0
-		t.logf("integrate %s: aborted after reset — checkout raced (now on %q); no push/poke", B, cur)
+	if aborted {
+		res.RolledBack = rolled > 0
 		return res, nil
 	}
 
@@ -311,6 +287,44 @@ func (t *Ticker) integrate(ctx context.Context, B, L, R string, snap map[string]
 	// the fast-forward integrated cleanly.
 	res.Integrated = true
 	return res, nil
+}
+
+// postVerify re-checks, immediately after a worktree-mutating op (reset --hard
+// or rebase), that ONLY refs/heads/B moved from the step-1 snapshot. reset and
+// rebase move whatever branch HEAD points at; if a checkout won the microsecond
+// window after the pre-mutation re-verify, they moved the WRONG branch. Any ref
+// other than B that moved — and still exists, since a vanished ref is an
+// unrelated external delete we must not fight — is restored from the snapshot
+// via update-ref. It reports aborted when a checkout raced (HEAD no longer on B)
+// or any ref was rolled back, in which case the caller MUST skip the push and
+// the poke. This is the guard that makes the issue-#86 bare poison impossible,
+// so a rollback logs loudly; both worktree-mutating paths share it.
+func (t *Ticker) postVerify(ctx context.Context, B string, snap map[string]string) (aborted bool, rolled int, err error) {
+	cur, curErr := t.symbolicRef(ctx)
+	after, serr := t.snapshotHeads(ctx)
+	if serr != nil {
+		return false, 0, fmt.Errorf("post-verify snapshot: %w", serr)
+	}
+	for name, before := range snap {
+		if name == B {
+			continue // the one ref allowed to have moved (to R)
+		}
+		if now, ok := after[name]; ok && now != before {
+			if uerr := t.run(ctx, "update-ref", "refs/heads/"+name, before); uerr != nil {
+				t.logf("post-verify: WARNING failed to roll back refs/heads/%s %s->%s: %v", name, short(now), short(before), uerr)
+			} else {
+				t.logf("post-verify: WARNING refs/heads/%s moved to %s during a worktree-mutating op (checkout race); rolled back to %s", name, short(now), short(before))
+			}
+			rolled++
+		}
+	}
+	if curErr != nil || cur != B || rolled > 0 {
+		// A checkout raced the mutation. The caller aborts: no push, no poke.
+		// The next tick re-runs cleanly on whatever branch is now checked out.
+		t.logf("post-verify: aborting tick — checkout raced (HEAD now on %q); no push/poke", cur)
+		return true, rolled, nil
+	}
+	return false, 0, nil
 }
 
 // pushExplicit pushes the explicit sha (NOT a ref name) to the bare repo's
