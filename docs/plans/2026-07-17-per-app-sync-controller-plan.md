@@ -71,7 +71,7 @@ deterministic race tests.
       `naming.ReconcileRequestAnnotation`.
 - [x] Test-hook seam (`testHook func(stage string)`) at post-snapshot,
       pre-reset, post-reset.
-- [ ] Unit tests on real on-disk git repos: follow/patch, push-guard idle
+- [x] Unit tests on real on-disk git repos: follow/patch, push-guard idle
       no-op, worktree-ahead push, bare-ahead fast-forward, divergence rebase,
       conflict stall, corrupt-index heal, dirty-guard refusal.
 - [ ] Race-injection tests: (a) checkout between snapshot and fetch → no-op;
