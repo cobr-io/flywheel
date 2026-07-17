@@ -137,9 +137,10 @@ poison cannot reach a push:
   branch switches, patches, fast-forwards, pushes, stalls — one line each,
   app-prefixed. The post-verify rollback logs at warning with both refs; it
   should be near-never and we want to see it if it isn't.
-- `/healthz` = process up; `/readyz` = informer cache synced + workqueue not
-  stalled. A single wedged app must not flip readiness (a restart would land
-  all apps in the same state).
+- `/healthz` = process up; `/readyz` = informer cache synced. A single wedged
+  app must not flip readiness (a restart would land all apps in the same
+  state), so no per-app tick outcome feeds readiness — cache sync is the only
+  gate.
 - **Legacy interlock**: while a `git-auto-sync-<app>` Deployment exists in
   flywheel-system, the reconciler skips that app and warns (once per app) —
   prevents the two-writers-on-one-worktree hazard during migration.
