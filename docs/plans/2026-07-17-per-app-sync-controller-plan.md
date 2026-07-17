@@ -66,7 +66,7 @@ deterministic race tests.
       push fallback for a brand-new bare branch.
 - [x] Divergence path: rebase; on conflict abort + loud log; tick returns a
       stall marker → reconciler requeues at ~30s (Q4 parity).
-- [ ] Reconcile poke: `reconcile.fluxcd.io/requestedAt` on the GR whenever
+- [x] Reconcile poke: `reconcile.fluxcd.io/requestedAt` on the GR whenever
       the bare head changed (push or integrated fast-forward) — mirror
       `naming.ReconcileRequestAnnotation`.
 - [ ] Test-hook seam (`testHook func(stage string)`) at post-snapshot,

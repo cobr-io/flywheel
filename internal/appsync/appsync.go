@@ -103,6 +103,10 @@ type TickResult struct {
 	// was aborted, the worktree left pristine, and the reconciler should requeue
 	// on the long stall interval (design step 7 / plan Q4). No push, no poke.
 	Stalled bool
+	// Poked is set when PokeReconcile ran because the bare head for B changed
+	// this tick (our push, or a fast-forward we integrated). Never set on an
+	// idle / skip / stall tick.
+	Poked bool
 }
 
 // Tick performs one race-free sync pass against trackedBranch, the GR's current
@@ -169,7 +173,7 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 			return res, nil
 		}
 		res.Pushed = true
-		return res, nil
+		return t.finish(ctx, res)
 	}
 	R, err := t.revParse(ctx, "FETCH_HEAD")
 	if err != nil {
@@ -203,7 +207,7 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 		}
 	}
 
-	return res, nil
+	return t.finish(ctx, res)
 }
 
 // integrate fast-forwards the worktree onto the strictly-ahead bare head R.
@@ -356,6 +360,31 @@ func (t *Ticker) rebaseDivergence(ctx context.Context, B, R string, res TickResu
 	}
 	res.Pushed = true
 	return res, nil
+}
+
+// finish applies the poke rule and returns the tick result. Flux is poked
+// exactly when the bare repo's head for B changed this tick — our push, or a
+// fast-forward we integrated — and never on an idle, dirty-skip,
+// re-verify-skip, rollback-abort or stall tick (design step 6). Genuine errors
+// from earlier steps return directly and bypass this, so a failed tick never
+// pokes.
+func (t *Ticker) finish(ctx context.Context, res TickResult) (TickResult, error) {
+	if res.Pushed || res.Integrated {
+		t.poke(ctx, &res)
+	}
+	return res, nil
+}
+
+// poke asks Flux to reconcile now (the production FluxPatcher bumps
+// reconcile.fluxcd.io/requestedAt — naming.ReconcileRequestAnnotation — on the
+// GR). Best-effort: a failure just falls back to the poll interval, so it warns
+// but never fails the tick (sync.sh's trigger_reconcile).
+func (t *Ticker) poke(ctx context.Context, res *TickResult) {
+	if err := t.Flux.PokeReconcile(ctx); err != nil {
+		t.logf("poke reconcile: %v", err)
+		return
+	}
+	res.Poked = true
 }
 
 // run/output duplicate internal/selfsync's Worktree helpers of the same name
