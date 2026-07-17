@@ -54,7 +54,7 @@ deterministic race tests.
       `L = refs/heads/B`. All later decisions take `L`, never `HEAD`.
 - [x] Port `heal_index_if_corrupt` (issue #4) and the exit-code-aware dirty
       classification (`diff --quiet` 0/1/>1 semantics).
-- [ ] Branch-follow: when `trackedBranch != B`, `FluxPatcher` ensures the
+- [x] Branch-follow: when `trackedBranch != B`, `FluxPatcher` ensures the
       `kustomize.toolkit.fluxcd.io/reconcile: disabled` annotation then
       patches `spec.ref.branch = B` (monotonic; no LAST_BRANCH state).
 - [ ] Fetch bare `B` (objects only) → remote head `R`; ancestry decisions

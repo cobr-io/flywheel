@@ -81,6 +81,12 @@ type TickResult struct {
 	// Healed is set when heal_index_if_corrupt rebuilt a corrupt .git/index this
 	// tick (issue #4).
 	Healed bool
+	// Followed is set when trackedBranch != B and the branch-follow patch was
+	// attempted this tick. FollowErr carries a patch failure — the tick still
+	// continues (sync.sh parity) so the bare repo converges and the reconciler
+	// requeues normally; it is surfaced here for observability, not returned.
+	Followed  bool
+	FollowErr error
 }
 
 // Tick performs one race-free sync pass against trackedBranch, the GR's current
@@ -120,9 +126,21 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 		res.Healed = true
 	}
 
-	// L and refsSnapshot are the only inputs to every later decision; the
-	// branch-follow, fetch, compare, integrate and push tasks build on them
-	// here (they never re-read HEAD).
+	// Step 2: branch-follow. trackedBranch is the GR's live spec.ref.branch,
+	// reconciled fresh each tick, so this single comparison subsumes sync.sh's
+	// switch-detection AND its drift-correction (an external re-apply that
+	// clobbered spec.ref.branch also lands here as trackedBranch != B — no
+	// cached LAST_BRANCH state). A patch failure does NOT abort: sync.sh keeps
+	// syncing and retries the patch next loop, so we log it, record it, and
+	// press on — the reconciler still requeues normally.
+	if trackedBranch != B {
+		res.Followed = true
+		if err := t.Flux.EnsureBranch(ctx, B); err != nil {
+			t.logf("branch-follow: EnsureBranch(%s) failed; continuing sync, will retry: %v", B, err)
+			res.FollowErr = err
+		}
+	}
+
 	return res, nil
 }
 
