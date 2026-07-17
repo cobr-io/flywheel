@@ -49,7 +49,7 @@ builds all four `flywheel-dev/*` images; `goreleaser release --snapshot
 `internal/appsync.Ticker.Tick` implements the design's tick end-to-end with
 deterministic race tests.
 
-- [ ] Snapshot helpers: `symbolic-ref --short HEAD` (branch `B`; detached →
+- [x] Snapshot helpers: `symbolic-ref --short HEAD` (branch `B`; detached →
       skip), `for-each-ref` snapshot of all `refs/heads/*`, resolve
       `L = refs/heads/B`. All later decisions take `L`, never `HEAD`.
 - [ ] Port `heal_index_if_corrupt` (issue #4) and the exit-code-aware dirty

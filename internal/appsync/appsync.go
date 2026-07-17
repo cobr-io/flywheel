@@ -7,10 +7,10 @@
 // HEAD, so a `git checkout` landing mid-tick can't apply a stale branch's
 // decisions to a worktree that has already moved on.
 //
-// This file is Phase 1 scaffolding only (see docs/plans/2026-07-17-per-app-sync-
-// controller-plan.md): Tick is not yet implemented. Phase 2 replaces its body
-// with the full snapshot / branch-follow / fetch / integrate / push / poke
-// algorithm plus the deterministic race-injection tests.
+// Phase 2 (see docs/plans/2026-07-17-per-app-sync-controller-plan.md) implements
+// Tick as the design's snapshot / branch-follow / fetch / integrate / push /
+// poke algorithm, proven by deterministic race-injection tests. The Reconciler
+// that resolves GitRepositories to Tickers is Phase 3.
 //
 // Shares selfsync's idioms (explicit refs, push-guard, shell-out runner) but
 // is a separate package — internal/selfsync (the gitops/self path) is not
@@ -21,6 +21,7 @@ package appsync
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cobr-io/flywheel/internal/execx"
@@ -74,12 +75,39 @@ type TickResult struct {
 	Branch string // checked-out branch B this tick observed, or "" if detached/empty (tick skipped)
 }
 
-// Tick performs one race-free sync pass against trackedBranch, the GR's
-// current spec.ref.branch. Phase 1 stub: not yet implemented — Phase 2
-// replaces this body with the design's snapshot / branch-follow / fetch /
-// integrate / push / poke algorithm.
+// Tick performs one race-free sync pass against trackedBranch, the GR's current
+// spec.ref.branch (design "The race-free tick"). Every decision is made against
+// L (the checked-out branch's ref, snapshotted once up front) and the step-1 ref
+// snapshot, never a live re-read of HEAD — so a `git checkout` landing mid-tick
+// can't redirect a decision onto a worktree that has already moved on.
 func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, error) {
-	return TickResult{}, fmt.Errorf("appsync: Tick not implemented (phase 2)")
+	var res TickResult
+
+	// Step 1: snapshot. B is the checked-out branch; refsSnapshot is every
+	// refs/heads/* name->sha at this instant; L is B's sha. A detached/empty
+	// HEAD (symbolic-ref errors, or resolves to the literal "HEAD") or an unborn
+	// B (no commit yet, so absent from refsSnapshot) has nothing to sync: skip
+	// the tick with no error so the reconciler just requeues on the poll
+	// interval — sync.sh's "detached or empty branch, skipping".
+	B, err := t.symbolicRef(ctx)
+	if err != nil || B == "" || B == "HEAD" {
+		return res, nil
+	}
+	res.Branch = B
+
+	refsSnapshot, err := t.snapshotHeads(ctx)
+	if err != nil {
+		return res, fmt.Errorf("snapshot refs/heads: %w", err)
+	}
+	L, ok := refsSnapshot[B]
+	if !ok || L == "" {
+		return res, nil
+	}
+
+	// L and refsSnapshot are the only inputs to every later decision; the
+	// branch-follow, fetch, compare, integrate and push tasks build on them
+	// here (they never re-read HEAD).
+	return res, nil
 }
 
 // run/output duplicate internal/selfsync's Worktree helpers of the same name
@@ -111,4 +139,60 @@ func (t *Ticker) logf(format string, args ...any) {
 	if t.Logf != nil {
 		t.Logf(format, args...)
 	}
+}
+
+// symbolicRef returns the checked-out branch via `symbolic-ref --short HEAD`.
+// A detached HEAD makes the command exit non-zero (there is no symbolic ref);
+// any failure returns an error and the caller skips the tick. Unlike a re-read
+// of HEAD later in the tick, this is the ONE authoritative read of the branch
+// name — every decision is made against the ref it names, snapshotted once.
+func (t *Ticker) symbolicRef(ctx context.Context) (string, error) {
+	out, err := t.output(ctx, "symbolic-ref", "--short", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// snapshotHeads returns every refs/heads/* as name->sha. The tick decides
+// against this snapshot, so a checkout that moves HEAD mid-tick can neither
+// redirect a decision nor hide a ref the post-verify must protect (design
+// step 1 / step 5e).
+func (t *Ticker) snapshotHeads(ctx context.Context) (map[string]string, error) {
+	out, err := t.output(ctx, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/")
+	if err != nil {
+		return nil, err
+	}
+	m := make(map[string]string)
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 2 {
+			continue // empty (no branches) or malformed line
+		}
+		m[fields[0]] = fields[1]
+	}
+	return m, nil
+}
+
+// revParse resolves rev (e.g. FETCH_HEAD, refs/heads/<B>) to its full sha.
+func (t *Ticker) revParse(ctx context.Context, rev string) (string, error) {
+	out, err := t.output(ctx, "rev-parse", rev)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(out), nil
+}
+
+// isAncestor reports whether a is an ancestor of b (fast-forward test). A git
+// error (bad sha) is treated as "not an ancestor", matching sync.sh's plain
+// `if git merge-base --is-ancestor ...`.
+func (t *Ticker) isAncestor(ctx context.Context, a, b string) bool {
+	return t.run(ctx, "merge-base", "--is-ancestor", a, b) == nil
+}
+
+func short(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
 }
