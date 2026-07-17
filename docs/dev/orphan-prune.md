@@ -23,10 +23,16 @@ Every resource `up` applies imperatively carries
 | secrets (`sops-age`, `local-cert`, `mkcert-ca`) | `up.managedByFlywheel()` (Go) |
 
 **Anything Flux reconciles from the gitops repo is deliberately NOT labelled** —
-app/infra workloads, and the per-app `git-auto-sync-{app}` sidecars
-(`manifests/per-app-template/git-auto-sync.yaml.tmpl`). The label-scoped scan
-therefore can't even see them. **If you add a new resource that `up` applies
-directly, label it. If you add a resource Flux applies, do not.**
+app/infra workloads. The label-scoped scan therefore can't even see them.
+**If you add a new resource that `up` applies directly, label it. If you add
+a resource Flux applies, do not.**
+
+(Historical: per-app `git-auto-sync-{app}` sidecars, rendered by
+`manifests/per-app-template/git-auto-sync.yaml.tmpl`, used to be an example of
+the Flux-applied, deliberately-unlabelled case. The Go port
+(docs/designs/2026-07-17-per-app-sync-controller-design.md) deleted that
+template; git-auto-sync is now the single `up`-applied, labelled Deployment in
+`manifests/dev-loop/base/git-auto-sync.yaml`.)
 
 ## How the prune decides
 
