@@ -87,6 +87,14 @@ type TickResult struct {
 	// requeues normally; it is surfaced here for observability, not returned.
 	Followed  bool
 	FollowErr error
+	// Integrated is set when the bare repo was strictly ahead and the worktree
+	// was fast-forwarded onto it (reset --hard R).
+	Integrated bool
+	// RolledBack is set when post-verify caught a checkout that won the
+	// microsecond window before reset --hard and moved the wrong branch's ref:
+	// that ref was restored from the step-1 snapshot and the tick aborted (no
+	// push, no poke). Near-never in production; logged at WARNING.
+	RolledBack bool
 }
 
 // Tick performs one race-free sync pass against trackedBranch, the GR's current
@@ -164,11 +172,103 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 		// worktree ahead of bare — push L. Wired in the push task.
 	case t.isAncestor(ctx, L, R):
 		// bare strictly ahead — integrate (the only worktree-mutating path).
-		// Wired in the integrate task.
+		res, err = t.integrate(ctx, B, L, R, refsSnapshot, res)
+		if err != nil {
+			return res, err
+		}
 	default:
 		// genuine divergence — rebase worktree on R. Wired in the divergence task.
 	}
 
+	return res, nil
+}
+
+// integrate fast-forwards the worktree onto the strictly-ahead bare head R.
+// This is the ONLY worktree-mutating path — the one where sync.sh's HEAD-sampled
+// reset --hard poisoned the bare repo (issue #86) — so it is the guarded one:
+// dirty-guard, re-verify the checked-out branch is still B, reset, then
+// post-verify that the reset moved only refs/heads/B and roll back anything else.
+// It never pushes and never pokes; success is reported via res.Integrated and
+// the caller's poke rule fires. heal_index_if_corrupt already ran early in Tick.
+func (t *Ticker) integrate(ctx context.Context, B, L, R string, snap map[string]string, res TickResult) (TickResult, error) {
+	// Dirty classification. diff --quiet exits 0 clean / 1 changes / >1 index
+	// error (issue #4).
+	unstaged, err := t.diffQuietCode(ctx, "diff", "--quiet")
+	if err != nil {
+		return res, fmt.Errorf("classify worktree (unstaged): %w", err)
+	}
+	staged, err := t.diffQuietCode(ctx, "diff", "--cached", "--quiet")
+	if err != nil {
+		return res, fmt.Errorf("classify worktree (staged): %w", err)
+	}
+	if unstaged > 1 || staged > 1 {
+		// Index unreadable this round — skip integrate; the next tick's heal
+		// rebuilds it. Not a stall, just a retry (issue #4).
+		t.logf("integrate %s: worktree index unreadable (git diff errored); skipping this tick", B)
+		return res, nil
+	}
+	if unstaged != 0 || staged != 0 {
+		// DATA-LOSS GUARD: reset --hard would silently discard the uncommitted
+		// work. Skip the integrate AND everything downstream — were we to fall
+		// through and push, --force-with-lease=B:R would rewind the bare repo
+		// (at R) back over R's commits to L. Once the developer commits, the
+		// worktree has a local commit ahead and the next tick integrates via the
+		// dirty-safe divergence rebase instead. sync.sh parity (its `continue`).
+		t.logf("integrate %s: bare advanced to %s but worktree has uncommitted changes; NOT hard-resetting (commit to integrate)", B, short(R))
+		return res, nil
+	}
+
+	// Re-verify the checked-out branch is STILL B immediately before mutating.
+	// A checkout that landed between the snapshot and here is caught now → no
+	// reset, so the wrong branch is never touched (design step 5c).
+	if cur, err := t.symbolicRef(ctx); err != nil || cur != B {
+		t.logf("integrate %s: worktree switched to %q before reset; skipping integrate", B, cur)
+		return res, nil
+	}
+
+	// Fast-forward the worktree onto the bare head.
+	if err := t.run(ctx, "reset", "--hard", R); err != nil {
+		return res, fmt.Errorf("reset --hard %s: %w", short(R), err)
+	}
+
+	// POST-VERIFY. reset --hard moves whatever branch HEAD points at and rewrites
+	// the worktree; if a checkout won the microsecond window after the re-verify,
+	// it moved the WRONG branch. The only ref allowed to differ from the step-1
+	// snapshot is refs/heads/B (now == R). Restore any other moved ref from the
+	// snapshot and abort — this is the guard that makes the issue-#86 bare poison
+	// impossible, so it logs loudly if it ever fires.
+	cur, curErr := t.symbolicRef(ctx)
+	after, err := t.snapshotHeads(ctx)
+	if err != nil {
+		return res, fmt.Errorf("post-verify snapshot: %w", err)
+	}
+	var rolled []string
+	for name, before := range snap {
+		if name == B {
+			continue // the one ref allowed to have moved (to R)
+		}
+		// reset --hard only MOVES an existing ref, never deletes one, so a
+		// vanished ref is an unrelated external delete we must not fight.
+		if now, ok := after[name]; ok && now != before {
+			if uerr := t.run(ctx, "update-ref", "refs/heads/"+name, before); uerr != nil {
+				t.logf("post-verify: WARNING failed to roll back refs/heads/%s %s->%s: %v", name, short(now), short(before), uerr)
+			} else {
+				t.logf("post-verify: WARNING refs/heads/%s moved to %s during reset (checkout race); rolled back to %s", name, short(now), short(before))
+			}
+			rolled = append(rolled, name)
+		}
+	}
+	if curErr != nil || cur != B || len(rolled) > 0 {
+		// A checkout raced the reset. Abort: no push, no poke. The next tick
+		// re-runs cleanly on whatever branch is now checked out.
+		res.RolledBack = len(rolled) > 0
+		t.logf("integrate %s: aborted after reset — checkout raced (now on %q); no push/poke", B, cur)
+		return res, nil
+	}
+
+	// The bare advanced without us pushing (a teammate/CI push straight to bare):
+	// the fast-forward integrated cleanly.
+	res.Integrated = true
 	return res, nil
 }
 

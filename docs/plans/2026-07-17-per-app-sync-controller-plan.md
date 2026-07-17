@@ -59,7 +59,7 @@ deterministic race tests.
       patches `spec.ref.branch = B` (monotonic; no LAST_BRANCH state).
 - [x] Fetch bare `B` (objects only) → remote head `R`; ancestry decisions
       against `L`.
-- [ ] Integrate path: dirty-guard → re-verify `symbolic-ref == B` →
+- [x] Integrate path: dirty-guard → re-verify `symbolic-ref == B` →
       `reset --hard R` → **post-verify** (re-read symbolic-ref + diff ref
       snapshot; roll back any moved ref ≠ `refs/heads/B`, abort tick).
 - [ ] Push path: `push --force-with-lease=B:R <url> L:refs/heads/B`; plain
