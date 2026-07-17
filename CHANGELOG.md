@@ -9,6 +9,38 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+### Changed (2026-07-17, per-app `git-auto-sync` is now a shared Go controller)
+
+- **The per-app `git-auto-sync-<app>` bash sidecar (`scripts/git-auto-sync/sync.sh`)
+  is replaced by a single Go controller** — one `git-auto-sync` Deployment in
+  `flywheel-system` that LISTs/WATCHes every app's `GitRepository` and drives
+  the same branch-follow/mirror tick, race-free (issue #86). The old sidecar
+  had a TOCTOU window: a `git checkout` in the app worktree landing between
+  its snapshot and its `reset --hard` could reset against the wrong branch or
+  leave the in-cluster bare repo's `main` pointed at a commit from an
+  already-abandoned branch — "poisoning" it so `ImagePolicy` could later
+  latch a stale tag built from that content (the intermittent nightly
+  scenario-4 failure). The new controller (`internal/appsync`) takes every
+  decision against a `for-each-ref` snapshot (never bare `HEAD`) and
+  re-verifies after every mutating step, rolling back and aborting the tick
+  if a checkout raced it. New `testdata/scenarios/scenario-6-branch-stress.sh`
+  rapid-fires ~10 sub-second branch flips to exercise the race directly
+  (nightly-only, like scenarios 2-4). See
+  [design](docs/designs/2026-07-17-per-app-sync-controller-design.md) and
+  [plan](docs/plans/2026-07-17-per-app-sync-controller-plan.md).
+  - **New apps**: `flywheel add app` no longer renders
+    `builders/base/<name>/git-auto-sync.yaml` — nothing to do.
+  - **Existing repos**: per-app files are never re-rendered, so upgrading
+    `flywheel.version` alone leaves the old sidecar running. Finish the
+    migration per-app with `git rm builders/base/<app>/git-auto-sync.yaml`
+    (Flux prunes the old Deployment). The new controller interlocks against
+    that file — it skips (and warns once about) any app whose
+    `git-auto-sync.yaml` still exists, so there is never a two-writer window;
+    migrate apps on your own schedule. See
+    [Upgrading § Migrating off the per-app sidecar](docs/guides/upgrading.md#migrating-off-the-per-app-git-auto-sync-sidecar-existing-repos).
+  - RBAC: the `git-auto-sync` Role gains `gitrepositories` `list, watch` and a
+    new `apps/deployments` `get, list, watch` rule (the legacy interlock).
+
 ### Fixed (2026-07-02, mirror multi-arch released images under Docker's containerd image store)
 
 - **`flywheel up` no longer fails at the image-mirror step on hosts using
