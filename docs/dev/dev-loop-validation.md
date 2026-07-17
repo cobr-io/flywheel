@@ -15,6 +15,26 @@ v0.1.0 pre-release validation.
 > 5 = orphan-job reaper; 2–4 cover branch switches). This runbook is the manual,
 > human/agent-followable counterpart — handy for ad-hoc checks and for eyeballing
 > `add app`'s scaffolding interactively.
+>
+> **Scenario 6 — branch-flip stress (nightly-only, issue #86 regression
+> guard):** `testdata/scenarios/scenario-6-branch-stress.sh` rapid-fires ~10
+> sub-second checkouts between `feat/stress` and `main` on the app worktree
+> (no waits between flips), deliberately landing checkouts inside
+> `git-auto-sync`'s poll/tick window to exercise the TOCTOU race the Go
+> controller (`internal/appsync`) closes. It asserts: (a) the served content
+> converges to main's known content; (b) the in-cluster bare repo's `main`
+> sha matches the worktree's `refs/heads/main` sha (no "poison" — the bare
+> repo latching a commit from an abandoned branch, which is exactly what let
+> `ImagePolicy` pick a stale tag in #86); (c) `index.html` is still writable
+> by the runner uid (guards against the old sidecar's root-owned
+> `reset --hard` leaving files the next commit couldn't touch). Per-PR CI
+> only runs scenarios `1 5` (see `.github/workflows/test.yml`), so like
+> scenarios 2–4, scenario 6 runs **only** in the full nightly chain
+> (`run-all.sh` / `.github/workflows/e2e-full.yml`) — it rots silently
+> between nightlies same as the others, watch the nightly. It must run
+> after scenarios 1–4 (needs the app seeded on main) and before the
+> destructive scenario 5 (which deletes the app); `run-all.sh` sequences
+> the chain `1, 2, 3, 4, 6, 5` accordingly.
 
 ## Prerequisites
 
