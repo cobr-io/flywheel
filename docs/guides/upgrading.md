@@ -59,13 +59,20 @@ Deployment keeps running. To finish migrating each app:
 
 ```sh
 git rm builders/base/<app>/git-auto-sync.yaml
-git commit -m "migrate <app> off the git-auto-sync sidecar"
+# AND remove its entry from the app's kustomization:
+#   builders/base/<app>/kustomization.yaml → delete the "- ./git-auto-sync.yaml" line
+git commit -am "migrate <app> off the git-auto-sync sidecar"
 ```
 
-Flux (`client-builders`, `prune: true`) deletes the old per-app Deployment on
-that commit. That's the whole migration — nothing else to change, and
-**new** apps need nothing at all (`flywheel add app` on a current release no
-longer renders the file in the first place).
+Both edits must land together: the rendered per-app `kustomization.yaml`
+references `./git-auto-sync.yaml`, so deleting only the file breaks the
+kustomize build and the `client-builders` Kustomization goes NotReady for the
+whole tier (nothing in `builders/` applies until it's fixed — a repo CI
+`kustomize build` check catches this before merge if you have one). With both
+edits, Flux (`client-builders`, `prune: true`) deletes the old per-app
+Deployment on that commit. That's the whole migration, and **new** apps need
+nothing at all (`flywheel add app` on a current release no longer renders the
+file in the first place).
 
 **Why there's no rush, and no two-writer window:** the new shared controller
 interlocks against the legacy file. While `builders/base/<app>/git-auto-sync.yaml`

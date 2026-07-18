@@ -26,9 +26,14 @@ sidecar — including its issue-#86 race.
 
 ```sh
 git rm builders/base/<app>/git-auto-sync.yaml
-git commit -m "migrate <app> to the shared git-auto-sync controller"
+# AND delete the "- ./git-auto-sync.yaml" line from builders/base/<app>/kustomization.yaml
+git commit -am "migrate <app> to the shared git-auto-sync controller"
 git push
 ```
+
+Both edits must land together — the per-app `kustomization.yaml` references
+the file, so deleting only the manifest breaks the kustomize build and the
+whole `client-builders` tier goes NotReady until fixed.
 
 Flux prunes the old sidecar Deployment; the new controller takes the app over
 within a poll interval (~2s). Full walkthrough:
