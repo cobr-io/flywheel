@@ -69,9 +69,11 @@ One run scaffolds **both halves** and wires them in:
 
 * `builders/base/<name>/` — the build pipeline: a Flux `GitRepository`
   watching the in-cluster mirror of your worktree, a `build-config` ConfigMap
-  (what to build), a `git-auto-sync` Deployment (mirrors your worktree's
-  commits into the cluster), and an `ImageRepository` + `ImagePolicy` (rolls
-  new tags out). A README in the folder explains each piece.
+  (what to build), and an `ImageRepository` + `ImagePolicy` (rolls new tags
+  out). A single shared `git-auto-sync` controller (`flywheel-system`, not
+  rendered per-app) mirrors your worktree's commits into the cluster and
+  keeps the `GitRepository` following your checked-out branch. A README in
+  the folder explains each piece.
 * `apps/base/<name>/` — the workload: a Deployment / Service / Ingress
   serving at `https://<name>.<local.domain>/`.
 
@@ -177,10 +179,13 @@ kubectl get jobs -n flywheel-system  # build jobs: build-<name>-<ts>-<sha>
   build hasn't landed. Check the build Job's logs
   (`kubectl logs -n flywheel-system job/<build-job>`); a broken Dockerfile
   fails here, not at `add app` time.
-* **No build Job at all** — check the git-auto-sync pod for your app in
-  `flywheel-system`: your worktree's commits may not be reaching the
-  in-cluster mirror. Note it mirrors **commits** — uncommitted edits never
-  deploy.
+* **No build Job at all** — check the shared `git-auto-sync` Deployment's
+  logs in `flywheel-system` (`kubectl logs -n flywheel-system deploy/git-auto-sync`):
+  your worktree's commits may not be reaching the in-cluster mirror. Note it
+  mirrors **commits** — uncommitted edits never deploy. (Existing repos
+  upgrading from an older release may still carry a per-app
+  `builders/base/<name>/git-auto-sync.yaml` sidecar — see
+  [Upgrading](upgrading.md#migrating-off-the-per-app-git-auto-sync-sidecar-existing-repos).)
 * **Pod runs but the URL doesn't resolve** — that's browser-side name
   resolution, see the [Local DNS guide](local-dns.md).
 * **Builds fail / pods `Pending` on a large repo** — the in-cluster git-server

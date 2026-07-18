@@ -71,23 +71,29 @@ const (
 	imgOwnerClientBuilders = "client-builders" // client-builders Kustomization (client-builders-kustomization.yaml)
 )
 
-// bootstrapImageOwners is the single source of truth for the 3/1 split between
+// bootstrapImageOwners is the single source of truth for the split between
 // the two bootstrap Kustomizations' `images:` blocks — the split rationale that
 // used to be duplicated as prose in both templates lives here instead.
 //
 // The two Kustomizations reconcile different trees, so an image's ref must be
 // rewritten in whichever one owns its Deployment:
 //   - imgOwnerDevLoop: the flywheel-dev-loop Kustomization reconciles
-//     manifests/dev-loop/overlays/local. git-server, image-builder-controller
-//     and git-deploy-controller have Deployments under that overlay, so their
-//     refs are rewritten there to match the step-11a direct apply
-//     (renderDevLoopKustomization) — otherwise Flux re-applies the base ghcr.io
-//     ref and the pod ErrImagePulls.
+//     manifests/dev-loop/overlays/local. git-server, image-builder-controller,
+//     git-deploy-controller and git-auto-sync all have their (single, shared)
+//     Deployment under that overlay, so their refs are rewritten there to
+//     match the step-11a direct apply (renderDevLoopKustomization) —
+//     otherwise Flux re-applies the base ghcr.io ref and the pod
+//     ErrImagePulls. git-auto-sync joined this bucket in the Go-port design
+//     (docs/designs/2026-07-17-per-app-sync-controller-design.md): it used to
+//     be the odd one out (imgOwnerClientBuilders, below) because its only
+//     Deployments were per-app builder sidecars; it is now a single
+//     controller alongside the other three.
 //   - imgOwnerClientBuilders: the client-builders Kustomization reconciles the
-//     client repo's per-app builders/ tree. git-auto-sync's only Deployments
-//     are the per-app sidecars there, so its ref is rewritten by that
-//     Kustomization's spec.images, not the dev-loop overlay. Listing it under
-//     dev-loop would be a dead no-op.
+//     client repo's per-app builders/ tree. No current image's Deployment
+//     lives there (schema.ImageNames images all run in dev-loop/base now), so
+//     this bucket — and the client-builders-kustomization.yaml.tmpl `images:`
+//     block it feeds — is presently empty. It stays defined for the next
+//     image whose only Deployment is per-app-rendered.
 //
 // Every schema.ImageNames entry MUST appear here; an image with no owner is
 // rendered into NEITHER block, which the image agreement test
@@ -97,7 +103,7 @@ var bootstrapImageOwners = map[string]string{
 	"git-server":               imgOwnerDevLoop,
 	"image-builder-controller": imgOwnerDevLoop,
 	"git-deploy-controller":    imgOwnerDevLoop,
-	"git-auto-sync":            imgOwnerClientBuilders,
+	"git-auto-sync":            imgOwnerDevLoop,
 }
 
 // bootstrapContext is the typed render context for the bootstrap tree

@@ -8,12 +8,14 @@ the rest is this ordered checklist.
 
 Two image *shapes* exist — the checklist calls out where they differ:
 
-- **Controller** (Go binary; `image-builder-controller`, `git-deploy-controller`):
-  a `cmd/<name>` package cross-compiled on the host and `COPY`'d into a
-  distroless/debian image (issue #46 — no in-image QEMU Go build).
-- **Script image** (`git-server`, `git-auto-sync`): shell/tooling only, built
-  straight from the repo root, with its scripts declared as goreleaser
-  `extra_files`.
+- **Controller** (Go binary; `image-builder-controller`, `git-deploy-controller`,
+  `git-auto-sync`): a `cmd/<name>` package cross-compiled on the host and
+  `COPY`'d into a distroless/debian image (issue #46 — no in-image QEMU Go
+  build). `git-auto-sync` moved into this bucket from script image in the Go
+  port (docs/designs/2026-07-17-per-app-sync-controller-design.md) — it used
+  to be a bash script (`scripts/git-auto-sync/sync.sh`, deleted).
+- **Script image** (`git-server`): shell/tooling only, built straight from the
+  repo root, with its scripts declared as goreleaser `extra_files`.
 
 The reference commit for a full walk-through is `5f1c7d7` (added
 `git-deploy-controller`; note it spanned more than one commit historically —
@@ -45,9 +47,13 @@ keys off.
 Assign the new image to exactly one Flux Kustomization:
 
 - `imgOwnerDevLoop` — the image has a Deployment under the dev-loop overlay
-  (`manifests/dev-loop/base`). This is the common case for a new controller.
-- `imgOwnerClientBuilders` — the image's only Deployments are the per-app
-  builder sidecars (this is why `git-auto-sync` is the odd one out).
+  (`manifests/dev-loop/base`). This is the common case for a new controller;
+  all four current images (including `git-auto-sync`, since its Go port) live
+  here.
+- `imgOwnerClientBuilders` — the image's only Deployments are per-app-rendered
+  into the client repo's `builders/` tree, not `manifests/dev-loop/base`.
+  Presently unused (no image is per-app-only), but stays wired for the next
+  one that is.
 
 Skipping this makes `TestBootstrapImages_TemplateUnionMatchesSchema` fail (the
 image renders into neither template block) — that is the intended guard, not a
@@ -66,17 +72,18 @@ Add the Go command package the binary builds from. Skip for a script image.
 Three spots in the `images` target region:
 - Add `<name>` to `IMAGES`.
 - Controller only: add `<name>` to the host cross-compile loop
-  (`for c in image-builder-controller git-deploy-controller`) **and** to the
-  `case` that selects the host-built context (`bctx="$ctx"`).
+  (`for c in image-builder-controller git-deploy-controller git-auto-sync`)
+  **and** to the `case` that selects the host-built context (`bctx="$ctx"`).
 
-### 6. `manifests/dev-loop/base/` (dev-loop images only)
+### 6. `manifests/dev-loop/base/` (`imgOwnerDevLoop` images only)
 - Add `manifests/dev-loop/base/<name>.yaml` (the Deployment). Pin the image as
   `ghcr.io/cobr-io/<name>:rewritten-by-flywheel-up` — the placeholder tag `up`
   rewrites (T07).
 - Add `./<name>.yaml` to `manifests/dev-loop/base/kustomization.yaml`
   `resources:`.
-- (A `git-auto-sync`-shaped image instead lives in
-  `manifests/per-app-template/`, not here.)
+- (An `imgOwnerClientBuilders`-shaped image — one whose only Deployments are
+  per-app-rendered — instead lives in `manifests/per-app-template/`, not here.
+  No current image is shaped this way.)
 
 ### 7. `.goreleaser.yaml`
 Not derivable — edit by hand:

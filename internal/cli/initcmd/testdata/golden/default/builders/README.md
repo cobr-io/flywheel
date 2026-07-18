@@ -18,11 +18,12 @@ it does **not** belong here: put it under `../apps/` (an application) or
 `flywheel add app <worktree>` scaffolds these (all hand-editable afterwards):
 
 * **GitRepository** (`flywheel-system`) — Flux watches the in-cluster bare
-  repo for your worktree and triggers a build on each commit.
+  repo for your worktree and triggers a build on each commit. A single shared
+  `git-auto-sync` controller (`flywheel-system`, not rendered per-app) syncs
+  your host worktree to the in-cluster bare repo and follows branch switches
+  for every app's GitRepository.
 * **build-config** ConfigMap (`flywheel-system`) — declares what to build
   (image name, build context, Dockerfile); add entries for a monorepo.
-* **git-auto-sync** Deployment (`flywheel-system`) — syncs your host
-  worktree to the in-cluster bare repo and follows branch switches.
 * **ImageRepository** + **ImagePolicy** (`flux-system`) — Flux image
   automation watches the registry and selects the newest tag to roll out.
 

@@ -24,6 +24,7 @@ resources:
   - ./buildkitd.yaml
   - ./image-builder-controller.yaml
   - ./git-deploy-controller.yaml
+  - ./git-auto-sync.yaml
   - ./image-update-automation.yaml
   - ./source-controller-np.yaml
   - ./inotify-bump.yaml

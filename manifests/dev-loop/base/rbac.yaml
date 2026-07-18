@@ -108,9 +108,25 @@ metadata:
   name: git-auto-sync
   namespace: flywheel-system
 rules:
+  # get/patch: the controller (internal/appsync.Ticker/FluxPatcher) patches
+  # spec.ref.branch on a branch-follow and pokes
+  # reconcile.fluxcd.io/requestedAt after a head-changing sync — same as the
+  # bash sidecar it replaces. list/watch: the manager's Reconciler is set up
+  # with `.For(&sourcev1.GitRepository{})` (cmd/git-auto-sync), so it LISTs +
+  # WATCHes every per-app GitRepository in this namespace to discover apps,
+  # rather than being told about one Deployment's app via env vars.
   - apiGroups: [source.toolkit.fluxcd.io]
     resources: [gitrepositories]
-    verbs: [get, patch]
+    verbs: [get, list, watch, patch]
+  # The legacy-sidecar interlock (Reconciler.Reconcile) GETs
+  # git-auto-sync-<app> to detect a not-yet-migrated client repo and skip that
+  # app. get is the only verb the code calls, but the manager's client reads
+  # through the informer cache by default, so list/watch are required for
+  # that cache to sync — same shape as image-builder-controller's configmaps
+  # rule.
+  - apiGroups: [apps]
+    resources: [deployments]
+    verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
@@ -144,9 +160,10 @@ rules:
     verbs: [get, patch]
   # ...and pokes the apps Kustomization to reconcile immediately after a
   # head-changing sync (reconcile.fluxcd.io/requestedAt). Only
-  # git-deploy-controller does this (sync.sh, used by per-app sidecars, has no
-  # Kustomization poke), but the Role is shared, and the apps Kustomization
-  # lives in flux-system.
+  # git-deploy-controller does this — the git-auto-sync controller
+  # (internal/appsync) has no Kustomization poke, same as the sync.sh sidecar
+  # it replaces (design: "Out of scope") — but the Role is shared, and the
+  # apps Kustomization lives in flux-system.
   - apiGroups: [kustomize.toolkit.fluxcd.io]
     resources: [kustomizations]
     verbs: [get, patch]
@@ -164,8 +181,12 @@ subjects:
   - kind: ServiceAccount
     name: git-auto-sync
     namespace: flywheel-system
-# Per-app git-auto-sync Deployments run in flywheel-system (flywheel infra,
-# alongside git-auto-sync-self) using the flywheel-system git-auto-sync
-# ServiceAccount + Role declared above. Their per-app GitRepository now also
-# lives in flywheel-system (builder infra), so that same flywheel-system Role
-# already authorises the branch-switch patch — no apps-namespace RBAC is needed.
+# The single git-auto-sync Deployment (manifests/dev-loop/base/git-auto-sync.yaml)
+# runs in flywheel-system (flywheel infra, alongside git-deploy-controller and
+# formerly git-auto-sync-self) using the flywheel-system git-auto-sync
+# ServiceAccount + Role declared above. It replaces what used to be one
+# per-app sidecar Deployment per app (manifests/per-app-template/git-auto-sync.yaml.tmpl,
+# deleted) with one controller that LISTs/WATCHes every per-app GitRepository —
+# which also lives in flywheel-system (builder infra) — so that same
+# flywheel-system Role already authorises the branch-switch patch for every
+# app; no apps-namespace or per-app RBAC is needed.

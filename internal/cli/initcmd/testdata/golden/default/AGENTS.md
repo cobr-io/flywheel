@@ -44,10 +44,11 @@ flywheel add app <worktree>
 
 Scaffolds the workload under `apps/base/<name>/` (its image line carries an
 `{"$imagepolicy": ...}` setter) **and** the build pipeline under
-`builders/base/<name>/` (GitRepository, build-config, git-auto-sync,
-ImageRepository, ImagePolicy), wiring both `kustomization.yaml`s. That is the
-whole dev loop. See [apps/README.md](apps/README.md) and
-[builders/README.md](builders/README.md).
+`builders/base/<name>/` (GitRepository, build-config, ImageRepository,
+ImagePolicy), wiring both `kustomization.yaml`s. A shared `git-auto-sync`
+controller (not per-app) keeps the new GitRepository in sync with your
+worktree. That is the whole dev loop. See [apps/README.md](apps/README.md)
+and [builders/README.md](builders/README.md).
 
 ## Add an off-the-shelf app
 

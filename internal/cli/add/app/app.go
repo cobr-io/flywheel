@@ -22,7 +22,6 @@ import (
 	flywheel "github.com/cobr-io/flywheel"
 	"github.com/cobr-io/flywheel/internal/cli/config"
 	"github.com/cobr-io/flywheel/internal/cli/converge"
-	"github.com/cobr-io/flywheel/internal/cli/imagepin"
 	"github.com/cobr-io/flywheel/internal/cli/render"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/sourcemode"
@@ -329,17 +328,7 @@ func Run(opts Options) (*Result, error) {
 	// into a throwaway dir under the repo (same filesystem, so the tail's moves
 	// are atomic renames) means a failure leaves the client repo untouched.
 
-	// The per-app git-auto-sync Deployment commits the *canonical* ghcr.io
-	// ref — NOT a resolved/content-addressed registry ref. The client-builders
-	// Flux Kustomization rewrites this name to whatever `up` mirrored into the
-	// local registry (a dogfood `:dogfood-<sha>` build or the released
-	// `:<version>` default), re-rendered fresh on every `up`. Committing the
-	// resolved ref instead would pin a digest that goes stale the next time the
-	// dogfood image is rebuilt — the ImagePullBackOff this avoids. This mirrors
-	// how git-server / image-builder-controller are handled (stable ghcr name
-	// in the manifest, rewritten by the Kustomization's spec.images).
-	gitAutoSyncRef := imagepin.DefaultRef("git-auto-sync", cfg.Flywheel.Version)
-	values := buildValues(opts, cfg, worktree, gitAutoSyncRef)
+	values := buildValues(opts, cfg, worktree)
 
 	staging, err := os.MkdirTemp(opts.RepoDir, ".flywheel-add-app-*")
 	if err != nil {
@@ -435,15 +424,14 @@ func Run(opts Options) (*Result, error) {
 // URL, the GitRepository URL).
 type appContext struct {
 	schema.Core
-	AppName          string
-	Worktree         string
-	GitServerURL     string
-	GitAutoSyncImage string
-	RegistryURL      string
-	Image            string
-	Context          string
-	Dockerfile       string
-	Target           string
+	AppName      string
+	Worktree     string
+	GitServerURL string
+	RegistryURL  string
+	Image        string
+	Context      string
+	Dockerfile   string
+	Target       string
 }
 
 // buildValues constructs the render context for the per-app + apps templates.
@@ -451,7 +439,7 @@ type appContext struct {
 // with the resolved per-app namespace (opts.Namespace — an explicit --namespace
 // wins over the cfg default) since add-app's namespace semantics differ from
 // the cfg-wide default the constructor supplies.
-func buildValues(opts Options, cfg *schema.File, worktree, gitAutoSyncRef string) appContext {
+func buildValues(opts Options, cfg *schema.File, worktree string) appContext {
 	core := schema.NewCore(cfg)
 	core.AppsNamespace = opts.Namespace
 	return appContext{
@@ -461,13 +449,12 @@ func buildValues(opts Options, cfg *schema.File, worktree, gitAutoSyncRef string
 		// flywheel's namespace is fixed (Core.FlywheelNamespace = naming
 		// .FlywheelNamespace); the per-app scaffolds reference the git-server in
 		// it via a placeholder rather than a baked literal (task T14).
-		GitServerURL:     naming.GitServerURL(naming.FlywheelNamespace),
-		GitAutoSyncImage: gitAutoSyncRef,
-		RegistryURL:      fmt.Sprintf("k3d-%s:5000", cfg.Cluster.Registry),
-		Image:            opts.Image,
-		Context:          opts.Context,
-		Dockerfile:       opts.Dockerfile,
-		Target:           opts.Target,
+		GitServerURL: naming.GitServerURL(naming.FlywheelNamespace),
+		RegistryURL:  fmt.Sprintf("k3d-%s:5000", cfg.Cluster.Registry),
+		Image:        opts.Image,
+		Context:      opts.Context,
+		Dockerfile:   opts.Dockerfile,
+		Target:       opts.Target,
 	}
 }
 
@@ -538,10 +525,11 @@ func WorkspaceDirs(repoDir string) ([]string, error) {
 
 // readConfig parses flywheel.yaml, merged with flywheel.yaml.local if
 // present. The merge matters for namespace/interval defaults (filled by the
-// shared loader when unset); image overrides no longer affect the committed
-// git-auto-sync manifest (it pins the canonical ghcr.io name, rewritten at
-// reconcile by the client-builders Kustomization), so a `.local` override
-// reaches the per-app sidecar through `up`, not through this read.
+// shared loader when unset); add-app no longer renders a per-app git-auto-sync
+// manifest at all (the controller is a single dev-loop Deployment, see
+// docs/designs/2026-07-17-per-app-sync-controller-design.md), so an
+// `images.git-auto-sync` override in flywheel.yaml(.local) is irrelevant here
+// — it reaches the controller through `up`, not through this read.
 func readConfig(repoDir string) (*schema.File, error) {
 	return config.Load(repoDir, config.LoadOptions{})
 }

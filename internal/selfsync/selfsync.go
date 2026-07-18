@@ -1,6 +1,10 @@
 // Package selfsync is the dev-loop's self/gitops sync controller: it owns the
 // git-auto-sync-self path end-to-end, replacing the sync.sh sidecar for the
-// gitops repo only (per-app git-auto-sync sidecars keep running sync.sh).
+// gitops repo only. The per-app path was a separate sync.sh sidecar at the
+// time this package was written; it has since been ported to Go too
+// (internal/appsync, docs/designs/2026-07-17-per-app-sync-controller-design.md)
+// — a distinct package, not this one, since the two paths' semantics differ
+// (auto-follow + bidirectional sync vs. this package's one-way AUTHORED→DEPLOY).
 //
 // Each tick it:
 //  1. pushes the host worktree's AUTHORED branch → the in-cluster bare repo

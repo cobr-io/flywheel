@@ -129,15 +129,21 @@ func TestAddApp_RendersBuilder(t *testing.T) {
 	if res.BuilderDir != filepath.Join(repo, "builders", "base", "hello") {
 		t.Errorf("BuilderDir = %q", res.BuilderDir)
 	}
-	// All seven per-app-template files should be rendered.
+	// All six per-app-template files should be rendered.
 	wantFiles := []string{
 		"kustomization.yaml", "gitrepository.yaml", "build-config.yaml",
-		"git-auto-sync.yaml", "imagerepository.yaml", "imagepolicy.yaml", "README.md",
+		"imagerepository.yaml", "imagepolicy.yaml", "README.md",
 	}
 	for _, f := range wantFiles {
 		if _, err := os.Stat(filepath.Join(res.BuilderDir, f)); err != nil {
 			t.Errorf("expected %s rendered: %v", f, err)
 		}
+	}
+	// git-auto-sync is now a single shared dev-loop controller
+	// (manifests/dev-loop/base/git-auto-sync.yaml), not a per-app sidecar —
+	// add-app must not render one.
+	if _, err := os.Stat(filepath.Join(res.BuilderDir, "git-auto-sync.yaml")); !os.IsNotExist(err) {
+		t.Errorf("expected no git-auto-sync.yaml rendered, stat err = %v", err)
 	}
 	raw, err := os.ReadFile(filepath.Join(res.BuilderDir, "gitrepository.yaml"))
 	if err != nil {
@@ -147,7 +153,7 @@ func TestAddApp_RendersBuilder(t *testing.T) {
 		t.Errorf("expected `name: hello` in gitrepository.yaml, got:\n%s", raw)
 	}
 	// All builder-side infra runs in flywheel-system, not apps.
-	for _, f := range []string{"gitrepository.yaml", "build-config.yaml", "git-auto-sync.yaml"} {
+	for _, f := range []string{"gitrepository.yaml", "build-config.yaml"} {
 		b, err := os.ReadFile(filepath.Join(res.BuilderDir, f))
 		if err != nil {
 			t.Fatal(err)
@@ -158,14 +164,6 @@ func TestAddApp_RendersBuilder(t *testing.T) {
 		if strings.Contains(string(b), "namespace: apps") {
 			t.Errorf("%s should not reference the apps namespace, got:\n%s", f, b)
 		}
-	}
-	gas, err := os.ReadFile(filepath.Join(res.BuilderDir, "git-auto-sync.yaml"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !strings.Contains(string(gas), "GITREPOSITORY_NAMESPACE") ||
-		!strings.Contains(string(gas), "value: flywheel-system") {
-		t.Errorf("git-auto-sync.yaml should patch the flywheel-system GitRepository, got:\n%s", gas)
 	}
 }
 
@@ -455,7 +453,10 @@ func TestAddApp_RendersAppsTemplate(t *testing.T) {
 // TestAddApp_DecouplesNameFromDir is the core Phase 2 behavior: the worktree
 // directory and the app name are independent. The name drives logical identity
 // (folders, resource names, Ingress host, image); the directory drives the
-// physical bindings (the /workspaces mount, the bare-repo URL, the GR url).
+// physical binding that remains per-app-rendered — the GitRepository's
+// bare-repo URL. (The /workspaces mount used to be a second per-app physical
+// binding, in the now-deleted git-auto-sync.yaml sidecar; the shared
+// dev-loop git-auto-sync controller mounts /workspaces once for every app.)
 func TestAddApp_DecouplesNameFromDir(t *testing.T) {
 	repo := setupRepo(t)
 	mkWorktree(t, repo, "sample-app", nil)
@@ -474,17 +475,9 @@ func TestAddApp_DecouplesNameFromDir(t *testing.T) {
 	if !strings.Contains(string(gr), "name: frontend") {
 		t.Errorf("GitRepository should be named frontend:\n%s", gr)
 	}
-	// Physical bindings follow the directory.
+	// Physical binding follows the directory.
 	if !strings.Contains(string(gr), "/sample-app.git") {
 		t.Errorf("GitRepository url should point at sample-app.git:\n%s", gr)
-	}
-	gas, _ := os.ReadFile(filepath.Join(res.BuilderDir, "git-auto-sync.yaml"))
-	s := string(gas)
-	if !strings.Contains(s, "/workspaces/sample-app") || !strings.Contains(s, "/sample-app.git") {
-		t.Errorf("git-auto-sync should mount /workspaces/sample-app and push sample-app.git:\n%s", s)
-	}
-	if !strings.Contains(s, "value: frontend") { // GITREPOSITORY_NAME = app name
-		t.Errorf("git-auto-sync GITREPOSITORY_NAME should be the app name frontend:\n%s", s)
 	}
 }
 
@@ -500,9 +493,9 @@ func TestAddApp_DerivesNameFromManifest(t *testing.T) {
 	if res.BuilderDir != filepath.Join(repo, "builders", "base", "cool-app") {
 		t.Errorf("BuilderDir = %q, want .../cool-app (derived)", res.BuilderDir)
 	}
-	gas, _ := os.ReadFile(filepath.Join(res.BuilderDir, "git-auto-sync.yaml"))
-	if !strings.Contains(string(gas), "/workspaces/myrepo") {
-		t.Errorf("worktree mount should still be /workspaces/myrepo:\n%s", gas)
+	gr, _ := os.ReadFile(filepath.Join(res.BuilderDir, "gitrepository.yaml"))
+	if !strings.Contains(string(gr), "/myrepo.git") {
+		t.Errorf("GitRepository url should still point at myrepo.git (the directory, not the derived name):\n%s", gr)
 	}
 }
 
@@ -677,18 +670,21 @@ func TestAddApp_ErrorsOnMissingLocalDomain(t *testing.T) {
 	}
 }
 
-// TestAddApp_PinsCanonicalGitAutoSyncImage locks in the design invariant: the
-// committed per-app git-auto-sync.yaml pins the *canonical* ghcr.io ref
-// (imagepin.DefaultRef at the flywheel version), NOT a resolved/dogfood ref —
-// even when flywheel.yaml(.local) carries a dogfood images override. The
-// override reaches the sidecar at `up` time via the client-builders
-// Kustomization's spec.images rewrite, so baking it into the committed manifest
-// would only pin a digest that goes stale on the next dogfood rebuild.
-func TestAddApp_PinsCanonicalGitAutoSyncImage(t *testing.T) {
+// TestAddApp_NoGitAutoSyncRendered locks in the Go-port invariant
+// (docs/designs/2026-07-17-per-app-sync-controller-design.md): add-app never
+// renders a per-app git-auto-sync manifest, even when flywheel.yaml(.local)
+// carries a `images.git-auto-sync` override — that key now only affects the
+// single shared dev-loop Deployment (manifests/dev-loop/base/git-auto-sync.yaml),
+// rewritten at `up` time, not anything add-app scaffolds. This test used to be
+// TestAddApp_PinsCanonicalGitAutoSyncImage, which locked in the opposite
+// invariant (the committed sidecar must pin the canonical ghcr.io ref, never
+// the override) back when add-app rendered a per-app sidecar at all.
+func TestAddApp_NoGitAutoSyncRendered(t *testing.T) {
 	for _, tc := range []struct {
 		name    string
 		overlay func(t *testing.T, repo string)
 	}{
+		{"no override", func(t *testing.T, repo string) {}},
 		{"override in flywheel.yaml.local", func(t *testing.T, repo string) {
 			localYAML := "flywheel:\n  images:\n    git-auto-sync: flywheel-dev/git-auto-sync:dogfood\n"
 			if err := os.WriteFile(filepath.Join(repo, "flywheel.yaml.local"), []byte(localYAML), 0o644); err != nil {
@@ -710,12 +706,8 @@ func TestAddApp_PinsCanonicalGitAutoSyncImage(t *testing.T) {
 			if _, err := Run(Options{RepoDir: repo, Worktree: "hello", Stdout: io.Discard}); err != nil {
 				t.Fatal(err)
 			}
-			raw, _ := os.ReadFile(filepath.Join(repo, "builders", "base", "hello", "git-auto-sync.yaml"))
-			if !strings.Contains(string(raw), "ghcr.io/cobr-io/git-auto-sync:v0.1.0") {
-				t.Errorf("git-auto-sync.yaml should pin the canonical ghcr.io ref:\n%s", raw)
-			}
-			if strings.Contains(string(raw), "flywheel-dev/git-auto-sync:dogfood") {
-				t.Errorf("git-auto-sync.yaml must not bake the dogfood override (it goes stale):\n%s", raw)
+			if _, err := os.Stat(filepath.Join(repo, "builders", "base", "hello", "git-auto-sync.yaml")); !os.IsNotExist(err) {
+				t.Errorf("expected no git-auto-sync.yaml rendered, stat err = %v", err)
 			}
 		})
 	}

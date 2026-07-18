@@ -11,17 +11,21 @@
 // than on a live cluster.
 //
 // This package is deliberately dependency-free (stdlib only) so every layer can
-// import it without introducing an import cycle. scripts/git-auto-sync/sync.sh
-// keeps its own bash copies of a few of these strings; agreement between the
-// bash and Go copies is enforced Go-side only (see the pointer comment there).
+// import it without introducing an import cycle. The former per-app
+// git-auto-sync sidecar (scripts/git-auto-sync/sync.sh, deleted — see
+// docs/designs/2026-07-17-per-app-sync-controller-design.md) kept its own bash
+// copies of a few of these strings; its Go-port replacement (internal/appsync)
+// imports this package directly instead, so there is no longer a cross-language
+// copy to keep in agreement.
 package naming
 
 // Managed-by marker. Every resource `flywheel up` applies imperatively (the
-// dev-loop machinery, the flywheel-config ConfigMap, the bootstrap flux-system
-// tree, the secrets) carries this label; resources Flux reconciles from the
-// gitops repo (app/infra workloads, per-app git-auto-sync sidecars) are
-// deliberately NOT labeled. `up`'s orphan prune scopes its scan to this label,
-// so the safety of that prune depends on every writer spelling it identically —
+// dev-loop machinery — including the single git-auto-sync Deployment,
+// manifests/dev-loop/base/git-auto-sync.yaml — the flywheel-config ConfigMap,
+// the bootstrap flux-system tree, the secrets) carries this label; resources
+// Flux reconciles from the gitops repo (app/infra workloads) are deliberately
+// NOT labeled. `up`'s orphan prune scopes its scan to this label, so the
+// safety of that prune depends on every writer spelling it identically —
 // which is exactly why it lives in one place here.
 const (
 	ManagedByLabelKey   = "app.kubernetes.io/managed-by"
@@ -47,9 +51,23 @@ const DeployBranchAnnotation = "flywheel.cobr.io/deploy-branch"
 const DeployBranch = "flywheel/local-deploy"
 
 // ReconcileRequestAnnotation is Flux's "reconcile now" trigger. The value is
-// opaque to Flux — it only has to differ from the last handled value. Also used
-// by scripts/git-auto-sync/sync.sh (bash copy).
+// opaque to Flux — it only has to differ from the last handled value. Also
+// used by internal/appsync (the git-auto-sync controller's tick poke) and
+// internal/selfsync.
 const ReconcileRequestAnnotation = "reconcile.fluxcd.io/requestedAt"
+
+// KustomizeReconcileDisabledAnnotation, set to KustomizeReconcileDisabledValue,
+// stops kustomize-controller from reconciling (and so re-applying a stale
+// spec.ref.branch from the source manifest over) a GitRepository that is
+// patched imperatively instead — the per-app branch-follow race (design doc
+// 2026-07-17-per-app-sync-controller-design.md, Open Issue #11). Present in
+// the source manifest it also blocks Flux's own creation/prune of the
+// resource, so it must only ever be added after first apply. Also used by
+// internal/appsync (the git-auto-sync controller's branch-follow patch).
+const (
+	KustomizeReconcileDisabledAnnotation = "kustomize.toolkit.fluxcd.io/reconcile"
+	KustomizeReconcileDisabledValue      = "disabled"
+)
 
 // FluxNamespace is the Flux install namespace. It is fixed by convention,
 // independent of the client-configurable flywheel/apps namespaces.
