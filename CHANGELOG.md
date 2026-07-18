@@ -9,6 +9,43 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-07-18
+
+### ⚠ BREAKING — per-app `git-auto-sync` sidecars are gone; existing gitops repos need a one-time manual migration
+
+Upgrading `flywheel.version` to `0.3.0` and re-running `flywheel up` is **not
+enough** for repos that already have apps. Per-app files under
+`builders/base/<app>/` are rendered once by `flywheel add app` and never
+re-rendered, so every existing app still carries a
+`builders/base/<app>/git-auto-sync.yaml` Deployment running the OLD bash
+sidecar — including its issue-#86 race.
+
+**What you must do, per gitops repo, per app:**
+
+```sh
+git rm builders/base/<app>/git-auto-sync.yaml
+git commit -m "migrate <app> to the shared git-auto-sync controller"
+git push
+```
+
+Flux prunes the old sidecar Deployment; the new controller takes the app over
+within a poll interval (~2s). Full walkthrough:
+[Upgrading § Migrating off the per-app sidecar](docs/guides/upgrading.md#migrating-off-the-per-app-git-auto-sync-sidecar-existing-repos).
+
+**Until you do this** the new controller deliberately stays hands-off for that
+app (it skips it and logs one warning — look for `legacy git-auto-sync sidecar
+Deployment still present` in `kubectl -n flywheel-system logs deploy/git-auto-sync`),
+so there is never a two-writer window — but the app keeps syncing through the
+old racy sidecar. Migrate each app on your own schedule; per-app migration is
+independent.
+
+**Not affected:** fresh `flywheel init` repos, and apps added with `flywheel
+add app` on ≥0.3.0 (the sidecar is simply no longer rendered). RBAC changes
+(the `git-auto-sync` Role gains `gitrepositories list, watch` + a
+`deployments get, list, watch` rule) apply automatically via `flywheel up`.
+
 ### Changed (2026-07-17, per-app `git-auto-sync` is now a shared Go controller)
 
 - **The per-app `git-auto-sync-<app>` bash sidecar (`scripts/git-auto-sync/sync.sh`)
@@ -23,23 +60,17 @@ During the v0.x phase no compat promise is made between minor versions
   scenario-4 failure). The new controller (`internal/appsync`) takes every
   decision against a `for-each-ref` snapshot (never bare `HEAD`) and
   re-verifies after every mutating step, rolling back and aborting the tick
-  if a checkout raced it. New `testdata/scenarios/scenario-6-branch-stress.sh`
-  rapid-fires ~10 sub-second branch flips to exercise the race directly
-  (nightly-only, like scenarios 2-4). See
+  if a checkout raced it. It also writes with `umask 0` and neutralizes git
+  hooks on every exec, fixing the root-owned-worktree-file (`EACCES`) facet.
+  New `testdata/scenarios/scenario-6-branch-stress.sh` rapid-fires ~10
+  sub-second branch flips to exercise the race directly (nightly-only, like
+  scenarios 2-4). Measured on the release sha: warm commit→serving 6-7s
+  (previous band 7-13s); the scenario-4 wedge mode (converge-never) is
+  structurally impossible. See
   [design](docs/designs/2026-07-17-per-app-sync-controller-design.md) and
   [plan](docs/plans/2026-07-17-per-app-sync-controller-plan.md).
-  - **New apps**: `flywheel add app` no longer renders
-    `builders/base/<name>/git-auto-sync.yaml` — nothing to do.
-  - **Existing repos**: per-app files are never re-rendered, so upgrading
-    `flywheel.version` alone leaves the old sidecar running. Finish the
-    migration per-app with `git rm builders/base/<app>/git-auto-sync.yaml`
-    (Flux prunes the old Deployment). The new controller interlocks against
-    that file — it skips (and warns once about) any app whose
-    `git-auto-sync.yaml` still exists, so there is never a two-writer window;
-    migrate apps on your own schedule. See
-    [Upgrading § Migrating off the per-app sidecar](docs/guides/upgrading.md#migrating-off-the-per-app-git-auto-sync-sidecar-existing-repos).
-  - RBAC: the `git-auto-sync` Role gains `gitrepositories` `list, watch` and a
-    new `apps/deployments` `get, list, watch` rule (the legacy interlock).
+
+## [0.2.0] - 2026-07-02
 
 ### Fixed (2026-07-02, mirror multi-arch released images under Docker's containerd image store)
 
@@ -70,6 +101,8 @@ During the v0.x phase no compat promise is made between minor versions
     `crane` binary is not invoked, and `flywheel doctor`'s host-tool checks are
     unchanged. Mirror failures now surface the underlying registry error instead
     of a bare `exit status 1`.
+
+## [0.1.0] - 2026-06-30
 
 ### Removed (2026-06-30, drop generic lint & secret-scanning from the client skeleton)
 
