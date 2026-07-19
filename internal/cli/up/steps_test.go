@@ -104,10 +104,13 @@ func TestRunSteps_Skip(t *testing.T) {
 }
 
 // TestRunSteps_PruneSkippedWhenBootstrapFailed locks the load-bearing
-// apply-flux-system → prune-machinery dependency: a non-critical
-// apply-flux-system failure clears bootstrapOK, and skipPrune must then elide
-// prune-machinery so a resource that failed to apply is never mistaken for a
-// superseded orphan.
+// apply-flux-system → prune-machinery dependency: an apply-flux-system
+// failure clears bootstrapOK, and skipPrune must then elide prune-machinery
+// so a resource that failed to apply is never mistaken for a superseded
+// orphan. In production apply-flux-system is critical (issue #117), so this
+// path is normally unreachable — runSteps aborts before prune-machinery is
+// even considered — but the bootstrapOK gate stays as belt-and-braces, and
+// this test exercises it directly with a locally-built (non-critical) step.
 func TestRunSteps_PruneSkippedWhenBootstrapFailed(t *testing.T) {
 	pruned := false
 	s := &upState{out: &bytes.Buffer{}, bootstrapOK: true}
@@ -144,6 +147,24 @@ func TestRunSteps_PruneRunsWhenBootstrapOK(t *testing.T) {
 	if !pruned {
 		t.Fatal("prune-machinery must run when bootstrapOK is true")
 	}
+}
+
+// TestUpSteps_ApplyFluxSystemIsCritical locks issue #117's fix: a failed
+// bootstrap apply must abort `up` with the real error, not degrade to a WARN
+// that the Ready-wait's found-set derivation could then silently paper over
+// (the wait only ever waits for whatever Kustomizations the API server
+// actually holds, so a dropped one shrank the success criterion instead of
+// failing the run).
+func TestUpSteps_ApplyFluxSystemIsCritical(t *testing.T) {
+	for _, st := range upSteps() {
+		if st.name == "apply-flux-system" {
+			if !st.critical {
+				t.Fatal("apply-flux-system must be critical: a failed bootstrap apply should abort `up`, not warn and continue")
+			}
+			return
+		}
+	}
+	t.Fatal("apply-flux-system step not found in upSteps()")
 }
 
 // TestStepSkipPredicates locks the skip functions the table wires in: the two

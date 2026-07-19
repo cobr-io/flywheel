@@ -167,7 +167,14 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
-	steps := []step{
+	return runSteps(s, upSteps())
+}
+
+// upSteps is the up pipeline's step table, factored out of Run so tests can
+// inspect it (e.g. locking a step's critical policy) without driving a full
+// cluster run.
+func upSteps() []step {
+	return []step{
 		{name: "load-config", critical: true, run: (*upState).loadConfig},
 		{name: "version-check", critical: true, run: (*upState).versionCheck},
 		{name: "check-host", critical: true, run: (*upState).checkHost},
@@ -191,13 +198,12 @@ func Run(ctx context.Context, opts Options) error {
 		{name: "dev-loop", critical: true, run: (*upState).devLoop},
 		{name: "wait-git-server", critical: true, run: (*upState).waitGitServer},
 		{name: "push-mirror", run: (*upState).pushMirror},
-		{name: "apply-flux-system", run: (*upState).applyFluxSystem},
+		{name: "apply-flux-system", critical: true, run: (*upState).applyFluxSystem},
 		{name: "prune-machinery", skip: skipPrune, run: (*upState).pruneMachinery},
 		{name: "create-secrets", critical: true, run: (*upState).createSecrets},
 		{name: "wait-flux-kustomizations", skip: skipWait, run: (*upState).waitFluxKustomizations},
 		{name: "success", critical: true, run: (*upState).printSuccess},
 	}
-	return runSteps(s, steps)
 }
 
 func skipFluxInstall(s *upState) bool { return s.opts.SkipFluxInstall }
@@ -601,9 +607,16 @@ func (s *upState) pushMirror() error {
 // applyFluxSystem applies the bootstrap flux-system tree from the rendered
 // tmpdir. Flux's Kustomization + GitRepository objects come into existence here
 // with `spec.images` / `spec.ref.commit` already matching the resolved refs +
-// cache SHA the rest of `up` is using — no follow-up refresh needed. Best-effort
-// (non-critical): on failure it warns and clears bootstrapOK so prune-machinery
-// is skipped (a resource that failed to apply must not be mistaken for an orphan).
+// cache SHA the rest of `up` is using — no follow-up refresh needed. Critical
+// (issue #117): a failed apply here used to be swallowed as a WARN, and the
+// Ready-wait derives its expected set from whatever Kustomizations the API
+// server actually holds — so a dropped resource silently shrank the success
+// criterion instead of failing the run, turning a deterministic apply
+// rejection into a 20-minute wait-timeout mystery. down=destroy / up=always-
+// recreate makes "re-run up" the remedy either way, so abort loudly here
+// instead. bootstrapOK is still cleared on failure as belt-and-braces for
+// prune-machinery (a resource that failed to apply must not be mistaken for
+// an orphan), even though the abort means that step is normally never reached.
 func (s *upState) applyFluxSystem() error {
 	err := style.Spin(s.out,
 		"bootstrap: applying flux-system (from in-memory bootstrap)",
@@ -664,9 +677,26 @@ func (s *upState) createSecrets() error {
 }
 
 // waitFluxKustomizations waits for Flux Kustomizations Ready (best-effort; the
-// Waiter renders its own header). Skipped when --wait=false.
+// Waiter renders its own header). Skipped when --wait=false. Waits on the
+// Kustomizations apply-flux-system actually applied (keepBootstrap), not
+// whatever the API server happens to list — issue #117, Tier 2.
 func (s *upState) waitFluxKustomizations() error {
-	return waitForFluxKustomizations(s.ctx, s.a, 3*time.Minute, s.out)
+	return waitForFluxKustomizations(s.ctx, s.a, kustomizationNames(s.keepBootstrap), 3*time.Minute, s.out)
+}
+
+// kustomizationNames extracts the Flux Kustomization names from a
+// ResourceRef set, for waitForFluxKustomizations' expected set (issue #117,
+// Tier 2): the bootstrap tree's keep set also includes the GitRepository and
+// ConfigMap/Namespace kinds apply-flux-system applies alongside it, which
+// aren't Kustomizations and have nothing to wait Ready on.
+func kustomizationNames(refs []applier.ResourceRef) []string {
+	names := make([]string, 0, len(refs))
+	for _, r := range refs {
+		if r.Kind == "Kustomization" {
+			names = append(names, r.Name)
+		}
+	}
+	return names
 }
 
 // printSuccess prints the closing summary. Don't fabricate an app URL here (no
