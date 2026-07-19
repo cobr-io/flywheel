@@ -119,6 +119,42 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 	}
 }
 
+// TestRenderBootstrap_NoExplicitNulls is the shift-left guard for issue #117
+// Tier 3a: walk every document the bootstrap tree renders and fail on any
+// explicit YAML null. This is the general form of the regex assertion above
+// (the specific `images:` case #115 hit) — it would have caught that
+// regression, and any future one shaped the same way (an empty
+// `{{ range }}` leaving a bare `key:` behind), directly in a unit test
+// instead of a live API server 400 buried in a 20-minute e2e timeout.
+// bootstrapImageOwners currently routes every image to imgOwnerDevLoop, so
+// this cfg — deliberately identical to TestRenderBootstrap_ResolvesImageRefs
+// — already exercises the empty-ClientBuilderImages path that regressed.
+func TestRenderBootstrap_NoExplicitNulls(t *testing.T) {
+	cfg := &flywheelSchema.File{}
+	cfg.Client.Name = "acme"
+	cfg.Cluster.Name = "acme-local"
+	cfg.Cluster.Registry = "acme-local-registry"
+	cfg.Cluster.RegistryPort = 50001
+	cfg.Flux.IntervalLocal = "10s"
+	cfg.Local.Domain = "localdev.me"
+	cfg.Namespaces.Apps = "apps"
+
+	refs := map[string]string{
+		"git-server":               "flywheel-dev/git-server:dogfood",
+		"git-auto-sync":            "flywheel-dev/git-auto-sync:dogfood",
+		"image-builder-controller": "flywheel-dev/image-builder-controller:dogfood",
+		"git-deploy-controller":    "flywheel-dev/git-deploy-controller:dogfood",
+	}
+
+	dir, err := RenderBootstrap(cfg, refs, "abc123def456abc123def456abc123def456abcd", "acme-gitops", "")
+	if err != nil {
+		t.Fatalf("renderBootstrap: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	lintNoExplicitNulls(t, dir)
+}
+
 // A configured git_server.memory_limit flows into the flywheel-dev-loop
 // Kustomization's patch, so Flux reconciles the cluster to the raised limit.
 func TestRenderBootstrap_GitServerMemoryLimit(t *testing.T) {

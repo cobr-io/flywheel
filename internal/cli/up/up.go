@@ -167,7 +167,14 @@ func Run(ctx context.Context, opts Options) error {
 		}
 	}()
 
-	steps := []step{
+	return runSteps(s, upSteps())
+}
+
+// upSteps is the up pipeline's step table, factored out of Run so tests can
+// inspect it (e.g. locking a step's critical policy) without driving a full
+// cluster run.
+func upSteps() []step {
+	return []step{
 		{name: "load-config", critical: true, run: (*upState).loadConfig},
 		{name: "version-check", critical: true, run: (*upState).versionCheck},
 		{name: "check-host", critical: true, run: (*upState).checkHost},
@@ -191,13 +198,12 @@ func Run(ctx context.Context, opts Options) error {
 		{name: "dev-loop", critical: true, run: (*upState).devLoop},
 		{name: "wait-git-server", critical: true, run: (*upState).waitGitServer},
 		{name: "push-mirror", run: (*upState).pushMirror},
-		{name: "apply-flux-system", run: (*upState).applyFluxSystem},
+		{name: "apply-flux-system", critical: true, run: (*upState).applyFluxSystem},
 		{name: "prune-machinery", skip: skipPrune, run: (*upState).pruneMachinery},
 		{name: "create-secrets", critical: true, run: (*upState).createSecrets},
 		{name: "wait-flux-kustomizations", skip: skipWait, run: (*upState).waitFluxKustomizations},
 		{name: "success", critical: true, run: (*upState).printSuccess},
 	}
-	return runSteps(s, steps)
 }
 
 func skipFluxInstall(s *upState) bool { return s.opts.SkipFluxInstall }
@@ -601,9 +607,16 @@ func (s *upState) pushMirror() error {
 // applyFluxSystem applies the bootstrap flux-system tree from the rendered
 // tmpdir. Flux's Kustomization + GitRepository objects come into existence here
 // with `spec.images` / `spec.ref.commit` already matching the resolved refs +
-// cache SHA the rest of `up` is using — no follow-up refresh needed. Best-effort
-// (non-critical): on failure it warns and clears bootstrapOK so prune-machinery
-// is skipped (a resource that failed to apply must not be mistaken for an orphan).
+// cache SHA the rest of `up` is using — no follow-up refresh needed. Critical
+// (issue #117): a failed apply here used to be swallowed as a WARN, and the
+// Ready-wait derives its expected set from whatever Kustomizations the API
+// server actually holds — so a dropped resource silently shrank the success
+// criterion instead of failing the run, turning a deterministic apply
+// rejection into a 20-minute wait-timeout mystery. down=destroy / up=always-
+// recreate makes "re-run up" the remedy either way, so abort loudly here
+// instead. bootstrapOK is still cleared on failure as belt-and-braces for
+// prune-machinery (a resource that failed to apply must not be mistaken for
+// an orphan), even though the abort means that step is normally never reached.
 func (s *upState) applyFluxSystem() error {
 	err := style.Spin(s.out,
 		"bootstrap: applying flux-system (from in-memory bootstrap)",
