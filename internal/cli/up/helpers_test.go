@@ -3,13 +3,21 @@ package up
 import (
 	"context"
 	"errors"
+	"io"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
+	dynamicfake "k8s.io/client-go/dynamic/fake"
+
+	"github.com/cobr-io/flywheel/internal/cli/applier"
+	"github.com/cobr-io/flywheel/internal/naming"
 )
 
 // A real, parseable age private key — loadAgeKey itself doesn't parse it, but
@@ -212,5 +220,85 @@ func TestMkcertRootSecret(t *testing.T) {
 	}
 	if got, _, _ := unstructured.NestedString(s.Object, "stringData", "ca.crt"); got != caPEM {
 		t.Errorf("ca.crt = %q, want the root CA PEM", got)
+	}
+}
+
+// TestKustomizationNames locks kustomizationNames' filter: only Kustomization
+// refs contribute a name (issue #117, Tier 2) — the bootstrap keep set also
+// carries GitRepository/ConfigMap/Namespace refs that have nothing to
+// Ready-wait on.
+func TestKustomizationNames(t *testing.T) {
+	refs := []applier.ResourceRef{
+		{Kind: "Kustomization", Name: "client-infra"},
+		{Kind: "GitRepository", Name: "flux-system"},
+		{Kind: "Kustomization", Name: "client-apps"},
+		{Kind: "ConfigMap", Name: "flywheel-config"},
+	}
+	got := kustomizationNames(refs)
+	want := []string{"client-infra", "client-apps"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("kustomizationNames = %v, want %v", got, want)
+	}
+}
+
+var kustomizationGVR = schema.GroupVersionResource{
+	Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Resource: "kustomizations",
+}
+
+// readyKustomization builds a Kustomization unstructured object reporting
+// Ready — enough for the fake dynamic client to serve back through
+// GetUnstructured.
+func readyKustomization(name string) *unstructured.Unstructured {
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "kustomize.toolkit.fluxcd.io/v1",
+		"kind":       "Kustomization",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": naming.FluxNamespace,
+		},
+		"status": map[string]interface{}{
+			"conditions": []interface{}{
+				map[string]interface{}{"type": "Ready", "status": "True"},
+			},
+		},
+	}}
+}
+
+// TestWaitForFluxKustomizations_MissingNameNeverResolves is Tier 2's core
+// property (issue #117): waitForFluxKustomizations must wait on the names it
+// was TOLD to expect, not whatever the API server happens to hold. Here
+// "client-infra" is Ready in the (fake) cluster but "client-apps" — part of
+// the expected set, e.g. because apply-flux-system applied it — never shows
+// up. The old found-set implementation would have listed one Kustomization,
+// seen it Ready, and reported "1/1 ready" success; seeding the expected set
+// up front must instead leave the wait pending on the missing name. Proven
+// here by canceling ctx quickly and asserting the wait was still going
+// (returned the context's error) instead of having already declared success.
+func TestWaitForFluxKustomizations_MissingNameNeverResolves(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{kustomizationGVR: "KustomizationList"},
+		readyKustomization("client-infra"))
+	a := applier.NewForTest(dyn, nil)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	err := waitForFluxKustomizations(ctx, a, []string{"client-infra", "client-apps"}, time.Minute, io.Discard)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("waitForFluxKustomizations = %v, want context.DeadlineExceeded (must still be waiting on the missing name, not declaring success)", err)
+	}
+}
+
+// The inverse: once every expected name is present and Ready, the wait
+// returns nil — Tier 2 must not regress the happy path.
+func TestWaitForFluxKustomizations_AllPresentAndReadySucceeds(t *testing.T) {
+	dyn := dynamicfake.NewSimpleDynamicClientWithCustomListKinds(runtime.NewScheme(),
+		map[schema.GroupVersionResource]string{kustomizationGVR: "KustomizationList"},
+		readyKustomization("client-infra"), readyKustomization("client-apps"))
+	a := applier.NewForTest(dyn, nil)
+
+	err := waitForFluxKustomizations(context.Background(), a, []string{"client-infra", "client-apps"}, time.Minute, io.Discard)
+	if err != nil {
+		t.Fatalf("waitForFluxKustomizations = %v, want nil once every expected name is Ready", err)
 	}
 }

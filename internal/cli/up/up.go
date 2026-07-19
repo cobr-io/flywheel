@@ -677,9 +677,26 @@ func (s *upState) createSecrets() error {
 }
 
 // waitFluxKustomizations waits for Flux Kustomizations Ready (best-effort; the
-// Waiter renders its own header). Skipped when --wait=false.
+// Waiter renders its own header). Skipped when --wait=false. Waits on the
+// Kustomizations apply-flux-system actually applied (keepBootstrap), not
+// whatever the API server happens to list — issue #117, Tier 2.
 func (s *upState) waitFluxKustomizations() error {
-	return waitForFluxKustomizations(s.ctx, s.a, 3*time.Minute, s.out)
+	return waitForFluxKustomizations(s.ctx, s.a, kustomizationNames(s.keepBootstrap), 3*time.Minute, s.out)
+}
+
+// kustomizationNames extracts the Flux Kustomization names from a
+// ResourceRef set, for waitForFluxKustomizations' expected set (issue #117,
+// Tier 2): the bootstrap tree's keep set also includes the GitRepository and
+// ConfigMap/Namespace kinds apply-flux-system applies alongside it, which
+// aren't Kustomizations and have nothing to wait Ready on.
+func kustomizationNames(refs []applier.ResourceRef) []string {
+	names := make([]string, 0, len(refs))
+	for _, r := range refs {
+		if r.Kind == "Kustomization" {
+			names = append(names, r.Name)
+		}
+	}
+	return names
 }
 
 // printSuccess prints the closing summary. Don't fabricate an app URL here (no

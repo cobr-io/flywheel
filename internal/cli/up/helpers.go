@@ -19,43 +19,45 @@ import (
 	"github.com/cobr-io/flywheel/internal/naming"
 )
 
-// waitForFluxKustomizations polls every Flux Kustomization across the
-// cluster until each reports Ready or `timeout` elapses. Surfaces
-// "blocked on: <dep>" inline when a Kustomization's Not-Ready reason
-// is a dependency lag, so the user sees which link in the chain is
-// holding the rest up.
-func waitForFluxKustomizations(ctx context.Context, a *applier.Applier, timeout time.Duration, out io.Writer) error {
+// waitForFluxKustomizations polls the given Flux Kustomizations — named,
+// not discovered — until each reports Ready or `timeout` elapses. Surfaces
+// "blocked on: <dep>" inline when a Kustomization's Not-Ready reason is a
+// dependency lag, so the user sees which link in the chain is holding the
+// rest up.
+//
+// `names` is the set `up` actually applied (issue #117, Tier 2), not
+// whatever the API server happens to list: LISTing and waiting on the
+// found set let a dropped Kustomization silently shrink the success
+// criterion (e.g. "4/4 ready" instead of "5/5, one missing"). Polling each
+// expected name by GetUnstructured — the same by-name pattern
+// converge.WaitForDeployments already uses — means a Kustomization that
+// goes missing, by any means, fails the wait BY NAME within the timeout
+// instead of vanishing from the denominator.
+func waitForFluxKustomizations(ctx context.Context, a *applier.Applier, names []string, timeout time.Duration, out io.Writer) error {
 	gvr := schema.GroupVersionResource{Group: "kustomize.toolkit.fluxcd.io", Version: "v1", Resource: "kustomizations"}
 	w := style.NewWaiter(out, "waiting for Flux Kustomizations Ready")
+	for _, n := range names {
+		w.Add(n)
+	}
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
-		items, err := a.ListUnstructured(ctx, gvr, "")
-		if err != nil {
-			// CRD may not exist yet; retry (Tick the spinner so the
-			// user sees we're alive).
-			w.Tick()
-			if err := waitTick(ctx, 2*time.Second); err != nil {
-				w.Done("")
-				return err
-			}
-			continue
-		}
-		// On the first list, seed all items so the layout is stable
-		// across redraws even if a Kustomization transiently disappears.
-		for _, it := range items {
-			w.Add(it.GetName())
-		}
-		for _, it := range items {
-			name := it.GetName()
-			if kustomizationReady(&it) {
-				w.Set(name, style.Ready, "ready")
-			} else {
-				w.Set(name, style.Pending, kustomizationDetail(&it))
+		for _, n := range names {
+			u, err := a.GetUnstructured(ctx, gvr, naming.FluxNamespace, n)
+			switch {
+			case err != nil:
+				// Not found yet (CRD not registered, or apply hasn't landed
+				// it) — keep it Pending so a name that never appears times
+				// out loudly instead of being missed.
+				w.Set(n, style.Pending, "waiting to appear")
+			case kustomizationReady(u):
+				w.Set(n, style.Ready, "ready")
+			default:
+				w.Set(n, style.Pending, kustomizationDetail(u))
 			}
 		}
 		w.Tick()
-		if len(items) > 0 && w.AllResolved() {
-			w.Done(fmt.Sprintf("%d Flux Kustomization(s) Ready", len(items)))
+		if w.AllResolved() {
+			w.Done(fmt.Sprintf("%d Flux Kustomization(s) Ready", len(names)))
 			return nil
 		}
 		if err := waitTick(ctx, 2*time.Second); err != nil {
