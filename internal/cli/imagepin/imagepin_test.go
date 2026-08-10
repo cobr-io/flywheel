@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"runtime"
@@ -19,6 +20,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/v1/mutate"
 	"github.com/google/go-containerregistry/pkg/v1/random"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 	"github.com/google/go-containerregistry/pkg/v1/types"
 )
 
@@ -343,25 +345,117 @@ func TestMirrorToRegistry_LocalOnlyRefUsesDockerPath(t *testing.T) {
 	}
 }
 
-// A read failure on the unmodified default ref surfaces the option-(c) override
-// guidance, with the underlying cause preserved for diagnosis.
-func TestMirrorRemote_DefaultRefReadFailureReturnsOptionC(t *testing.T) {
+// The two ways reading the default ghcr ref can fail demand OPPOSITE remedies,
+// so mirrorRemote has to tell them apart. Only the registry itself answering
+// "not there" may steer the user to hand-build the image and pin an override;
+// a request that never completed — the classic case being a docker credential
+// helper left behind by an uninstalled Docker Desktop, which breaks even
+// anonymous pulls of public images — must not, or the user ends up permanently
+// off released images to work around a purely local fault.
+func TestMirrorRemote_DefaultRefFailureSeparatesAbsenceFromEnvironment(t *testing.T) {
 	t.Parallel()
-	cause := errors.New("MANIFEST_UNKNOWN: manifest unknown")
+	const overrideStanza = "flywheel.yaml.local"
+
+	tests := []struct {
+		name string
+		// cause is what the registry read returns.
+		cause error
+		// wantOverride: the message offers the build-locally-and-pin stanza.
+		wantOverride bool
+	}{
+		{
+			name: "404 manifest unknown is genuine absence",
+			cause: &transport.Error{
+				StatusCode: http.StatusNotFound,
+				Errors:     []transport.Diagnostic{{Code: transport.ManifestUnknownErrorCode, Message: "manifest unknown"}},
+			},
+			wantOverride: true,
+		},
+		{
+			name: "unknown repository is genuine absence",
+			cause: &transport.Error{
+				StatusCode: http.StatusNotFound,
+				Errors:     []transport.Diagnostic{{Code: transport.NameUnknownErrorCode, Message: "repository name not known"}},
+			},
+			wantOverride: true,
+		},
+		{
+			name:         "published index carries no artifact for this platform",
+			cause:        errors.New("no child with platform {Architecture:s390x OS:linux} in index ghcr.io/cobr-io/git-server:v0.1.0"),
+			wantOverride: true,
+		},
+		{
+			name:         "broken credential helper never reached the registry",
+			cause:        errors.New(`error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH, out: ` + "``"),
+			wantOverride: false,
+		},
+		{
+			name: "denied access says nothing about existence",
+			cause: &transport.Error{
+				StatusCode: http.StatusUnauthorized,
+				Errors:     []transport.Diagnostic{{Code: transport.UnauthorizedErrorCode, Message: "authentication required"}},
+			},
+			wantOverride: false,
+		},
+		{
+			name:         "rate limiting is transient, not absence",
+			cause:        &transport.Error{StatusCode: http.StatusTooManyRequests},
+			wantOverride: false,
+		},
+		{
+			name:         "connection never established",
+			cause:        errors.New("dial tcp: lookup ghcr.io: no such host"),
+			wantOverride: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			d := defaultDeps()
+			d.remoteImage = func(_ context.Context, _ name.Reference, _ v1.Platform) (v1.Image, error) {
+				return nil, tc.cause
+			}
+			_, err := mirrorRemote(context.Background(), d,
+				DefaultRef("git-server", "v0.1.0"), "acme-local-registry", 50001, "git-server", "v0.1.0", io.Discard)
+			if err == nil {
+				t.Fatal("want an error on read failure")
+			}
+			if got := strings.Contains(err.Error(), overrideStanza); got != tc.wantOverride {
+				t.Errorf("message offers %q = %v, want %v\ngot message:\n%s", overrideStanza, got, tc.wantOverride, err)
+			}
+			// Either way the operator needs the real cause to diagnose.
+			if !errors.Is(err, tc.cause) {
+				t.Errorf("underlying cause should be wrapped for diagnosis, got: %v", err)
+			}
+		})
+	}
+}
+
+// The environment message must stand on its own: the whole failure mode is
+// that a user cannot tell a broken local docker from a missing release, so it
+// names the credential-helper trap, says where to fix it, and gives a check
+// that exercises the same credential and network path.
+func TestMirrorRemote_EnvironmentFailureGivesLocalDiagnosis(t *testing.T) {
+	t.Parallel()
 	d := defaultDeps()
 	d.remoteImage = func(_ context.Context, _ name.Reference, _ v1.Platform) (v1.Image, error) {
-		return nil, cause
+		return nil, errors.New(`error getting credentials - err: exec: "docker-credential-desktop": executable file not found in $PATH`)
 	}
-	_, err := mirrorRemote(context.Background(), d,
-		DefaultRef("git-server", "v0.1.0"), "acme-local-registry", 50001, "git-server", "v0.1.0", io.Discard)
+	ref := DefaultRef("git-server", "v0.1.0")
+	_, err := mirrorRemote(context.Background(), d, ref, "acme-local-registry", 50001, "git-server", "v0.1.0", io.Discard)
 	if err == nil {
 		t.Fatal("want an error on read failure")
 	}
-	if !strings.Contains(err.Error(), "flywheel.yaml.local") {
-		t.Errorf("expected option-(c) override guidance, got: %v", err)
-	}
-	if !errors.Is(err, cause) {
-		t.Errorf("underlying cause should be wrapped for diagnosis, got: %v", err)
+	for _, want := range []string{
+		"credsStore",            // the actual trap, by name
+		"~/.docker/config.json", // and where it lives
+		"docker pull " + ref,    // a check using the same path that just failed
+		"docker login ghcr.io",  // the other routine cause
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("environment guidance is missing %q\ngot message:\n%s", want, err)
+		}
 	}
 }
 

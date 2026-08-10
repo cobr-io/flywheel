@@ -28,9 +28,13 @@
 //     Tagging: the immutable `:<version>` for the default ref (the version IS
 //     the content address for a release), or a content-addressed
 //     `:dogfood-<sha>` derived from the source image digest for an override.
-//     If reading the default ref fails and no override is set, return
-//     option (c) — a clear error naming the override stanza for
-//     `flywheel.yaml.local`.
+//     If reading the default ref fails and no override is set, the error
+//     depends on WHY (classifyFetch): only a definitive "not there" from the
+//     registry returns option (c), naming the `flywheel.yaml.local` override
+//     stanza. A request that never completed — a broken docker credential
+//     helper, an expired login, network trouble — reports an environment
+//     failure instead, because pinning a hand-built override to get past a
+//     local fault strands the client off released images for good.
 //
 //   - Local-only dogfood ref (`flywheel-dev/<name>:dogfood`, naming no
 //     registry): these exist only in the host docker store (a `make images`
@@ -49,8 +53,10 @@ package imagepin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os/exec"
 	"runtime"
 	"strings"
@@ -62,6 +68,7 @@ import (
 	"github.com/google/go-containerregistry/pkg/name"
 	v1 "github.com/google/go-containerregistry/pkg/v1"
 	"github.com/google/go-containerregistry/pkg/v1/remote"
+	"github.com/google/go-containerregistry/pkg/v1/remote/transport"
 )
 
 // deps bundles imagepin's external dependencies — docker daemon queries and
@@ -131,11 +138,21 @@ func IsDefault(name, version, ref string) bool {
 // image built by `make images` (`flywheel-dev/<name>:dogfood`) has no registry
 // host — it lives only in the local docker store, so pulling it is doomed.
 func hasRegistryHost(ref string) bool {
+	host := registryHost(ref)
+	return strings.ContainsAny(host, ".:") || host == "localhost"
+}
+
+// registryHost returns the registry component of `ref` — everything before the
+// first '/' — or "" for a bare "name:tag" Docker Hub library image. It applies
+// the same syntactic split as hasRegistryHost without judging whether the
+// result is a real host, so callers that only need the string (error messages
+// naming a `docker login` target) can share the parse.
+func registryHost(ref string) string {
 	host, _, ok := strings.Cut(ref, "/")
 	if !ok {
-		return false // bare "name:tag" — a Docker Hub library image
+		return ""
 	}
-	return strings.ContainsAny(host, ".:") || host == "localhost"
+	return host
 }
 
 // isLocalOnlyOverride reports whether `ref` is an override that can only come
@@ -277,12 +294,12 @@ func mirrorRemote(ctx context.Context, d deps, ref, registryName string, registr
 	platform := hostPlatform(ctx, d)
 	img, err := d.remoteImage(ctx, srcRef, platform)
 	if err != nil {
-		// A read failure on the unmodified default ref means no published
-		// release is reachable — surface the option-(c) override guidance.
-		// The underlying cause (auth, 404, no matching platform) rides along
-		// via %w, so the failure stays diagnosable (issue #50 secondary ask).
+		// A read failure on the unmodified default ref splits two ways, and
+		// the remedies are opposites — see defaultRefError. The underlying
+		// cause rides along via %w either way, so the failure stays
+		// diagnosable (issue #50 secondary ask).
 		if IsDefault(imageName, version, ref) {
-			return "", optionCError(imageName, version, ref, err)
+			return "", defaultRefError(imageName, ref, err)
 		}
 		return "", fmt.Errorf("read %s: %w", ref, err)
 	}
@@ -412,15 +429,112 @@ func ensureLocal(ctx context.Context, d deps, ref, imageName string) error {
 	return MissingDogfoodError([]MissingDogfood{{Name: imageName, Ref: ref}})
 }
 
-// optionCError formats the design's option-(c) failure: the message
-// names the missing image, the version, and shows the exact override
-// stanza the user needs to add to flywheel.yaml.local.
-func optionCError(name, version, ref string, underlying error) error {
+// fetchFailure is why a read of the DEFAULT ghcr ref failed. The two modes
+// call for opposite remedies, so they must not be conflated.
+type fetchFailure int
+
+const (
+	// fetchUnavailable: the registry gave a definitive answer and that answer
+	// was "nothing here" — no such tag or repository, or an index carrying no
+	// artifact for this cluster's platform. Building locally and pinning an
+	// override is the genuine remedy (design option (c)).
+	fetchUnavailable fetchFailure = iota
+	// fetchUnreachable: no definitive answer ever arrived — a broken docker
+	// credential helper, an expired login, DNS/TLS/proxy trouble, rate
+	// limiting, a 5xx. The release is probably fine and this machine is not,
+	// so pinning an override would hide a local fault behind a permanent
+	// desync from released images.
+	fetchUnreachable
+)
+
+// classifyFetch decides which mode `err` represents. The bar for claiming a
+// release does not exist is high on purpose: only the registry itself saying
+// so counts. Anything else defaults to fetchUnreachable, because wrongly
+// telling a user to hand-build an image is far more costly than wrongly
+// telling them to check their docker setup.
+func classifyFetch(err error) fetchFailure {
+	if terr, ok := errors.AsType[*transport.Error](err); ok {
+		if terr.StatusCode == http.StatusNotFound {
+			return fetchUnavailable
+		}
+		for _, d := range terr.Errors {
+			if d.Code == transport.ManifestUnknownErrorCode || d.Code == transport.NameUnknownErrorCode {
+				return fetchUnavailable
+			}
+		}
+		// A registry that answered with anything else — 401/403 (not logged
+		// in, or the package is private), 429, 5xx — has not told us the
+		// image is absent.
+		return fetchUnreachable
+	}
+	// A multi-arch index that exists but has no child for the cluster's
+	// platform: published, yet unusable here, so the option-(c) remedy still
+	// applies. go-containerregistry returns this untyped (remote/index.go,
+	// childByPlatform), so matching its text is the only signal available; if
+	// upstream rewords it we fall through to the environment message, which is
+	// the safe default.
+	if strings.Contains(err.Error(), "no child with platform") {
+		return fetchUnavailable
+	}
+	return fetchUnreachable
+}
+
+// defaultRefError renders the right guidance for a failed read of the default
+// ghcr ref: build-and-override when the release genuinely isn't there, or
+// fix-your-machine when the request never completed.
+func defaultRefError(name, ref string, underlying error) error {
+	if classifyFetch(underlying) == fetchUnreachable {
+		return unreachableError(name, ref, underlying)
+	}
+	return optionCError(name, ref, underlying)
+}
+
+// unreachableError formats the environment-failure mode. It deliberately does
+// NOT offer the flywheel.yaml.local override stanza: the release most likely
+// exists, and pinning a hand-built image to get past a local docker problem
+// silently strands the user off released images indefinitely.
+func unreachableError(name, ref string, underlying error) error {
+	return fmt.Errorf(`%s: could not reach the registry for the default ref
+  ref:   %s
+  cause: %w
+
+The registry never reported this image as missing, so the release is most
+likely fine — something on this machine blocked the request. Usual causes:
+
+  - A stale docker credential helper. Removing Docker Desktop leaves
+    "credsStore": "desktop" behind in ~/.docker/config.json, and the docker
+    client then fails EVERY registry call, including anonymous pulls of
+    public images. Point it at a helper you actually have installed
+    (osxkeychain, secretservice, pass) or delete the key.
+  - Not logged in to a registry that requires it: docker login %s
+  - No route to the registry — VPN, proxy, firewall, DNS — or the registry
+    is rate-limiting or down.
+
+Confirm with a plain pull, which uses the same credentials and network path:
+
+  docker pull %s
+
+Do not work around this with an override — pinning
+
+  flywheel.images.%s
+
+swaps a released image for a hand-built one permanently. Fix the access
+problem above and re-run.
+`, name, ref, underlying, registryHost(ref), ref, name)
+}
+
+// optionCError formats the design's option-(c) failure: the message names the
+// image, the ref the registry had nothing for, and the exact override stanza
+// the user needs to add to flywheel.yaml.local. Reserved for a fetch the
+// registry definitively answered (classifyFetch → fetchUnavailable) — the ref
+// already carries the version, so this is only reached when that exact
+// released artifact is genuinely unavailable.
+func optionCError(name, ref string, underlying error) error {
 	return fmt.Errorf(`%s: could not fetch the default ghcr.io ref
   ref:   %s
   cause: %w
 
-No published release exists for this version, and no override is set.
+The registry has no image to serve for this ref, and no override is set.
 Build the image locally and add this to flywheel.yaml.local:
 
   flywheel:
