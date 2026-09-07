@@ -9,11 +9,15 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.0] - 2026-09-07
+
 ### Added
 
 - `git_auto_sync.memory_limit` makes the shared worktree-sync controller's
   memory limit configurable, applied through both Flywheel reconciliation
-  paths so a raised limit isn't reverted by the other one.
+  paths so a raised limit isn't reverted by the other one. (#131)
 
 ### Changed
 
@@ -28,7 +32,15 @@ During the v0.x phase no compat promise is made between minor versions
 
   Note that a `flywheel.yaml` written by this version carries a
   `git_auto_sync:` block that an older CLI rejects (parsing is strict); pin
-  the same version across the team, per the v0.x compat policy above.
+  the same version across the team, per the v0.x compat policy above. (#131)
+
+- `flywheel up`'s apply-flux-system step is now critical: a failed bootstrap
+  apply aborts with the real error instead of warning and letting the
+  Ready-wait shrink its own success criterion, which previously turned a
+  rendered-template regression into a 20-minute e2e timeout. Unit tests also
+  lint every rendered bootstrap document for explicit YAML nulls, catching the
+  empty-`{{ range }}`-leaves-a-bare-key class before it reaches a live API
+  server. (#120, closes #117)
 
 ### Fixed
 
@@ -36,7 +48,28 @@ During the v0.x phase no compat promise is made between minor versions
   referenced BuildKit Secret. Secret validation therefore uses the intended
   namespace-scoped `get` permission instead of attempting a cluster-wide
   Secret list/watch, which made the controller unready and stalled unrelated
-  builds as soon as a build declared `secrets:`.
+  builds as soon as a build declared `secrets:`. (#131)
+
+- Registry access failures are no longer reported as missing releases. Any
+  failed read of the default ghcr ref used to claim "No published release
+  exists for this version" and steer you into building the image locally and
+  pinning `flywheel.images.<name>` — damaging advice when the real cause was
+  local, most commonly a stale `"credsStore": "desktop"` in
+  `~/.docker/config.json` after uninstalling Docker Desktop. Only a definitive
+  answer from the registry (404, `MANIFEST_UNKNOWN`/`NAME_UNKNOWN`, or an index
+  with no child for the cluster's platform) now keeps the build-and-pin
+  guidance; everything else reports an environment failure that names the
+  credsStore trap and warns against pinning an override. (#126)
+
+### Security
+
+- Cleared all reachable govulncheck findings: `go` 1.26.5 → 1.26.6 (net/url,
+  crypto/tls, net/http, encoding/xml) and `golang.org/x/crypto` v0.54.0 →
+  v0.56.0 (two SSH channel DoS issues reachable via `mirror.Push`). Eight
+  vulnerabilities were reachable from called code; `govulncheck ./...` now
+  reports none. Note that neither class is covered by the weekly Dependabot
+  update — stdlib CVEs sit outside any Dependabot ecosystem, and x/crypto is
+  an indirect dependency.
 
 ## [0.3.0] - 2026-07-18
 
