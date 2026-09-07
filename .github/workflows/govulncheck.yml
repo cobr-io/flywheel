@@ -4,10 +4,25 @@ name: govulncheck
 # matching, govulncheck only reports CVEs in code paths the binary actually
 # calls (go.mod deps + stdlib), so a red run is almost always actionable.
 #
-# Scheduled / non-blocking by design: it does NOT gate PRs. A weekly run (plus
-# on-demand dispatch) surfaces newly-disclosed vulns; a failed run is the
-# signal — GitHub emails repo admins on scheduled-workflow failure.
+# Gates PRs. This was scheduled-only and non-blocking until v0.4.0, on the
+# theory that emailing admins on a failed scheduled run was signal enough. It
+# wasn't: the run went red for three consecutive weeks (2026-08-24 onward) with
+# 8 vulnerabilities reachable from called code, nobody acted, and v0.4.0 nearly
+# shipped with them — the second time this regressed after #123 cleared it.
+#
+# The weekly run stays: it is the only thing that catches a vuln disclosed
+# against code nobody is currently touching. The PR trigger catches the other
+# direction — a dependency or toolchain bump that introduces one.
+#
+# Consequence to know about: because the vuln DB is fetched fresh each run, a
+# newly-disclosed vuln can turn an unrelated PR red through no fault of its
+# author. That is the intended trade — a red PR is a bump away from green, and
+# it is strictly better than the silence this replaces.
 on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]      # keeps main's own status green/red, not just PRs
   schedule:
     - cron: "0 6 * * 1"   # Mondays 06:00 UTC (aligns with the Dependabot day)
   workflow_dispatch: {}   # manual run after a disclosure / before a release
