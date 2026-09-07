@@ -62,7 +62,11 @@ spec:
               memory: 32Mi
             limits:
               cpu: 200m
-              memory: 128Mi
+              # Overwritten on both apply paths by the git_auto_sync.memory_limit
+              # patch (renderDevLoopKustomization + the flywheel-dev-loop
+              # Kustomization); kept equal to schema.DefaultGitAutoSyncMemoryLimit
+              # so a raw `kubectl apply -k` of this tree lands the same value.
+              memory: 256Mi
       volumes:
         # The developer's app worktrees, bind-mounted into k3d at /workspaces —
         # same hostPath every per-app git-auto-sync sidecar used to mount

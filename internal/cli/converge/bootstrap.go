@@ -125,9 +125,13 @@ type bootstrapContext struct {
 	RepoBaseName string
 	// FluxIacInterval is the client-infra reconcile cadence (flux.iac_interval,
 	// falling back to interval_local).
-	FluxIacInterval      string
-	FlywheelSHA          string
-	GitServerMemoryLimit string
+	FluxIacInterval string
+	FlywheelSHA     string
+	// DevLoopLimits feeds builders-kustomization.yaml.tmpl's memory patches.
+	// It is the SAME value ApplyDevLoop patches with on the direct-apply path
+	// (both come from DevLoopLimitsFor), which is what stops the two reconcile
+	// paths from fighting over a Deployment's limit.
+	DevLoopLimits DevLoopLimits
 	// FlywheelConfigData is the flywheel-config ConfigMap's full key/value map
 	// from the single producer (FlywheelConfigData). flywheel-config.yaml.tmpl
 	// ranges over it (text/template visits map keys in sorted order, so the
@@ -179,14 +183,14 @@ func bootstrapValues(cfg *flywheelSchema.File, refs map[string]string, flywheelS
 	// loader-defaulted (config.Load → applyLoadDefaults) by the time up reaches
 	// RenderBootstrap, so AppsNamespace is never empty in production.
 	return bootstrapContext{
-		Core:                 flywheelSchema.NewCore(cfg),
-		RepoBaseName:         repoBaseName,
-		FluxIacInterval:      iacInterval,
-		FlywheelSHA:          flywheelSHA,
-		GitServerMemoryLimit: cfg.GitServerMemoryLimit(),
-		FlywheelConfigData:   FlywheelConfigData(cfg, repoBaseName, buildKitClientRef),
-		DevLoopImages:        devLoopImages,
-		ClientBuilderImages:  clientBuilderImages,
+		Core:                flywheelSchema.NewCore(cfg),
+		RepoBaseName:        repoBaseName,
+		FluxIacInterval:     iacInterval,
+		FlywheelSHA:         flywheelSHA,
+		DevLoopLimits:       DevLoopLimitsFor(cfg),
+		FlywheelConfigData:  FlywheelConfigData(cfg, repoBaseName, buildKitClientRef),
+		DevLoopImages:       devLoopImages,
+		ClientBuilderImages: clientBuilderImages,
 	}, nil
 }
 

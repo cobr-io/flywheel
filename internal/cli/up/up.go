@@ -571,15 +571,16 @@ func (s *upState) flywheelConfig() error {
 // devLoop applies the dev-loop overlay (also where the inotify DaemonSet
 // lands). Rewrites the overlay's image references for THIS
 // client using the resolved (override-aware) refs from mirror-images, and
-// patches git-server's memory limit (cfg.git_server.memory_limit) — the same
-// limit rendered into the flywheel-dev-loop Flux Kustomization by
-// apply-flux-system, so this direct apply and Flux's reconcile agree. keepDevLoop
+// patches the git-server and git-auto-sync memory limits — DevLoopLimitsFor is
+// also what apply-flux-system renders into the flywheel-dev-loop Flux
+// Kustomization, so this direct apply and Flux's reconcile agree by
+// construction. keepDevLoop
 // ∪ keepBootstrap form the keep set prune-machinery scans against — the resources
 // THIS run applied.
 func (s *upState) devLoop() error {
 	devLoopDir := filepath.Join(s.cacheDir, "manifests", "dev-loop", "overlays", "local")
 	return style.Spin(s.out, "bootstrap: dev-loop overlay", func() error {
-		keep, e := converge.ApplyDevLoop(s.ctx, s.a, devLoopDir, s.resolvedImages, s.cfg.GitServerMemoryLimit(), s.out)
+		keep, e := converge.ApplyDevLoop(s.ctx, s.a, devLoopDir, s.resolvedImages, converge.DevLoopLimitsFor(s.cfg), s.out)
 		s.keepDevLoop = keep
 		return e
 	})

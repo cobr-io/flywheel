@@ -15,10 +15,12 @@ import (
 	"os"
 
 	sourcev1 "github.com/fluxcd/source-controller/api/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
@@ -38,6 +40,22 @@ func envOrFlag(flagVal, envKey string) string {
 		return flagVal
 	}
 	return os.Getenv(envKey)
+}
+
+func managerOptions(probeAddr string) ctrl.Options {
+	return ctrl.Options{
+		Scheme:                 scheme,
+		HealthProbeBindAddress: probeAddr,
+		Client: client.Options{
+			Cache: &client.CacheOptions{
+				// Build secrets are fetched by name from the builder namespace.
+				// Bypass the informer cache so this read needs only the
+				// namespaced `get` permission declared in rbac.yaml, rather
+				// than a cluster-wide Secret list/watch.
+				DisableFor: []client.Object{&corev1.Secret{}},
+			},
+		},
+	}
 }
 
 func main() {
@@ -85,10 +103,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
-		Scheme:                 scheme,
-		HealthProbeBindAddress: probeAddr,
-	})
+	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), managerOptions(probeAddr))
 	if err != nil {
 		ctrl.Log.Error(err, "unable to start manager")
 		os.Exit(1)

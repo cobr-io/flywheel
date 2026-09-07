@@ -39,12 +39,17 @@ spec:
       newName: {{ .ImageName }}
       newTag: {{ .ImageTag }}
 {{- end }}
-  # git-server memory limit (cfg.git_server.memory_limit, default 128Mi). The
-  # base manifest bakes in 128Mi; this patch lets a client raise it for large
-  # repos whose git-upload-pack would otherwise OOMKill the pod (issue #4).
-  # Rendered fresh on every `up`, so a change reconciles onto a live cluster —
-  # and matches the limit the step-11a direct apply (ApplyDevLoop) sets, so the
-  # two paths don't fight.
+  # Dev-loop memory limits. Both values come from converge.DevLoopLimitsFor —
+  # the same producer the step-11a direct apply (ApplyDevLoop) reads — so the
+  # two reconcile paths cannot land different limits on the same Deployment.
+  # Rendered fresh on every `up`, so a flywheel.yaml change reconciles onto a
+  # live cluster. The patch SHAPE here (Deployment name + container name) is
+  # not checked by the renderer, so it is built through kustomize against the
+  # real dev-loop tree in TestBuildersKustomization_PatchesBuildThroughKustomize;
+  # a typo'd container name would otherwise inject an imageless container.
+  #
+  # git-server (cfg.git_server.memory_limit): git-upload-pack's pack
+  # compression on a large monorepo would otherwise OOMKill the pod (issue #4).
   patches:
     - patch: |-
         apiVersion: apps/v1
@@ -59,4 +64,23 @@ spec:
                 - name: git-server
                   resources:
                     limits:
-                      memory: {{ .GitServerMemoryLimit }}
+                      memory: {{ .DevLoopLimits.GitServerMemory }}
+    # git-auto-sync (cfg.git_auto_sync.memory_limit, default 256Mi). One shared
+    # controller forks Git subprocesses for EVERY declared worktree into a
+    # single cgroup, so this scales with worktree count; clients past ~10 can
+    # raise it without carrying a client-owned patch that fights this
+    # Kustomization.
+    - patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: git-auto-sync
+          namespace: {{ .FlywheelNamespace }}
+        spec:
+          template:
+            spec:
+              containers:
+                - name: controller
+                  resources:
+                    limits:
+                      memory: {{ .DevLoopLimits.GitAutoSyncMemory }}

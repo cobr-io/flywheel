@@ -159,29 +159,57 @@ func TestGitServerMemoryLimit_Configured(t *testing.T) {
 	}
 }
 
+func TestGitAutoSyncMemoryLimit_Default(t *testing.T) {
+	f, err := Parse([]byte(validYAML)) // no git_auto_sync block
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.GitAutoSyncMemoryLimit(); got != DefaultGitAutoSyncMemoryLimit {
+		t.Errorf("GitAutoSyncMemoryLimit() = %q, want %q (default)", got, DefaultGitAutoSyncMemoryLimit)
+	}
+}
+
+func TestGitAutoSyncMemoryLimit_Configured(t *testing.T) {
+	f, err := Parse([]byte(validYAML + "git_auto_sync:\n  memory_limit: 512Mi\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.GitAutoSyncMemoryLimit(); got != "512Mi" {
+		t.Errorf("GitAutoSyncMemoryLimit() = %q, want 512Mi", got)
+	}
+	if err := Validate(f); err != nil {
+		t.Errorf("a valid git-auto-sync memory_limit should pass Validate: %v", err)
+	}
+}
+
 // A present but implausible memory quantity is rejected before it reaches the
 // Deployment apply, where it would fail with a less obvious error.
 func TestValidate_RejectsBadMemoryLimit(t *testing.T) {
-	for _, bad := range []string{"512", "512 Mi", "lots", "512MiB"} {
-		f, err := Parse([]byte(validYAML + "git_server:\n  memory_limit: \"" + bad + "\"\n"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		err = Validate(f)
-		if err == nil || !strings.Contains(err.Error(), "git_server.memory_limit") {
-			t.Errorf("memory_limit %q: expected a git_server.memory_limit error, got %v", bad, err)
+	for _, field := range []string{"git_server", "git_auto_sync"} {
+		for _, bad := range []string{"512", "512 Mi", "lots", "512MiB"} {
+			f, err := Parse([]byte(validYAML + field + ":\n  memory_limit: \"" + bad + "\"\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = Validate(f)
+			want := field + ".memory_limit"
+			if err == nil || !strings.Contains(err.Error(), want) {
+				t.Errorf("%s memory_limit %q: expected a %s error, got %v", field, bad, want, err)
+			}
 		}
 	}
 }
 
 func TestValidate_AcceptsGoodMemoryLimits(t *testing.T) {
-	for _, ok := range []string{"128Mi", "512Mi", "1Gi", "256M", "2G"} {
-		f, err := Parse([]byte(validYAML + "git_server:\n  memory_limit: " + ok + "\n"))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := Validate(f); err != nil {
-			t.Errorf("memory_limit %q should be accepted, got %v", ok, err)
+	for _, field := range []string{"git_server", "git_auto_sync"} {
+		for _, ok := range []string{"128Mi", "512Mi", "1Gi", "256M", "2G"} {
+			f, err := Parse([]byte(validYAML + field + ":\n  memory_limit: " + ok + "\n"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := Validate(f); err != nil {
+				t.Errorf("%s memory_limit %q should be accepted, got %v", field, ok, err)
+			}
 		}
 	}
 }

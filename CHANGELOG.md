@@ -9,7 +9,34 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- `git_auto_sync.memory_limit` makes the shared worktree-sync controller's
+  memory limit configurable, applied through both Flywheel reconciliation
+  paths so a raised limit isn't reverted by the other one.
+
+### Changed
+
+- **The `git-auto-sync` default memory limit is now `256Mi` (was `128Mi`).**
+  The limit scales with how many worktrees a client declares, not repo size:
+  one shared controller forks Git subprocesses for all of them into a single
+  cgroup. A measured 11-worktree client settles at a ~141Mi working set and
+  OOMKill-looped roughly every 26 minutes under the old limit. Only the limit
+  moved — the 32Mi request is unchanged, so this is a ceiling, not a
+  reservation, and costs nothing at schedule time. Clients that pin
+  `git_auto_sync.memory_limit` explicitly are unaffected.
+
+  Note that a `flywheel.yaml` written by this version carries a
+  `git_auto_sync:` block that an older CLI rejects (parsing is strict); pin
+  the same version across the team, per the v0.x compat policy above.
+
+### Fixed
+
+- The image-builder controller now bypasses its informer cache when reading a
+  referenced BuildKit Secret. Secret validation therefore uses the intended
+  namespace-scoped `get` permission instead of attempting a cluster-wide
+  Secret list/watch, which made the controller unready and stalled unrelated
+  builds as soon as a build declared `secrets:`.
 
 ## [0.3.0] - 2026-07-18
 

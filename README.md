@@ -186,7 +186,7 @@ sops:
 ```
 
 Every field, including the optional blocks (`git.integration_branch`,
-`git_server.memory_limit`, `workspace:`), is documented in the
+`git_server.memory_limit`, `git_auto_sync.memory_limit`, `workspace:`), is documented in the
 [annotated template](templates/client-skeleton/flywheel.yaml.tmpl).
 Per-developer overrides go in a gitignored `flywheel.yaml.local`.
 
