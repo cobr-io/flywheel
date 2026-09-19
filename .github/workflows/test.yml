@@ -48,6 +48,11 @@ jobs:
         # keeps a static fallback for the same standalone case. Both hand-kept
         # copies can drift silently — this turns that into a test failure.
         run: bash scripts/check-completion-paths-drift.sh
+      - name: make images fails fast on a build error (#136)
+        # A failed `docker build` inside the recipe's loop used to be swallowed:
+        # `make images` exited 0 and the e2e job died later in `flywheel up`
+        # with a misleading "image not found". Stubs docker to fail.
+        run: bash scripts/check-make-images-fails-fast.sh
       # Portability guards. The native runner is linux/amd64, but Flywheel
       # is developed on macOS and run on Linux/WSL (incl. arm64). These
       # catch the regressions that *are* code-level — formatting drift, CRLF

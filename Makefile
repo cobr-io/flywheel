@@ -57,7 +57,7 @@ uninstall:
 # build platform here — into a throwaway context dir and build from that; the
 # script-only image (git-server) still builds from the repo root.
 images:
-	@tag="$(IMAGE_TAG)"; \
+	@set -e; tag="$(IMAGE_TAG)"; \
 	ctx="$$(mktemp -d)"; trap 'rm -rf "$$ctx"' EXIT; \
 	for c in image-builder-controller git-deploy-controller git-auto-sync; do \
 		CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags='-s -w' -o "$$ctx/$$c" "./cmd/$$c"; \
