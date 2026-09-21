@@ -9,6 +9,10 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.1] - 2026-09-21
+
 ### Fixed
 
 - A StatefulSet app no longer sits in `ImagePullBackOff` on `:0-placeholder`
@@ -20,7 +24,7 @@ During the v0.x phase no compat promise is made between minor versions
   its image, and has never started a container; the StatefulSet recreates it
   from the current template. Pods held back by a rolling-update `partition` or
   the `OnDelete` strategy are left alone. The controller's ClusterRole gains
-  `delete` on Pods and read access to StatefulSets.
+  `delete` on Pods and read access to StatefulSets. (#140)
 
 ## [0.4.0] - 2026-09-07
 
