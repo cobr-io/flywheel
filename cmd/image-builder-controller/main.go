@@ -139,6 +139,13 @@ func main() {
 		os.Exit(1)
 	}
 
+	if err := (&controller.StatefulSetUnstickReconciler{
+		Client: mgr.GetClient(),
+	}).SetupWithManager(mgr); err != nil {
+		ctrl.Log.Error(err, "unable to create statefulset-unstick controller")
+		os.Exit(1)
+	}
+
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
 		ctrl.Log.Error(err, "unable to set up health check")
 		os.Exit(1)
