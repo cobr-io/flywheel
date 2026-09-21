@@ -9,7 +9,18 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- A StatefulSet app no longer sits in `ImagePullBackOff` on `:0-placeholder`
+  after its first build lands. The image bump updated the StatefulSet's
+  template, but Kubernetes never replaces a StatefulSet Pod that isn't Ready
+  (kubernetes/kubernetes#67250), so the Pod stayed on the placeholder until
+  deleted by hand. Deployments were unaffected. The image-builder controller
+  now deletes a StatefulSet Pod that is on a superseded revision, cannot pull
+  its image, and has never started a container; the StatefulSet recreates it
+  from the current template. Pods held back by a rolling-update `partition` or
+  the `OnDelete` strategy are left alone. The controller's ClusterRole gains
+  `delete` on Pods and read access to StatefulSets.
 
 ## [0.4.0] - 2026-09-07
 

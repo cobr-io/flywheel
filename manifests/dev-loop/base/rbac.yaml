@@ -32,9 +32,19 @@ rules:
     verbs: [get, list, watch, create, delete]
   # BuildJobReconciler watches build Pods (not the Job) so it can poke the
   # image scan the instant the build container exits 0 — ~4s before the Job
-  # is marked Complete. Read-only.
+  # is marked Complete. `delete` is for StatefulSetUnstickReconciler: a
+  # StatefulSet never replaces a Pod stuck in ImagePullBackOff on a superseded
+  # revision (e.g. the `:0-placeholder` tag after the first build's image
+  # bump), so the controller deletes that Pod and the StatefulSet recreates it
+  # on the current template. It only deletes Pods none of whose containers
+  # has ever started.
   - apiGroups: [""]
     resources: [pods]
+    verbs: [get, list, watch, delete]
+  # StatefulSetUnstickReconciler reads each StatefulSet's update revision,
+  # strategy and partition to decide whether a stuck Pod is superseded.
+  - apiGroups: [apps]
+    resources: [statefulsets]
     verbs: [get, list, watch]
   # Poke the per-app ImageRepository to scan the registry immediately after a
   # build Job succeeds (reconcile.fluxcd.io/requestedAt), collapsing the
