@@ -19,9 +19,10 @@ During the v0.x phase no compat promise is made between minor versions
   ~1 zombie every 2s (1509 after 27 minutes) and its working set grew ~40Mi/h
   at flat Go-heap usage, OOMKilling roughly every 6h. **The v0.4.0 entry
   below (#131) that raised `git-auto-sync`'s limit to 256Mi and measured a
-  "~141Mi working set" was this leak** — it never settles, the higher limit
-  only delayed the OOMKill, which could SIGKILL whatever git command a
-  developer's host worktree happened to be mid-`rebase`/`reset --hard` on.
+  "~141Mi working set" was most likely this leak** — it never settles, the
+  higher limit only delayed the OOMKill, which could SIGKILL whatever git
+  command a developer's host worktree happened to be mid-`rebase`/`reset
+  --hard` on.
   The 256Mi default is unchanged; it still gives headroom for legitimate
   multi-worktree memory use. `execx.gitEnv()` now turns off
   `maintenance.auto` for every automation git command, and both Deployments

@@ -80,10 +80,10 @@ func runEnv(ctx context.Context, dir string, env []string, name string, args ...
 // background auto-maintenance.
 //
 // Since git 2.47, an everyday command like `fetch` backgrounds `git
-// maintenance run --auto --quiet --detach`. Under a normal init system the
-// detached process is reaped by its grandparent; the in-cluster controllers
-// run as PID 1 with no init, so it gets reparented to PID 1 instead and is
-// never reaped — a zombie `git` per fetch (#144). Root also has no business
+// maintenance run --auto --quiet --detach`. The detached process outlives its
+// parent and is reparented to PID 1, which normally is an init that reaps it;
+// the in-cluster controllers ARE PID 1, with no init, and never reap it — a
+// zombie `git` per fetch (#144). Root also has no business
 // running gc/maintenance on a repo it doesn't own (the bare automation repo,
 // or a developer's host worktree), so this stays off regardless of the PID-1
 // backstop (shareProcessNamespace on the Deployments).
