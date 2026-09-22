@@ -18,7 +18,11 @@ During the v0.x phase no compat promise is made between minor versions
   bare repos for a stretch — measured ~6.5s of concurrent ticks, plus up to
   30s more while an old reconcile was still in flight past SIGTERM. Two
   writers on one worktree is exactly the hazard the per-app sync controller
-  exists to remove. (#147)
+  exists to remove. Existing clusters are migrated in place: `flywheel up`
+  detects a live Deployment still carrying the server-defaulted
+  `rollingUpdate` block and clears it with a merge patch before applying
+  `Recreate`, since SSA alone can't drop a field no field manager owns.
+  (#147)
 
 ## [0.4.2] - 2026-09-22
 

@@ -196,6 +196,10 @@ func (a *Applier) ApplyObjectAs(ctx context.Context, obj *unstructured.Unstructu
 		resource = a.dyn.Resource(mapping.Resource)
 	}
 
+	if err := migrateRecreateStrategy(ctx, resource, obj); err != nil {
+		return fmt.Errorf("migrate strategy: %w", err)
+	}
+
 	data, err := obj.MarshalJSON()
 	if err != nil {
 		return err
@@ -213,6 +217,58 @@ func (a *Applier) ApplyObjectAs(ctx context.Context, obj *unstructured.Unstructu
 		schemaGVKLabel(gvk),
 		obj.GetNamespace(),
 		obj.GetName())
+	return nil
+}
+
+// deploymentGK is the GroupKind migrateRecreateStrategy gates on.
+var deploymentGK = schema.GroupKind{Group: "apps", Kind: "Deployment"}
+
+// migrateRecreateStrategy is #147's upgrade bridge for a Deployment newly
+// switching to spec.strategy.type: Recreate. A Deployment applied before any
+// `strategy:` field existed was server-defaulted to
+// spec.strategy: {type: RollingUpdate, rollingUpdate: {maxSurge: 25%,
+// maxUnavailable: 25%}} — and no field manager owns that key, so an SSA
+// apply that sets only spec.strategy.type: Recreate leaves rollingUpdate in
+// place (an SSA-omitted field means "no opinion", not "delete"). The API
+// server then rejects the object outright: "spec.strategy.rollingUpdate:
+// Forbidden: may not be specified when strategy `type` is 'Recreate'".
+// Setting rollingUpdate: null in the manifest doesn't help either — SSA
+// still treats a null as no opinion, not a deletion.
+//
+// A JSON merge patch does work: a merge-patch null unconditionally deletes
+// the field, regardless of which field manager (if any) owns it. It's only
+// sent when the live object still HAS rollingUpdate, so an already-migrated
+// cluster (or a Deployment that's brand new) costs one GET and nothing
+// else, and it patches only spec.strategy — never the pod template — so it
+// restarts nothing.
+//
+// Scoped to Deployment kind and driven by obj's OWN desired
+// spec.strategy.type (as rendered from the manifest), not a hardcoded name
+// list — so it covers any Deployment that newly wants Recreate: today's
+// git-auto-sync/git-deploy-controller (#147), and whatever else picks it up
+// later.
+func migrateRecreateStrategy(ctx context.Context, resource dynamic.ResourceInterface, obj *unstructured.Unstructured) error {
+	if obj.GroupVersionKind().GroupKind() != deploymentGK {
+		return nil
+	}
+	wantType, _, _ := unstructured.NestedString(obj.Object, "spec", "strategy", "type")
+	if wantType != "Recreate" {
+		return nil
+	}
+	live, err := resource.Get(ctx, obj.GetName(), metav1.GetOptions{})
+	if err != nil {
+		if apierrors.IsNotFound(err) {
+			return nil // nothing live to migrate; the SSA create below runs clean
+		}
+		return fmt.Errorf("get live object: %w", err)
+	}
+	if _, found, _ := unstructured.NestedMap(live.Object, "spec", "strategy", "rollingUpdate"); !found {
+		return nil // already migrated, or never had it
+	}
+	patch := []byte(`{"spec":{"strategy":{"type":"Recreate","rollingUpdate":null}}}`)
+	if _, err := resource.Patch(ctx, obj.GetName(), types.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return fmt.Errorf("clear server-defaulted rollingUpdate: %w", err)
+	}
 	return nil
 }
 
