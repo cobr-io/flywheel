@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -74,12 +75,52 @@ func runEnv(ctx context.Context, dir string, env []string, name string, args ...
 }
 
 // gitEnv disables interactive prompts (the in-cluster bare repo is
-// unauthenticated http) and pins a committer identity so rebases and commits
-// never fail on a missing ident in a bare container.
+// unauthenticated http), pins a committer identity so rebases and commits
+// never fail on a missing ident in a bare container, and turns off git's
+// background auto-maintenance.
+//
+// Since git 2.47, an everyday command like `fetch` backgrounds `git
+// maintenance run --auto --quiet --detach`. The detached process outlives its
+// parent and is reparented to PID 1, which normally is an init that reaps it;
+// the in-cluster controllers ARE PID 1, with no init, and never reap it — a
+// zombie `git` per fetch (#144). Root also has no business
+// running gc/maintenance on a repo it doesn't own (the bare automation repo,
+// or a developer's host worktree), so this stays off regardless of the PID-1
+// backstop (shareProcessNamespace on the Deployments).
+//
+// Set via GIT_CONFIG_COUNT/_KEY_N/_VALUE_N rather than a `-c` flag at each
+// GitAuto call site, so gitEnv stays the one place this is guaranteed.
+// Appended at the next free index (nextGitConfigIndex) instead of hard-coding
+// index 0, in case the inherited environment already carries some — nothing
+// under our control sets GIT_CONFIG_COUNT today, but clobbering a
+// pre-existing one would silently drop whatever config it carried.
 func gitEnv() []string {
-	return append(os.Environ(),
+	env := os.Environ()
+	i := nextGitConfigIndex(env)
+	return append(env,
 		"GIT_TERMINAL_PROMPT=0",
 		"GIT_COMMITTER_NAME="+CommitterName,
 		"GIT_COMMITTER_EMAIL="+CommitterEmail,
+		fmt.Sprintf("GIT_CONFIG_COUNT=%d", i+1),
+		fmt.Sprintf("GIT_CONFIG_KEY_%d=maintenance.auto", i),
+		fmt.Sprintf("GIT_CONFIG_VALUE_%d=false", i),
 	)
+}
+
+// nextGitConfigIndex returns the first unused GIT_CONFIG_KEY_N/VALUE_N index:
+// the inherited GIT_CONFIG_COUNT if env already sets one and it parses as a
+// non-negative integer, else 0. An unparsable count is left for git itself to
+// reject; nextGitConfigIndex just doesn't compound the error by clobbering it.
+func nextGitConfigIndex(env []string) int {
+	for _, e := range env {
+		v, ok := strings.CutPrefix(e, "GIT_CONFIG_COUNT=")
+		if !ok {
+			continue
+		}
+		if n, err := strconv.Atoi(v); err == nil && n >= 0 {
+			return n
+		}
+		return 0
+	}
+	return 0
 }

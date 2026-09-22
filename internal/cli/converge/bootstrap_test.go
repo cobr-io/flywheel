@@ -212,6 +212,12 @@ func TestBuildersKustomization_PatchesBuildThroughKustomize(t *testing.T) {
 	out := buildKustomizeForTest(t, devLoopTreeWithPatches(t, fluxKustomizationPatches(t, bk)))
 	assertContainerMemoryLimit(t, out, "git-server", "git-server", "512Mi")
 	assertContainerMemoryLimit(t, out, "git-auto-sync", "controller", "384Mi")
+	// #144: the Flux path must render the same PID-1 reaper backstop as the
+	// step-11a direct apply (TestApplyDevLoop_RealManifests_RewriteByName) —
+	// both resource the same base tree, so a drift here would mean the base
+	// manifest lost the field, not that the paths disagree.
+	assertShareProcessNamespace(t, out, "git-auto-sync")
+	assertShareProcessNamespace(t, out, "git-deploy-controller")
 }
 
 // fluxKustomizationPatches pulls the inline strategic-merge patches out of a

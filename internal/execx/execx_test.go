@@ -2,10 +2,15 @@ package execx
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/cobr-io/flywheel/internal/testgit"
 )
 
 func TestRun_StdoutAndDir(t *testing.T) {
@@ -86,5 +91,71 @@ func TestGitAuto_CommitterIdentity(t *testing.T) {
 	want := CommitterName + " <" + CommitterEmail + ">"
 	if strings.TrimSpace(out) != want {
 		t.Fatalf("committer = %q, want %q", strings.TrimSpace(out), want)
+	}
+}
+
+// TestGitAuto_NoAutoMaintenanceChild is the regression test for #144: since
+// git 2.47, an everyday `git fetch` backgrounds `git maintenance run --auto
+// --quiet --detach` unless maintenance.auto is off. A detached process
+// outlives its parent `git`, so under the in-cluster controllers (PID 1, no
+// init) it gets reparented to PID 1 and never reaped — one zombie per fetch.
+// gitEnv must turn maintenance.auto off for every GitAuto call.
+//
+// Proof is via a real fetch's GIT_TRACE2_EVENT log rather than a fake git
+// binary, so this asserts against git's actual behaviour instead of our
+// assumption about it: a fetch with something new to pull is the one case
+// that reliably triggers the auto-maintenance hook (a no-op fetch doesn't).
+func TestGitAuto_NoAutoMaintenanceChild(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git not on PATH")
+	}
+	ctx := context.Background()
+
+	// origin: a bare "remote" with one commit — mirrors the bare-repo
+	// image-bump loop's origin (deploybranch/selfsync fixtures use the same
+	// work -> --bare shape).
+	work := filepath.Join(t.TempDir(), "work")
+	testgit.Init(t, work)
+	testgit.Git(t, work, "commit", "-q", "--allow-empty", "-m", "A")
+	origin := filepath.Join(t.TempDir(), "origin.git")
+	testgit.Git(t, work, "clone", "-q", "--bare", work, origin)
+
+	// clone: what GitAuto fetches into. Starts behind origin.
+	clone := filepath.Join(t.TempDir(), "clone")
+	testgit.Git(t, filepath.Dir(clone), "clone", "-q", origin, clone)
+
+	// Advance origin past what clone has, so the fetch below is a real
+	// protocol exchange (transfers an object, triggering the auto-maintenance
+	// hook) rather than a no-op that git may skip it for.
+	testgit.Git(t, work, "commit", "-q", "--allow-empty", "-m", "B")
+	testgit.Git(t, work, "push", "-q", origin, "main")
+
+	trace := filepath.Join(t.TempDir(), "trace2.jsonl")
+	t.Setenv("GIT_TRACE2_EVENT", trace) // gitEnv() inherits os.Environ()
+
+	if _, err := GitAuto(ctx, clone, "fetch", "origin"); err != nil {
+		t.Fatalf("fetch: %v", err)
+	}
+
+	data, err := os.ReadFile(trace)
+	if err != nil {
+		t.Fatalf("read trace2 log: %v", err)
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		var ev struct {
+			Event string   `json:"event"`
+			Argv  []string `json:"argv"`
+		}
+		if err := json.Unmarshal([]byte(line), &ev); err != nil {
+			t.Fatalf("parse trace2 line %q: %v", line, err)
+		}
+		if ev.Event != "child_start" {
+			continue
+		}
+		for _, a := range ev.Argv {
+			if strings.Contains(a, "maintenance") {
+				t.Fatalf("GitAuto fetch spawned a maintenance child (argv=%v) — it will outlive its parent and, run as PID 1 with no init, never get reaped", ev.Argv)
+			}
+		}
 	}
 }

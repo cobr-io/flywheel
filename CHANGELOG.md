@@ -9,7 +9,26 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- `git-auto-sync` and `git-deploy-controller` no longer leak a zombie `git`
+  process per fetch. Since git 2.47 (the images ship 2.47.3), `git fetch`
+  backgrounds `git maintenance run --auto --quiet --detach`; that detached
+  process outlives its parent `git`, and both controllers run as PID 1 with
+  no init, so it gets reparented to PID 1 and is never reaped. A live pod hit
+  ~1 zombie every 2s (1509 after 27 minutes) and its working set grew ~40Mi/h
+  at flat Go-heap usage, OOMKilling roughly every 6h. **The v0.4.0 entry
+  below (#131) that raised `git-auto-sync`'s limit to 256Mi and measured a
+  "~141Mi working set" was most likely this leak** — it never settles, the
+  higher limit only delayed the OOMKill, which could SIGKILL whatever git
+  command a developer's host worktree happened to be mid-`rebase`/`reset
+  --hard` on.
+  The 256Mi default is unchanged; it still gives headroom for legitimate
+  multi-worktree memory use. `execx.gitEnv()` now turns off
+  `maintenance.auto` for every automation git command, and both Deployments
+  gain `shareProcessNamespace: true` as a backstop so the pod's pause
+  container — PID 1 once the namespace is shared — reaps any other process
+  either controller orphans. (#144)
 
 ## [0.4.1] - 2026-09-21
 
