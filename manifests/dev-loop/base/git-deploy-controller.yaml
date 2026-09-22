@@ -7,6 +7,10 @@ metadata:
     app: git-deploy-controller
 spec:
   replicas: 1
+  strategy:
+    # RollingUpdate would run the old and new controllers against the same
+    # worktrees during a rollout (#147).
+    type: Recreate
   selector:
     matchLabels:
       app: git-deploy-controller

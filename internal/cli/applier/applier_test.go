@@ -50,6 +50,12 @@ func testMapper() *restmapper.DeferredDiscoveryRESTMapper {
 				{Name: "persistentvolumeclaims", Namespaced: true, Kind: "PersistentVolumeClaim"},
 			},
 		},
+		{
+			GroupVersion: "apps/v1",
+			APIResources: []metav1.APIResource{
+				{Name: "deployments", Namespaced: true, Kind: "Deployment"},
+			},
+		},
 	}
 	return restmapper.NewDeferredDiscoveryRESTMapper(memory.NewMemCacheClient(fakeDisco))
 }
@@ -60,6 +66,7 @@ type applyRecord struct {
 	namespace    string
 	name         string
 	patchType    types.PatchType
+	patch        []byte
 	fieldManager string
 }
 
@@ -77,6 +84,7 @@ func recordingApplyReactor(recs *[]applyRecord, fail map[string]bool) clienttest
 			namespace:    pa.GetNamespace(),
 			name:         pa.GetName(),
 			patchType:    pa.GetPatchType(),
+			patch:        pa.GetPatch(),
 			fieldManager: pa.PatchOptions.FieldManager,
 		})
 		if fail[pa.GetName()] {
@@ -130,6 +138,27 @@ func configMap(name, ns string, labels map[string]string) *unstructured.Unstruct
 
 func managedLabels() map[string]string {
 	return map[string]string{naming.ManagedByLabelKey: naming.ManagedByLabelValue}
+}
+
+// deployment builds a minimal unstructured Deployment for the
+// migrateRecreateStrategy tests below. rollingUpdate is nil when the object
+// (live or desired) carries no such block.
+func deployment(name, ns, strategyType string, rollingUpdate map[string]interface{}) *unstructured.Unstructured {
+	strategy := map[string]interface{}{"type": strategyType}
+	if rollingUpdate != nil {
+		strategy["rollingUpdate"] = rollingUpdate
+	}
+	return &unstructured.Unstructured{Object: map[string]interface{}{
+		"apiVersion": "apps/v1",
+		"kind":       "Deployment",
+		"metadata": map[string]interface{}{
+			"name":      name,
+			"namespace": ns,
+		},
+		"spec": map[string]interface{}{
+			"strategy": strategy,
+		},
+	}}
 }
 
 // TestApplyYAML_MultiDocHappyPath applies a three-document blob (one
@@ -312,6 +341,69 @@ func TestApplyObjectAs_FieldManagerOverride(t *testing.T) {
 	}
 	if recs[0].fieldManager != deployManager {
 		t.Errorf("fieldManager = %q, want %q", recs[0].fieldManager, deployManager)
+	}
+}
+
+// TestApplyObject_RecreateMigration_ClearsServerDefaultedRollingUpdate is the
+// regression test for #147's upgrade bridge: a live Deployment predating any
+// `strategy:` field carries the API server's default
+// spec.strategy.rollingUpdate, which no field manager owns. Applying a
+// desired object with strategy.type: Recreate must send a JSON merge patch
+// that nulls rollingUpdate BEFORE the real SSA apply — an SSA apply alone
+// can't drop a field it doesn't own, and the real API server rejects
+// type: Recreate alongside a surviving rollingUpdate outright (proven against
+// a live cluster in #148; the fake client here doesn't enforce that
+// validation, so this test instead locks in that the merge patch is issued
+// with the right shape and ordering).
+func TestApplyObject_RecreateMigration_ClearsServerDefaultedRollingUpdate(t *testing.T) {
+	live := deployment("git-auto-sync", "flywheel-system", "RollingUpdate", map[string]interface{}{
+		"maxSurge":       "25%",
+		"maxUnavailable": "25%",
+	})
+	var recs []applyRecord
+	a := applierWithReactor(&recs, nil, live)
+
+	desired := deployment("git-auto-sync", "flywheel-system", "Recreate", nil)
+	var out bytes.Buffer
+	if err := a.ApplyObject(context.Background(), desired, &out); err != nil {
+		t.Fatalf("ApplyObject: %v", err)
+	}
+
+	if len(recs) != 2 {
+		t.Fatalf("patch calls = %d, want 2 (migration merge-patch + SSA apply): %v", len(recs), recs)
+	}
+	if recs[0].patchType != types.MergePatchType {
+		t.Errorf("first patch type = %q, want MergePatchType (the migration)", recs[0].patchType)
+	}
+	if !strings.Contains(string(recs[0].patch), `"rollingUpdate":null`) {
+		t.Errorf("migration patch body = %s, want it to null rollingUpdate", recs[0].patch)
+	}
+	if recs[1].patchType != types.ApplyPatchType {
+		t.Errorf("second patch type = %q, want ApplyPatchType (the real apply)", recs[1].patchType)
+	}
+}
+
+// TestApplyObject_RecreateMigration_SkipsWhenAlreadyClear proves the
+// migration doesn't repeat itself: once a live Deployment no longer carries
+// rollingUpdate (already migrated, or created fresh with Recreate from the
+// start — e.g. git-server/buildkitd), every later `up` costs one GET and no
+// extra patch.
+func TestApplyObject_RecreateMigration_SkipsWhenAlreadyClear(t *testing.T) {
+	live := deployment("git-auto-sync", "flywheel-system", "Recreate", nil)
+	var recs []applyRecord
+	a := applierWithReactor(&recs, nil, live)
+
+	desired := deployment("git-auto-sync", "flywheel-system", "Recreate", nil)
+	var out bytes.Buffer
+	if err := a.ApplyObject(context.Background(), desired, &out); err != nil {
+		t.Fatalf("ApplyObject: %v", err)
+	}
+
+	if len(recs) != 1 {
+		t.Fatalf("patch calls = %d, want 1 (no migration needed): %v", len(recs), recs)
+	}
+	if recs[0].patchType != types.ApplyPatchType {
+		t.Errorf("patch type = %q, want ApplyPatchType", recs[0].patchType)
 	}
 }
 

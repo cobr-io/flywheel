@@ -9,7 +9,20 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- `git-auto-sync` and `git-deploy-controller` now roll with `strategy: {type:
+  Recreate}` instead of the default `RollingUpdate`. With one replica,
+  RollingUpdate starts the new controller (surge 1) before the old one stops
+  (unavailable 0), so every rollout ran both against the same worktrees and
+  bare repos for a stretch — measured ~6.5s of concurrent ticks, plus up to
+  30s more while an old reconcile was still in flight past SIGTERM. Two
+  writers on one worktree is exactly the hazard the per-app sync controller
+  exists to remove. Existing clusters are migrated in place: `flywheel up`
+  detects a live Deployment still carrying the server-defaulted
+  `rollingUpdate` block and clears it with a merge patch before applying
+  `Recreate`, since SSA alone can't drop a field no field manager owns.
+  (#147)
 
 ## [0.4.2] - 2026-09-22
 
