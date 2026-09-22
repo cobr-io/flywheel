@@ -172,6 +172,48 @@ func assertShareProcessNamespace(t *testing.T, built, deployment string) {
 	t.Errorf("no Deployment %q in the kustomize output:\n%s", deployment, built)
 }
 
+// assertRecreateStrategy checks that a kustomize build's Deployment sets
+// spec.strategy.type: Recreate with no spec.strategy.rollingUpdate — the #147
+// backstop: RollingUpdate would run the old and new controllers against the
+// same worktrees during a rollout, which is exactly the two-writers hazard
+// the per-app sync controller exists to remove. The rollingUpdate check also
+// catches a leftover block from before a patch set type: Recreate — the API
+// server rejects that combination outright.
+func assertRecreateStrategy(t *testing.T, built, deployment string) {
+	t.Helper()
+	dec := yaml.NewDecoder(strings.NewReader(built))
+	for {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Strategy struct {
+					Type          string      `yaml:"type"`
+					RollingUpdate interface{} `yaml:"rollingUpdate"`
+				} `yaml:"strategy"`
+			} `yaml:"spec"`
+		}
+		if err := dec.Decode(&doc); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("decode kustomize output: %v\n%s", err, built)
+		}
+		if doc.Kind != "Deployment" || doc.Metadata.Name != deployment {
+			continue
+		}
+		if doc.Spec.Strategy.Type != "Recreate" {
+			t.Errorf("Deployment %s: strategy.type = %q, want Recreate (#147 — RollingUpdate runs the old and new controllers against the same worktrees)", deployment, doc.Spec.Strategy.Type)
+		}
+		if doc.Spec.Strategy.RollingUpdate != nil {
+			t.Errorf("Deployment %s: strategy.rollingUpdate is set alongside type: Recreate — the API server rejects that combination", deployment)
+		}
+		return
+	}
+	t.Errorf("no Deployment %q in the kustomize output:\n%s", deployment, built)
+}
+
 // devLoopFixture builds a fixture tree mirroring the real
 // manifests/dev-loop/ layout — base/ (populated from baseFiles) and
 // overlays/local/ (populated from overlayFiles, resourced alongside the
@@ -389,6 +431,10 @@ func TestApplyDevLoop_RealManifests_RewriteByName(t *testing.T) {
 	// orphan.
 	assertShareProcessNamespace(t, out, "git-auto-sync")
 	assertShareProcessNamespace(t, out, "git-deploy-controller")
+	// #147: RollingUpdate would run the old and new controllers against the
+	// same worktrees during a rollout.
+	assertRecreateStrategy(t, out, "git-auto-sync")
+	assertRecreateStrategy(t, out, "git-deploy-controller")
 }
 
 func TestDeploymentDetail_ProgressingFalseReasonWins(t *testing.T) {

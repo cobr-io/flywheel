@@ -218,6 +218,10 @@ func TestBuildersKustomization_PatchesBuildThroughKustomize(t *testing.T) {
 	// manifest lost the field, not that the paths disagree.
 	assertShareProcessNamespace(t, out, "git-auto-sync")
 	assertShareProcessNamespace(t, out, "git-deploy-controller")
+	// #147: same reasoning — both apply paths must render Recreate, or a
+	// rollout on one path still runs two controllers against one worktree.
+	assertRecreateStrategy(t, out, "git-auto-sync")
+	assertRecreateStrategy(t, out, "git-deploy-controller")
 }
 
 // fluxKustomizationPatches pulls the inline strategic-merge patches out of a
