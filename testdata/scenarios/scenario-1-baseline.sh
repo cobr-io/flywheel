@@ -57,4 +57,40 @@ for leg in "v2:$v2_dur" "v3:$v3_dur"; do
   fi
 done
 
+# --- #147/#148 upgrade check ------------------------------------------------
+# Reproduce a pre-#148 cluster: before the Recreate migration, git-auto-sync
+# and git-deploy-controller carried no `strategy:` field at all, so the API
+# server server-defaulted spec.strategy to {type: RollingUpdate,
+# rollingUpdate: {maxSurge: 25%, maxUnavailable: 25%}}. A plain merge patch
+# setting only `type: RollingUpdate` reproduces that exact shape — the API
+# server's own defaulting fills rollingUpdate back in on write, the same way
+# it did for every pre-#148 apply — without touching the pod template, so
+# nothing restarts. `flywheel up` must then migrate both Deployments back to
+# Recreate with no leftover rollingUpdate: before the applier's #147 fix, the
+# plain SSA apply here fails outright ("spec.strategy.rollingUpdate:
+# Forbidden: may not be specified when strategy `type` is 'Recreate'" — SSA
+# can't drop a field no field manager owns), so `flywheel up` would exit
+# non-zero and this scenario would fail under `set -e`.
+log "#147 upgrade check: reverting dev-loop controllers to the pre-#148 RollingUpdate shape"
+for dep in git-auto-sync git-deploy-controller; do
+  kc -n flywheel-system patch deployment "$dep" --type=merge \
+    -p '{"spec":{"strategy":{"type":"RollingUpdate"}}}'
+  log "  $dep reverted: strategy.type=$(kc -n flywheel-system get deployment "$dep" -o jsonpath='{.spec.strategy.type}') rollingUpdate=$(kc -n flywheel-system get deployment "$dep" -o jsonpath='{.spec.strategy.rollingUpdate}')"
+done
+
+log "#147 upgrade check: re-running flywheel up to migrate the live Deployments"
+( cd "$CLIENT_REPO" && flywheel up )
+
+for dep in git-auto-sync git-deploy-controller; do
+  strategy_type=$(kc -n flywheel-system get deployment "$dep" -o jsonpath='{.spec.strategy.type}')
+  rolling_update=$(kc -n flywheel-system get deployment "$dep" -o jsonpath='{.spec.strategy.rollingUpdate}')
+  if [[ "$strategy_type" != "Recreate" || -n "$rolling_update" ]]; then
+    log "FAIL: Deployment $dep strategy.type=$strategy_type rollingUpdate=${rolling_update:-<none>} after up, want Recreate with no rollingUpdate"
+    dump_diag
+    exit 1
+  fi
+  log "Deployment $dep strategy = Recreate, no rollingUpdate (upgrade migration OK)"
+done
+log "#147 upgrade check PASS"
+
 log "scenario 1 PASS"
