@@ -10,7 +10,10 @@
 //   - GitAuto pins the in-cluster automation identity used by the bare-repo
 //     image-bump loop (deploybranch, selfsync): interactive prompts disabled
 //     and a committer identity so a container without git config can still
-//     rebase and commit.
+//     rebase and commit. It also runs git in its own process group and kills
+//     that group on ctx cancellation, so a network remote helper (e.g.
+//     git-remote-http) dies with git instead of lingering past WaitDelay
+//     (#150).
 //
 // It lives outside internal/cli so both the CLI packages and the in-cluster
 // controllers (deploybranch, selfsync) can import it.
@@ -24,6 +27,8 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // CommitterName and CommitterEmail identify the in-cluster image-bump
@@ -40,28 +45,52 @@ const (
 // *exec.ExitError, so errors.Is / errors.As keep working) and carries the
 // command's trimmed stderr.
 func Run(ctx context.Context, dir, name string, args ...string) (string, error) {
-	return runEnv(ctx, dir, nil, name, args...)
+	return runEnv(ctx, dir, nil, false, name, args...)
 }
 
 // Git runs `git args...` in dir with the developer's inherited environment.
 func Git(ctx context.Context, dir string, args ...string) (string, error) {
-	return runEnv(ctx, dir, nil, "git", args...)
+	return runEnv(ctx, dir, nil, false, "git", args...)
 }
 
 // GitAuto runs `git args...` in dir with gitEnv(): interactive prompts disabled
 // and the pinned committer identity, for the in-cluster bare-repo automation.
+// It runs in its own process group, killed as a whole on ctx cancellation —
+// see runEnv's killProcessGroup and #150.
 func GitAuto(ctx context.Context, dir string, args ...string) (string, error) {
-	return runEnv(ctx, dir, gitEnv(), "git", args...)
+	return runEnv(ctx, dir, gitEnv(), true, "git", args...)
 }
 
+// waitDelay bounds how long Wait keeps blocking on a killed command's stdout
+// and stderr pipes once the command itself has exited or been killed.
+// Without it, a grandchild that inherited those pipes (e.g. git's
+// git-remote-http helper for an http(s) remote) can hold Wait open long after
+// ctx's deadline or cancellation fired (#150). A few seconds is generous
+// enough for a well-behaved command's own I/O to drain, so anything still
+// open past it is exactly the leaked-pipe case this bounds.
+const waitDelay = 5 * time.Second
+
 // runEnv is the single implementation behind Run/Git/GitAuto. A nil env
-// inherits the parent environment.
-func runEnv(ctx context.Context, dir string, env []string, name string, args ...string) (string, error) {
+// inherits the parent environment. killProcessGroup additionally starts name
+// in its own process group and kills that whole group on ctx cancellation,
+// instead of just the process exec.CommandContext would kill by default —
+// GitAuto sets it so a spawned remote helper can't outlive git; Run and Git
+// never do, since the CLI's developer-environment paths need the process in
+// the caller's terminal's process group to receive interactive prompts (a
+// background process group can't read the terminal — SIGTTIN).
+func runEnv(ctx context.Context, dir string, env []string, killProcessGroup bool, name string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	cmd.Env = env // nil → inherit the parent environment
+	cmd.WaitDelay = waitDelay
+	if killProcessGroup {
+		cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+		cmd.Cancel = func() error {
+			return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
+		}
+	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
