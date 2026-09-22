@@ -9,6 +9,10 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.3] - 2026-09-22
+
 ### Fixed
 
 - `git-auto-sync` and `git-deploy-controller` now roll with `strategy: {type:
@@ -22,7 +26,7 @@ During the v0.x phase no compat promise is made between minor versions
   detects a live Deployment still carrying the server-defaulted
   `rollingUpdate` block and clears it with a merge patch before applying
   `Recreate`, since SSA alone can't drop a field no field manager owns.
-  (#147)
+  (#147, #148)
 
 ## [0.4.2] - 2026-09-22
 
