@@ -9,7 +9,19 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- A timed-out or cancelled automation git call (`execx.GitAuto`) no longer
+  waits unboundedly on its remote helper. `git fetch`/`push` against an
+  http(s) remote spawns `git-remote-http`, which inherits the stdout/stderr
+  pipes; without a bound, killing `git` on ctx expiry or cancellation left
+  `Wait` blocked on those pipes until the helper exited on its own. That held
+  a dev-loop controller's graceful shutdown for the full 30s grace period
+  after a git-server restart, and could stall an app's sync for minutes on a
+  connection to a git-server pod that went away. `execx.runEnv` now sets
+  `cmd.WaitDelay`, and `GitAuto` additionally runs git in its own process
+  group and kills the whole group on cancellation, so the remote helper dies
+  with it instead of lingering. (#150)
 
 ## [0.4.3] - 2026-09-22
 
