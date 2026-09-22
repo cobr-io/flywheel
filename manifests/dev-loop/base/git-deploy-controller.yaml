@@ -20,6 +20,10 @@ spec:
       # — exactly what this controller needs (ConfigMap reads are kubelet-
       # resolved via valueFrom, so no extra RBAC).
       serviceAccountName: git-auto-sync
+      # Backstop for #144: same reasoning as git-auto-sync.yaml. This
+      # controller fetches less often, so it leaked slower (46 zombies in 18h
+      # vs. ~1 every 2s), but the cause and fix are identical.
+      shareProcessNamespace: true
       containers:
         - name: controller
           # Tag is a placeholder: rewritten to the per-client local-registry

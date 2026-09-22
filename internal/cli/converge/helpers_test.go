@@ -134,6 +134,44 @@ func assertContainerMemoryLimit(t *testing.T, built, deployment, container, want
 	t.Errorf("no Deployment %q in the kustomize output:\n%s", deployment, built)
 }
 
+// assertShareProcessNamespace checks that a kustomize build's Deployment sets
+// spec.template.spec.shareProcessNamespace: true — the #144 backstop: sharing
+// the pod's PID namespace makes the pause container PID 1 instead of the
+// controller binary, so pause (which reaps by design) catches any process
+// the controller orphans instead of the controller catching none.
+func assertShareProcessNamespace(t *testing.T, built, deployment string) {
+	t.Helper()
+	dec := yaml.NewDecoder(strings.NewReader(built))
+	for {
+		var doc struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Template struct {
+					Spec struct {
+						ShareProcessNamespace bool `yaml:"shareProcessNamespace"`
+					} `yaml:"spec"`
+				} `yaml:"template"`
+			} `yaml:"spec"`
+		}
+		if err := dec.Decode(&doc); err == io.EOF {
+			break
+		} else if err != nil {
+			t.Fatalf("decode kustomize output: %v\n%s", err, built)
+		}
+		if doc.Kind != "Deployment" || doc.Metadata.Name != deployment {
+			continue
+		}
+		if !doc.Spec.Template.Spec.ShareProcessNamespace {
+			t.Errorf("Deployment %s: shareProcessNamespace = %v, want true (#144 PID-1 reaper backstop)", deployment, doc.Spec.Template.Spec.ShareProcessNamespace)
+		}
+		return
+	}
+	t.Errorf("no Deployment %q in the kustomize output:\n%s", deployment, built)
+}
+
 // devLoopFixture builds a fixture tree mirroring the real
 // manifests/dev-loop/ layout — base/ (populated from baseFiles) and
 // overlays/local/ (populated from overlayFiles, resourced alongside the
@@ -346,6 +384,11 @@ func TestApplyDevLoop_RealManifests_RewriteByName(t *testing.T) {
 	if strings.Contains(out, "ghcr.io/cobr-io/git-auto-sync:rewritten-by-flywheel-up") {
 		t.Errorf("git-auto-sync.yaml still carries the unrewritten fail-loud placeholder:\n%s", out)
 	}
+	// #144: both dev-loop controllers run as PID 1 with no init, so the pod
+	// must share its PID namespace for the pause container to reap what they
+	// orphan.
+	assertShareProcessNamespace(t, out, "git-auto-sync")
+	assertShareProcessNamespace(t, out, "git-deploy-controller")
 }
 
 func TestDeploymentDetail_ProgressingFalseReasonWins(t *testing.T) {

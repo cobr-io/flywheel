@@ -16,6 +16,12 @@ spec:
         app: git-auto-sync
     spec:
       serviceAccountName: git-auto-sync
+      # Backstop for #144: this container runs as PID 1 with no init, so it
+      # never reaps a process it didn't start. gitEnv() (internal/execx) now
+      # turns off git's own source of those (auto-maintenance), but sharing
+      # the pod's PID namespace makes the pause container PID 1 instead —
+      # pause reaps orphans by design — in case anything else ever forks one.
+      shareProcessNamespace: true
       containers:
         - name: controller
           # Tag is a placeholder: rewritten to the per-client local-registry
