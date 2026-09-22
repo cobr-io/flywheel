@@ -9,6 +9,10 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.4] - 2026-09-22
+
 ### Fixed
 
 - A timed-out or cancelled automation git call (`execx.GitAuto`) no longer
@@ -21,7 +25,7 @@ During the v0.x phase no compat promise is made between minor versions
   connection to a git-server pod that went away. `execx.runEnv` now sets
   `cmd.WaitDelay`, and `GitAuto` additionally runs git in its own process
   group and kills the whole group on cancellation, so the remote helper dies
-  with it instead of lingering. (#150)
+  with it instead of lingering. (#150, #151)
 
 ## [0.4.3] - 2026-09-22
 
