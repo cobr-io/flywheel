@@ -9,6 +9,10 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.2] - 2026-09-22
+
 ### Fixed
 
 - `git-auto-sync` and `git-deploy-controller` no longer leak a zombie `git`
@@ -28,7 +32,7 @@ During the v0.x phase no compat promise is made between minor versions
   `maintenance.auto` for every automation git command, and both Deployments
   gain `shareProcessNamespace: true` as a backstop so the pod's pause
   container — PID 1 once the namespace is shared — reaps any other process
-  either controller orphans. (#144)
+  either controller orphans. (#144, #145)
 
 ## [0.4.1] - 2026-09-21
 
