@@ -5,7 +5,7 @@
 //
 //  1. Init(forceOff) sets the global Enabled state once, honoring:
 //     - explicit `forceOff` (e.g. a --no-color flag) → off;
-//     - NO_COLOR env (any value)                    → off;
+//     - NO_COLOR env (nonempty)                     → off;
 //     - CLICOLOR_FORCE=1 env                        → on, even off-TTY;
 //     - else: on iff stdout is a TTY.
 //
@@ -85,7 +85,7 @@ func Init(forceOff bool) {
 	switch {
 	case forceOff:
 		enabled = false
-	case envSet("NO_COLOR"):
+	case os.Getenv("NO_COLOR") != "":
 		enabled = false
 	case os.Getenv("CLICOLOR_FORCE") == "1":
 		enabled = true
@@ -94,9 +94,37 @@ func Init(forceOff bool) {
 	}
 }
 
-func envSet(name string) bool {
-	_, ok := os.LookupEnv(name)
-	return ok
+// State is the result of a read-only status check. The word remains visible
+// without colour; only the marker is coloured when ANSI output is enabled.
+type State string
+
+const (
+	StateOK   State = "OK"
+	StateWarn State = "WARN"
+	StateFail State = "FAIL"
+)
+
+// StateLine highlights the result marker while leaving the description in the
+// terminal's normal foreground colour.
+func StateLine(w io.Writer, state State, format string, a ...any) {
+	line := fmt.Sprintf(format, a...)
+	if !enabled {
+		fmt.Fprintf(w, "  %s %s\n", state, line)
+		return
+	}
+	color, glyph := green, glyphOK
+	switch state {
+	case StateWarn:
+		color, glyph = boldYellow, glyphWarn
+	case StateFail:
+		color, glyph = boldRed, glyphFail
+	}
+	fmt.Fprintf(w, "  %s%s %s%s %s\n", color, glyph, state, reset, line)
+}
+
+// Value prints important status values at normal brightness.
+func Value(w io.Writer, format string, a ...any) {
+	fmt.Fprintf(w, "  %s\n", fmt.Sprintf(format, a...))
 }
 
 // Step prints a top-level step header. Bold cyan + ▶ glyph in TTY mode,

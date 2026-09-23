@@ -155,8 +155,9 @@ k3d/docker/kubectl chatter; `--no-color` (or `NO_COLOR`) disables ANSI colour.
 
 `flywheel status` reads the configured local cluster without changing it. It
 reports selected and mirrored branches, the latest retained image-build Jobs,
-Flux readiness, nodes, and unhealthy workloads. It checks rollout status only
-for unhealthy workloads; an unrelated pod is advisory. The command exits
+Flux readiness, nodes, and unhealthy workloads, including pod failure reasons
+when Kubernetes reports them. It checks rollout status only for unhealthy
+workloads; an unrelated pod is advisory. The command exits
 nonzero when a query fails or a Flywheel-managed resource is unhealthy. Use
 `flywheel status -v` for full revisions and resource details.
 

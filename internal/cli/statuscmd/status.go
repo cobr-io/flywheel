@@ -134,9 +134,9 @@ func report(ctx context.Context, opts Options, contextName, defaultBranch string
 	add := func(text string, fatal bool) {
 		if fatal {
 			failures++
-			style.Err(out, "%s", text)
+			style.StateLine(out, style.StateFail, "%s", text)
 		} else {
-			style.Warn(out, "%s", text)
+			style.StateLine(out, style.StateWarn, "%s", text)
 		}
 	}
 	style.Summary(out, "Flywheel status — %s", contextName)
@@ -161,7 +161,13 @@ func report(ctx context.Context, opts Options, contextName, defaultBranch string
 			add(fmt.Sprintf("node %s is not Ready", n.GetName()), true)
 		}
 	}
-	style.Detail(out, "nodes: %d/%d Ready", ready, len(nodes))
+	if len(nodes) > 0 {
+		state := style.StateOK
+		if ready != len(nodes) {
+			state = style.StateWarn
+		}
+		style.StateLine(out, state, "nodes: %d/%d Ready", ready, len(nodes))
+	}
 	if len(nodes) == 0 && s.errors["nodes"] == nil {
 		add("no nodes found", true)
 	}
@@ -187,7 +193,7 @@ func report(ctx context.Context, opts Options, contextName, defaultBranch string
 		if !opts.Verbose {
 			rev = shortRevision(rev)
 		}
-		style.Detail(out, "%s: %s @ %s", objectKey(*g), branch, rev)
+		style.Value(out, "%s: %s @ %s", objectKey(*g), branch, rev)
 	}
 	if self == nil && s.errors["gitrepositories"] == nil {
 		add("self GitRepository flux-system/flux-system is missing", true)
@@ -196,7 +202,7 @@ func report(ctx context.Context, opts Options, contextName, defaultBranch string
 		selected := self.GetAnnotations()[naming.DeployBranchAnnotation]
 		if selected == "" {
 			selected = defaultBranch
-			style.Detail(out, "branch selection: default (%s)", defaultBranch)
+			style.Value(out, "branch selection: default (%s)", defaultBranch)
 		}
 		rev, _, _ := unstructured.NestedString(self.Object, "status", "artifact", "revision")
 		if rev == "" {
@@ -206,13 +212,13 @@ func report(ctx context.Context, opts Options, contextName, defaultBranch string
 		if !opts.Verbose {
 			rev = shortRevision(rev)
 		}
-		style.Detail(out, "selected: %s; deployed: %s", selected, rev)
+		style.Value(out, "selected: %s; deployed: %s", selected, rev)
 		local, err := opts.run(ctx, "git", "-C", opts.RepoDir, "symbolic-ref", "--quiet", "--short", "HEAD")
 		if err == nil {
 			branch := strings.TrimSpace(string(local))
-			style.Detail(out, "checkout: %s", branch)
+			style.Value(out, "checkout: %s", branch)
 			if selected != "unknown" && branch != selected {
-				style.Warn(out, "checkout is on %s while %s is selected", branch, selected)
+				style.StateLine(out, style.StateWarn, "checkout is on %s while %s is selected", branch, selected)
 			}
 		}
 	}
@@ -243,7 +249,13 @@ func report(ctx context.Context, opts Options, contextName, defaultBranch string
 			add(fmt.Sprintf("Flux %s %s: Ready=%s %s", obj.GetKind(), objectKey(obj), statusWord(condition(obj, "Ready")), conditionMessage(obj, "Ready")), fatal)
 		}
 	}
-	style.Detail(out, "resources: %d/%d Ready", fluxOK, fluxTotal)
+	if fluxTotal > 0 {
+		state := style.StateOK
+		if fluxOK != fluxTotal {
+			state = style.StateWarn
+		}
+		style.StateLine(out, state, "resources: %d/%d Ready", fluxOK, fluxTotal)
+	}
 	if fluxTotal == 0 && s.errors["gitrepositories"] == nil {
 		add("no Flux resources found", true)
 	}
@@ -254,12 +266,14 @@ func report(ctx context.Context, opts Options, contextName, defaultBranch string
 		style.Detail(out, "no image builds found")
 	}
 	for _, b := range builds {
-		style.Detail(out, "%s: %s; image policy: %s", b.name, b.state, b.policy)
+		state := style.StateOK
 		if b.failed {
-			add("current image build failed: "+b.name, true)
-		} else if strings.Contains(b.state, "waiting for build") || strings.Contains(b.policy, "behind source") {
-			style.Warn(out, "image %s has not reached the current source revision", b.name)
+			failures++
+			state = style.StateFail
+		} else if b.state != "succeeded" || b.policy == "unknown" || strings.Contains(b.policy, "behind source") {
+			state = style.StateWarn
 		}
+		style.StateLine(out, state, "%s: %s; image policy: %s", b.name, b.state, b.policy)
 	}
 
 	style.Step(out, "Workloads")
@@ -273,8 +287,8 @@ func report(ctx context.Context, opts Options, contextName, defaultBranch string
 		}
 	}
 	badPods := unhealthyPods(s.items["pods"])
-	if len(badPods) == 0 {
-		style.Detail(out, "pods: no unhealthy active pods")
+	if len(badPods) == 0 && s.errors["pods"] == nil {
+		style.StateLine(out, style.StateOK, "pods: no unhealthy active pods")
 	}
 	for _, p := range badPods {
 		fatal := p.GetLabels()[naming.ManagedByLabelKey] == naming.ManagedByLabelValue || podOwned(p, s.items["replicasets"], unhealthyOwned)
@@ -537,10 +551,53 @@ func podState(p unstructured.Unstructured) string {
 	if phase == "" {
 		phase = "Unknown"
 	}
+	for _, field := range []string{"initContainerStatuses", "containerStatuses"} {
+		containers, _, _ := unstructured.NestedSlice(p.Object, "status", field)
+		for _, raw := range containers {
+			container, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			name, _ := container["name"].(string)
+			state, _ := container["state"].(map[string]any)
+			if waiting, ok := state["waiting"].(map[string]any); ok {
+				if reason, _ := waiting["reason"].(string); reason != "" {
+					return fmt.Sprintf("%s: %s (%s)", phase, reason, name)
+				}
+			}
+			if terminated, ok := state["terminated"].(map[string]any); ok {
+				if reason, _ := terminated["reason"].(string); reason != "" && reason != "Completed" {
+					return fmt.Sprintf("%s: %s (%s)", phase, reason, name)
+				}
+			}
+		}
+	}
+	if reason, _, _ := unstructured.NestedString(p.Object, "status", "reason"); reason != "" {
+		return phase + ": " + reason
+	}
+	for _, kind := range []string{"PodScheduled", "Ready"} {
+		if condition(p, kind) == "False" {
+			if reason := conditionReason(p, kind); reason != "" {
+				return phase + ": " + reason
+			}
+		}
+	}
 	if phase == "Running" {
 		return "Running, not Ready"
 	}
 	return phase
+}
+
+func conditionReason(u unstructured.Unstructured, name string) string {
+	conds, _, _ := unstructured.NestedSlice(u.Object, "status", "conditions")
+	for _, raw := range conds {
+		c, ok := raw.(map[string]any)
+		if ok && c["type"] == name {
+			reason, _ := c["reason"].(string)
+			return reason
+		}
+	}
+	return ""
 }
 
 func podOwned(p unstructured.Unstructured, replicaSets []unstructured.Unstructured, owned map[string]bool) bool {

@@ -140,6 +140,43 @@ func TestCompletedJobPodIsIgnored(t *testing.T) {
 	}
 }
 
+func TestPodStateShowsKubernetesReason(t *testing.T) {
+	cases := []struct {
+		name   string
+		status map[string]any
+		want   string
+	}{
+		{"image pull", map[string]any{"phase": "Pending", "containerStatuses": []any{map[string]any{
+			"name": "api", "state": map[string]any{"waiting": map[string]any{"reason": "ImagePullBackOff"}},
+		}}}, "Pending: ImagePullBackOff (api)"},
+		{"init container", map[string]any{"phase": "Pending", "initContainerStatuses": []any{map[string]any{
+			"name": "init-db", "state": map[string]any{"waiting": map[string]any{"reason": "CrashLoopBackOff"}},
+		}}}, "Pending: CrashLoopBackOff (init-db)"},
+		{"completed init is skipped", map[string]any{
+			"phase": "Pending",
+			"initContainerStatuses": []any{map[string]any{
+				"name": "init-db", "state": map[string]any{"terminated": map[string]any{"reason": "Completed"}},
+			}},
+			"containerStatuses": []any{map[string]any{
+				"name": "api", "state": map[string]any{"waiting": map[string]any{"reason": "ImagePullBackOff"}},
+			}},
+		}, "Pending: ImagePullBackOff (api)"},
+		{"evicted", map[string]any{"phase": "Failed", "reason": "Evicted"}, "Failed: Evicted"},
+		{"unschedulable", map[string]any{"phase": "Pending", "conditions": []any{map[string]any{
+			"type": "PodScheduled", "status": "False", "reason": "Unschedulable",
+		}}}, "Pending: Unschedulable"},
+		{"no reason", map[string]any{"phase": "Running"}, "Running, not Ready"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := obj("Pod", "apps", "api", map[string]any{"status": tc.status})
+			if got := podState(pod); got != tc.want {
+				t.Errorf("podState = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestBuildResultRequiresCurrentSourceRevision(t *testing.T) {
 	repo := obj("GitRepository", naming.FlywheelNamespace, "local-app", map[string]any{
 		"status": map[string]any{"artifact": map[string]any{"revision": "main@sha1:abcdef0123456789"}},
