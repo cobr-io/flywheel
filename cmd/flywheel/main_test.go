@@ -19,7 +19,7 @@ func TestCommandTree(t *testing.T) {
 	}
 	want := []string{
 		"doctor", "init", "up", "down", "clean",
-		"add", "version",
+		"add", "status", "version",
 	}
 	for _, w := range want {
 		if !got[w] {

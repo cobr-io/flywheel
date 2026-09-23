@@ -120,6 +120,7 @@ func newRootCmd() *cobra.Command {
 		newAddCmd(),
 		newPublishAppCmd(),
 		newUseCmd(),
+		newStatusCmd(),
 		newVersionCmd(),
 	)
 	return root

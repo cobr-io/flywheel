@@ -145,12 +145,20 @@ All options, from-source details, and uninstalling:
 | `flywheel add app <dir>` | Scaffold a per-app builder + workload from a worktree dir. |
 | `flywheel publish-app <name>` | Promote a `local_only` app once its worktree has a remote. |
 | `flywheel use <branch>` | Choose which gitops branch Flux deploys. |
+| `flywheel status` | Show selected branch, mirrored revisions, builds, Flux health, and cluster readiness. |
 | `flywheel doctor` | Check host prerequisites. |
 | `flywheel clean` | Opt-in destructive cleanup of orphaned PVCs. |
 | `flywheel version` | Print the build version. |
 
 Run `flywheel <command> --help` for flags. `-v/--verbose` surfaces
 k3d/docker/kubectl chatter; `--no-color` (or `NO_COLOR`) disables ANSI colour.
+
+`flywheel status` reads the configured local cluster without changing it. It
+reports selected and mirrored branches, the latest retained image-build Jobs,
+Flux readiness, nodes, and unhealthy workloads. It checks rollout status only
+for unhealthy workloads; an unrelated pod is advisory. The command exits
+nonzero when a query fails or a Flywheel-managed resource is unhealthy. Use
+`flywheel status -v` for full revisions and resource details.
 
 ## Configuration
 
