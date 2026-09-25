@@ -11,6 +11,18 @@ During the v0.x phase no compat promise is made between minor versions
 
 Nothing yet.
 
+## [0.5.0] - 2026-09-25
+
+### Added
+
+- `flywheel status`: a read-only health summary for the configured k3d
+  context. Reports the selected and mirrored deploy branches, node and Flux
+  readiness, current image-build Jobs and ImagePolicy tags, and unhealthy
+  pods and workloads; exits nonzero when something Flywheel manages is
+  unhealthy or a query fails. Rollout probes are limited to unhealthy
+  workloads, unrelated pod problems stay advisory, and `-v` shows full
+  revisions and resource details. (#153)
+
 ## [0.4.4] - 2026-09-22
 
 ### Fixed
