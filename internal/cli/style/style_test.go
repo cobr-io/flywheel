@@ -7,10 +7,7 @@ import (
 	"testing"
 )
 
-// unsetEnv removes the var for the test duration. (`t.Setenv("X", "")`
-// SETS the var to empty, which the NO_COLOR spec still treats as
-// "color disabled" — see https://no-color.org. To test
-// CLICOLOR_FORCE we need NO_COLOR genuinely absent.)
+// unsetEnv removes the var for the test duration.
 func unsetEnv(t *testing.T, name string) {
 	t.Helper()
 	prev, had := os.LookupEnv(name)
@@ -117,6 +114,44 @@ func TestDetail_TwoSpaceIndent(t *testing.T) {
 	})
 }
 
+func TestStateLine_ColorsOnlyMarker(t *testing.T) {
+	for _, tc := range []struct {
+		state State
+		color string
+		mark  string
+	}{
+		{StateOK, green, "✓ OK"},
+		{StateWarn, boldYellow, "⚠ WARN"},
+		{StateFail, boldRed, "✗ FAIL"},
+	} {
+		withEnabled(t, true, func() {
+			var buf bytes.Buffer
+			StateLine(&buf, tc.state, "nodes: %d/%d Ready", 2, 3)
+			want := "  " + tc.color + tc.mark + reset + " nodes: 2/3 Ready\n"
+			if got := buf.String(); got != want {
+				t.Errorf("StateLine = %q, want %q", got, want)
+			}
+		})
+		withEnabled(t, false, func() {
+			var buf bytes.Buffer
+			StateLine(&buf, tc.state, "nodes: 2/3 Ready")
+			if got := buf.String(); got != "  "+string(tc.state)+" nodes: 2/3 Ready\n" {
+				t.Errorf("plain StateLine = %q", got)
+			}
+		})
+	}
+}
+
+func TestValue_NormalBrightness(t *testing.T) {
+	withEnabled(t, true, func() {
+		var buf bytes.Buffer
+		Value(&buf, "selected: %s", "main")
+		if got := buf.String(); got != "  selected: main\n" {
+			t.Errorf("Value = %q", got)
+		}
+	})
+}
+
 func TestSummary_OffMode_NoPrefix(t *testing.T) {
 	withEnabled(t, false, func() {
 		var buf bytes.Buffer
@@ -133,6 +168,15 @@ func TestInit_NoColorEnvForcesOff(t *testing.T) {
 	Init(false)
 	if enabled {
 		t.Error("Init with NO_COLOR set should leave enabled=false")
+	}
+}
+
+func TestInit_EmptyNoColorDoesNotDisableForcedColor(t *testing.T) {
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR_FORCE", "1")
+	Init(false)
+	if !enabled {
+		t.Error("an empty NO_COLOR should not disable CLICOLOR_FORCE")
 	}
 }
 

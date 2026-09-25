@@ -20,6 +20,7 @@ import (
 	"github.com/cobr-io/flywheel/internal/cli/publishapp"
 	"github.com/cobr-io/flywheel/internal/cli/schema"
 	"github.com/cobr-io/flywheel/internal/cli/sourcemode"
+	"github.com/cobr-io/flywheel/internal/cli/statuscmd"
 	"github.com/cobr-io/flywheel/internal/cli/style"
 	"github.com/cobr-io/flywheel/internal/cli/up"
 	"github.com/cobr-io/flywheel/internal/cli/usecmd"
@@ -364,6 +365,26 @@ func newUseCmd() *cobra.Command {
 		},
 	}
 	return cmd
+}
+
+func newStatusCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "status",
+		Short: "Summarize the selected branch and local cluster health",
+		Long:  "Read the configured local cluster and report branch, mirror, build, Flux, and workload state. Unrelated workload problems are advisory; failed checks and Flywheel-managed resources cause a nonzero exit.",
+		Args:  cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			wd, err := os.Getwd()
+			if err != nil {
+				return err
+			}
+			verbose, err := cmd.Root().PersistentFlags().GetBool("verbose")
+			if err != nil {
+				return err
+			}
+			return statuscmd.Run(cmd.Context(), statuscmd.Options{RepoDir: wd, Stdout: os.Stdout, Verbose: verbose})
+		},
+	}
 }
 
 // completeBranches powers `flywheel use <TAB>` by listing the gitops repo's
