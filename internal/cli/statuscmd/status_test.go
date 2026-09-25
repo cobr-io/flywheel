@@ -273,3 +273,23 @@ func TestQueryFailureReturnsNonzeroAfterSummary(t *testing.T) {
 		t.Fatalf("query failure: err=%v\n%s", err, out)
 	}
 }
+
+func TestKubectlWarningsOnStderrDoNotBreakQueries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "flywheel.yaml"), []byte("cluster:\n  name: sample-local\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	bin := t.TempDir()
+	kubectl := "#!/bin/sh\n" +
+		"printf 'E0925 memcache.go:287] couldn'\\''t get resource list for metrics.k8s.io/v1beta1\\n' >&2\n" +
+		"printf '{\"apiVersion\":\"v1\",\"kind\":\"List\",\"items\":[]}\\n'\n"
+	if err := os.WriteFile(filepath.Join(bin, "kubectl"), []byte(kubectl), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin)
+	var out bytes.Buffer
+	_ = Run(context.Background(), Options{RepoDir: dir, Stdout: &out})
+	if strings.Contains(out.String(), "cannot read") {
+		t.Fatalf("kubectl stderr leaked into JSON:\n%s", out.String())
+	}
+}

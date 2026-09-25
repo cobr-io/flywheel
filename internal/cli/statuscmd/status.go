@@ -5,6 +5,7 @@ package statuscmd
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -85,9 +86,16 @@ func Run(ctx context.Context, opts Options) error {
 
 func command(ctx context.Context, name string, args ...string) ([]byte, error) {
 	c := exec.CommandContext(ctx, name, args...)
-	out, err := c.CombinedOutput()
+	// Stdout only: kubectl logs warnings (e.g. metrics.k8s.io discovery
+	// errors) to stderr on success, which would corrupt the JSON.
+	out, err := c.Output()
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+		var stderr []byte
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr = exitErr.Stderr
+		}
+		return nil, fmt.Errorf("%s %s: %w: %s", name, strings.Join(args, " "), err, strings.TrimSpace(string(stderr)))
 	}
 	return out, nil
 }
