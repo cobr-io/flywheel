@@ -9,6 +9,10 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.1] - 2026-09-29
+
 ### Fixed
 
 - git-auto-sync no longer writes `FETCH_HEAD` in the developer's worktree. Its
@@ -16,6 +20,7 @@ During the v0.x phase no compat promise is made between minor versions
   sync tick found two entries and failed with "Cannot rebase onto multiple
   branches", and the tick could read the developer's fetch as the bare head.
   The tick now fetches into the private ref `refs/flywheel/bare/<branch>`.
+  (#156)
 
 ## [0.5.0] - 2026-09-25
 
