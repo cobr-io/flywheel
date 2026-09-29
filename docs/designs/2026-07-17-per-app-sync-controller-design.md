@@ -96,7 +96,10 @@ poison cannot reach a push:
    `kustomize.toolkit.fluxcd.io/reconcile: disabled` annotation, then patch
    `spec.ref.branch = B` (same monotonic intent signal as today; the spec
    value arrives free with the reconciled object, so no LAST_BRANCH state).
-3. **Fetch** bare `B` → remote head `R`. Objects only; no local ref update.
+3. **Fetch** bare `B` → remote head `R`, into the private ref
+   `refs/flywheel/bare/B` with `--no-write-fetch-head`; no branch ref update.
+   Not `FETCH_HEAD`: it is shared with the developer's own fetches, and an
+   overlapping `git pull` saw two entries and failed.
 4. **Integrate** (bare strictly ahead: `L` ancestor of `R`) — one of the two
    worktree-mutating paths (with divergence-rebase, step 7); both share the
    same post-verify + rollback guard:
