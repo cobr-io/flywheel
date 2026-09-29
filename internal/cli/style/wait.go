@@ -321,14 +321,17 @@ func (w *Waiter) glyphFor(it *WaitItem) (string, string) {
 	}
 }
 
+// truncate cuts s to at most max runes (not bytes, so multi-byte
+// glyphs like `→` are never split mid-rune), ending in `…` when cut.
 func truncate(s string, max int) string {
-	if len(s) <= max {
+	r := []rune(s)
+	if len(r) <= max {
 		return s
 	}
 	if max <= 1 {
 		return "…"
 	}
-	return s[:max-1] + "…"
+	return string(r[:max-1]) + "…"
 }
 
 // durStr renders a time.Duration in a compact "12s" / "1m24s" form

@@ -3,9 +3,16 @@ package style
 import (
 	"fmt"
 	"io"
+	"os"
 	"sync"
 	"time"
+
+	"golang.org/x/term"
 )
+
+// fallbackCols is the width assumed when `w` isn't a terminal we can
+// query (tests, CLICOLOR_FORCE into a pipe).
+const fallbackCols = 80
 
 // Spin runs `fn` while displaying a single-row braille spinner with
 // `label`. On TTY (and non-verbose), the line redraws every 100ms
@@ -79,13 +86,19 @@ func renderSpin(w io.Writer, label string, start time.Time, done <-chan struct{}
 		if drawn {
 			fmt.Fprintf(w, "\033[1A\033[J")
 		}
+		// The redraw moves up only one row, so a frame must never
+		// wrap: cut the label to fit. Glyph + space + two-space gap
+		// take 4 columns; keep the last column free so the terminal
+		// doesn't auto-wrap at exactly full width.
+		elapsed := durStr(time.Since(start))
+		labelW := termCols(w) - 4 - len(elapsed) - 1
 		// Spinner glyph is bold cyan (matches the Step header colour);
 		// label + elapsed are dim (this is a transient line, not
 		// scrollback-worthy).
 		fmt.Fprintf(w, "%s%s%s %s%s  %s%s\n",
 			boldCyan, string(spinFrames[frame]), reset,
-			dim, label,
-			durStr(time.Since(start)), reset,
+			dim, truncate(label, labelW),
+			elapsed, reset,
 		)
 	}
 	draw(false)
@@ -101,4 +114,15 @@ func renderSpin(w io.Writer, label string, start time.Time, done <-chan struct{}
 			draw(true)
 		}
 	}
+}
+
+// termCols returns the column width of `w` when it's a terminal, else
+// fallbackCols.
+func termCols(w io.Writer) int {
+	if f, ok := w.(*os.File); ok {
+		if cols, _, err := term.GetSize(int(f.Fd())); err == nil && cols > 0 {
+			return cols
+		}
+	}
+	return fallbackCols
 }

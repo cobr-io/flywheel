@@ -3,9 +3,11 @@ package style
 import (
 	"bytes"
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
+	"unicode/utf8"
 )
 
 func TestSpin_OffMode_PrintsLabelAndOutcome(t *testing.T) {
@@ -89,6 +91,44 @@ func TestSpin_TTY_AnimatesThenClearsBeforeSummary(t *testing.T) {
 		// The final stable summary lands after the last clear.
 		if !strings.Contains(got, "✓") {
 			t.Errorf("TTY mode missing final ✓ summary: %q", got)
+		}
+	})
+}
+
+// Regression for #158: the redraw moves up a single row, so a frame
+// wider than the terminal wraps and leaves its earlier rows behind.
+// Every frame must fit within the (fallback 80-column) width.
+func TestSpin_TTY_LongLabelFitsTerminalWidth(t *testing.T) {
+	withEnabled(t, true, func() {
+		prev := verbose
+		t.Cleanup(func() { verbose = prev })
+		verbose = false
+		var buf bytes.Buffer
+
+		label := "mirror ghcr.io/cobr-io/image-builder-controller:v0.5.1 → local registry (released image, pulled from ghcr)"
+		_ = Spin(&buf, label, func() error {
+			time.Sleep(150 * time.Millisecond)
+			return nil
+		})
+
+		ansi := regexp.MustCompile(`\033\[[0-9;]*[A-Za-z]`)
+		frames := 0
+		for _, line := range strings.Split(ansi.ReplaceAllString(buf.String(), ""), "\n") {
+			// Skip the stable ✓ summary: it lands in scrollback and
+			// is never redrawn, so wrapping it is harmless.
+			if line == "" || strings.Contains(line, "✓") {
+				continue
+			}
+			frames++
+			if n := utf8.RuneCountInString(line); n >= 80 {
+				t.Errorf("spinner frame is %d columns, want < 80: %q", n, line)
+			}
+			if !strings.Contains(line, "…") {
+				t.Errorf("long label should be cut with …: %q", line)
+			}
+		}
+		if frames == 0 {
+			t.Fatalf("no spinner frames drawn: %q", buf.String())
 		}
 	})
 }
