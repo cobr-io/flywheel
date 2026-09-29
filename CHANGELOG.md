@@ -9,7 +9,12 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- A spinner line longer than the terminal is wide no longer prints a new copy
+  on every frame. The redraw moves the cursor up only one row, so the label is
+  now cut with `…` to fit the terminal width (80 columns when the width is
+  unknown). (#158)
 
 ## [0.5.1] - 2026-09-29
 
