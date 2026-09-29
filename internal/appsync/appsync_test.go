@@ -245,6 +245,32 @@ func TestTick_BareAheadFastForward(t *testing.T) {
 	}
 }
 
+// The tick shares the developer's .git, so it must not write FETCH_HEAD: git
+// truncates it when a fetch starts and appends when it ends, so a tick fetch
+// overlapping the developer's `git pull` left both entries in it, and pull
+// then failed with "Cannot rebase onto multiple branches". The developer's
+// FETCH_HEAD must survive a tick byte-for-byte, and the tick must still find
+// the bare head without it.
+func TestTick_LeavesDeveloperFetchHeadAlone(t *testing.T) {
+	bare := bareRepo(t, "v0\n")
+	wt := cloneWorktree(t, bare)
+	testgit.Git(t, wt, "fetch", "-q", "origin")
+	gitDir := filepath.Join(wt, ".git")
+	before := readFile(t, gitDir, "FETCH_HEAD")
+	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
+
+	res, err := newTicker(t, bare, wt, &fakeFlux{}).Tick(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if !res.Integrated || localRef(t, wt, "main") != R {
+		t.Fatalf("expected fast-forward to R %s, got %+v", R, res)
+	}
+	if after := readFile(t, gitDir, "FETCH_HEAD"); after != before {
+		t.Errorf("tick rewrote the developer's FETCH_HEAD:\nbefore: %q\nafter:  %q", before, after)
+	}
+}
+
 // Genuine divergence (both sides moved, non-conflicting) rebases then pushes.
 // The two edits are 8 lines apart so they land in separate diff hunks (a clean
 // rebase) rather than the same 3-line context window.

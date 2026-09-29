@@ -37,6 +37,11 @@ import (
 // Hygiene / permissions).
 const defaultExecTimeout = 30 * time.Second
 
+// bareRefPrefix namespaces the worktree-local copy of each bare branch that a
+// tick fetches (step 3). Outside refs/heads, so it is never a branch, never in
+// the step-1 snapshot, and never touched by post-verify's rollback.
+const bareRefPrefix = "refs/flywheel/bare/"
+
 // FluxPatcher abstracts the Kubernetes-side Flux GitRepository operations a
 // Ticker needs. The production implementation patches the GR via a
 // controller-runtime client (wired into the Reconciler, Phase 3); tests fake
@@ -171,10 +176,15 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 		}
 	}
 
-	// Step 3: fetch the bare repo's view of B. Objects only — never a refspec
-	// that updates a local ref — so FETCH_HEAD is the only thing that moves and
-	// no branch ref is rewritten out from under the snapshot.
-	if err := t.run(ctx, "fetch", "--no-tags", t.BareURL, B); err != nil {
+	// Step 3: fetch the bare repo's view of B into a private ref outside
+	// refs/heads, so no branch ref is rewritten out from under the snapshot.
+	// Not FETCH_HEAD: this .git is the developer's, and git truncates
+	// FETCH_HEAD when a fetch starts and appends when it ends, so a tick fetch
+	// overlapping the developer's `git pull` left both entries in it — pull
+	// failed ("Cannot rebase onto multiple branches") or this tick read the
+	// developer's fetch as the bare head.
+	bareRef := bareRefPrefix + B
+	if err := t.run(ctx, "fetch", "--no-tags", "--no-write-fetch-head", t.BareURL, "+refs/heads/"+B+":"+bareRef); err != nil {
 		// The branch is not in the bare repo yet (first push): a plain push of
 		// the explicit sha L creates it. sync.sh parity, plus a poke (tail) so
 		// Flux sees the branch's first appearance now.
@@ -185,9 +195,9 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 		res.Pushed = true
 		return t.finish(ctx, res)
 	}
-	R, err := t.revParse(ctx, "FETCH_HEAD")
+	R, err := t.revParse(ctx, bareRef)
 	if err != nil {
-		return res, fmt.Errorf("resolve FETCH_HEAD: %w", err)
+		return res, fmt.Errorf("resolve %s: %w", bareRef, err)
 	}
 
 	// Step 4: compare the bare head R against L (the step-1 snapshot of B),
@@ -532,7 +542,7 @@ func (t *Ticker) snapshotHeads(ctx context.Context) (map[string]string, error) {
 	return m, nil
 }
 
-// revParse resolves rev (e.g. FETCH_HEAD, refs/heads/<B>) to its full sha.
+// revParse resolves rev (e.g. refs/flywheel/bare/<B>, refs/heads/<B>) to its full sha.
 func (t *Ticker) revParse(ctx context.Context, rev string) (string, error) {
 	out, err := t.output(ctx, "rev-parse", rev)
 	if err != nil {

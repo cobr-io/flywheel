@@ -9,7 +9,13 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- git-auto-sync no longer writes `FETCH_HEAD` in the developer's worktree. Its
+  fetch of the bare repo raced the developer's own: a `git pull` overlapping a
+  sync tick found two entries and failed with "Cannot rebase onto multiple
+  branches", and the tick could read the developer's fetch as the bare head.
+  The tick now fetches into the private ref `refs/flywheel/bare/<branch>`.
 
 ## [0.5.0] - 2026-09-25
 
