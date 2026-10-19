@@ -1,4 +1,4 @@
-// Package appsync is the per-app worktree<->bare-repo sync engine driving
+// Package appsync is the per-app worktree->bare-repo sync engine driving
 // cmd/git-auto-sync. It replaces the per-app git-auto-sync sidecar
 // (scripts/git-auto-sync/sync.sh)'s bash loop with the race-free tick
 // described in docs/designs/2026-07-17-per-app-sync-controller-design.md:
@@ -7,24 +7,22 @@
 // HEAD, so a `git checkout` landing mid-tick can't apply a stale branch's
 // decisions to a worktree that has already moved on.
 //
-// Phase 2 (see docs/plans/2026-07-17-per-app-sync-controller-plan.md) implements
-// Tick as the design's snapshot / branch-follow / fetch / integrate / push /
-// poke algorithm, proven by deterministic race-injection tests. The Reconciler
-// that resolves GitRepositories to Tickers is Phase 3.
+// Sync is one-directional, worktree -> bare (issue #161). Nothing but this
+// controller writes an app's bare repo, so a bare head the worktree doesn't
+// contain never means new work to pull: it means the developer rewrote
+// history (reset, rebase, amend). The tick pushes that rewrite to the bare
+// repo and never mutates the worktree. The design's integrate (reset --hard)
+// and divergence-rebase paths silently undid such rewrites and are gone.
 //
 // Shares selfsync's idioms (explicit refs, push-guard, shell-out runner) but
 // is a separate package — internal/selfsync (the gitops/self path) is not
-// modified; the per-app product behavior (auto-follow, bidirectional sync)
-// needs its own race-free redesign (design § Problem).
+// modified; the per-app product behavior (auto-follow) needs its own race-free
+// redesign (design § Problem).
 package appsync
 
 import (
 	"context"
-	"errors"
 	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -39,7 +37,7 @@ const defaultExecTimeout = 30 * time.Second
 
 // bareRefPrefix namespaces the worktree-local copy of each bare branch that a
 // tick fetches (step 3). Outside refs/heads, so it is never a branch, never in
-// the step-1 snapshot, and never touched by post-verify's rollback.
+// the step-1 snapshot.
 const bareRefPrefix = "refs/flywheel/bare/"
 
 // FluxPatcher abstracts the Kubernetes-side Flux GitRepository operations a
@@ -57,8 +55,8 @@ type FluxPatcher interface {
 	// PokeReconcile bumps reconcile.fluxcd.io/requestedAt
 	// (naming.ReconcileRequestAnnotation) on the GitRepository so
 	// source-controller fetches now instead of waiting out the poll interval.
-	// Called whenever the bare repo's head changed this tick — our push, or a
-	// fast-forward we integrated (design step 6).
+	// Called whenever this tick pushed, i.e. the bare repo's head changed
+	// (design step 6).
 	PokeReconcile(ctx context.Context) error
 }
 
@@ -75,50 +73,31 @@ type Ticker struct {
 	Logf func(string, ...any) // optional
 
 	// testHook is a test-only injection point (nil in production), invoked at
-	// exactly four stages — "post-snapshot", "pre-reset", "post-reset",
-	// "pre-rebase" — so race tests can land a `git checkout` in the precise
-	// window each guard defends against.
+	// the "post-snapshot" stage so race tests can land a `git checkout` after
+	// the snapshot and before any decision.
 	testHook func(stage string)
 }
 
 // TickResult reports what a single Tick did: the checked-out branch observed,
-// whether the branch-follow patch ran, whether the worktree was pushed or
-// fast-forwarded, whether a post-verify rollback fired, and whether the tick
-// stalled on a rebase conflict. A stalled tick returns (result, nil) with
-// Stalled set so the reconciler can pick a long requeue without treating it as
-// an error.
+// whether the branch-follow patch ran, and whether the worktree was pushed.
 type TickResult struct {
 	// Branch is the checked-out branch B this tick observed, or "" when the
 	// worktree is detached / on an unborn branch (tick skipped, no error).
 	Branch string
-	// Healed is set when heal_index_if_corrupt rebuilt a corrupt .git/index this
-	// tick (issue #4).
-	Healed bool
 	// Followed is set when trackedBranch != B and the branch-follow patch was
 	// attempted this tick. FollowErr carries a patch failure — the tick still
 	// continues (sync.sh parity) so the bare repo converges and the reconciler
 	// requeues normally; it is surfaced here for observability, not returned.
 	Followed  bool
 	FollowErr error
-	// Pushed is set when the worktree's commits were pushed to the bare repo:
-	// worktree-ahead, a successful divergence rebase, or a brand-new-branch
-	// create.
+	// Pushed is set when the worktree's branch was pushed to the bare repo:
+	// worktree-ahead, a local history rewrite, or a brand-new-branch create.
 	Pushed bool
-	// Integrated is set when the bare repo was strictly ahead and the worktree
-	// was fast-forwarded onto it (reset --hard R).
-	Integrated bool
-	// RolledBack is set when post-verify caught a checkout that won the
-	// microsecond window before reset --hard and moved the wrong branch's ref:
-	// that ref was restored from the step-1 snapshot and the tick aborted (no
-	// push, no poke). Near-never in production; logged at WARNING.
-	RolledBack bool
-	// Stalled is set when a genuine divergence hit a rebase conflict: the rebase
-	// was aborted, the worktree left pristine, and the reconciler should requeue
-	// on the long stall interval (design step 7 / plan Q4). No push, no poke.
-	Stalled bool
-	// Poked is set when PokeReconcile ran because the bare head for B changed
-	// this tick (our push, or a fast-forward we integrated). Never set on an
-	// idle / skip / stall tick.
+	// Rewrote is set when the push replaced bare history the worktree no
+	// longer contains (a local reset, rebase or amend), forced with a lease.
+	Rewrote bool
+	// Poked is set when PokeReconcile ran because this tick pushed. Never set
+	// on an idle or skip tick.
 	Poked bool
 }
 
@@ -152,14 +131,6 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 	}
 
 	t.hook("post-snapshot")
-
-	// Rebuild a corrupt .git/index before any index-reading op (the integrate
-	// path's dirty classification), so a transient corruption self-heals instead
-	// of wedging the loop — run early, matching sync.sh's placement before the
-	// branch-compare block (issue #4).
-	if t.healIndexIfCorrupt(ctx) {
-		res.Healed = true
-	}
 
 	// Step 2: branch-follow. trackedBranch is the GR's live spec.ref.branch,
 	// reconciled fresh each tick, so this single comparison subsumes sync.sh's
@@ -203,6 +174,8 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 	// Step 4: compare the bare head R against L (the step-1 snapshot of B),
 	// NEVER a re-read of HEAD. This is where sync.sh sampled HEAD and could
 	// apply a stale branch's decision to a worktree a checkout had already moved.
+	// The worktree is never mutated: this controller is the bare repo's only
+	// writer, so R is always something the worktree once had (issue #161).
 	switch {
 	case L == R:
 		// idle push-guard — already in sync, nothing to do (issue #6).
@@ -213,128 +186,19 @@ func (t *Ticker) Tick(ctx context.Context, trackedBranch string) (TickResult, er
 		} else {
 			res.Pushed = true
 		}
-	case t.isAncestor(ctx, L, R):
-		// bare strictly ahead — integrate (the only worktree-mutating path).
-		res, err = t.integrate(ctx, B, L, R, refsSnapshot, res)
-		if err != nil {
-			return res, err
-		}
 	default:
-		// genuine divergence (neither ancestor) — rebase worktree on R.
-		res, err = t.rebaseDivergence(ctx, B, refsSnapshot, R, res)
-		if err != nil {
-			return res, err
+		// L behind R, or diverged from it: the developer rewrote history
+		// (reset, rebase, amend). Force the bare repo to L, leasing against R.
+		if err := t.pushExplicit(ctx, B, L, R); err != nil {
+			t.logf("push rewritten %s: %v", B, err) // warn-and-continue
+		} else {
+			t.logf("%s rewritten locally (%s → %s); bare updated", B, short(R), short(L))
+			res.Pushed = true
+			res.Rewrote = true
 		}
 	}
 
 	return t.finish(ctx, res)
-}
-
-// integrate fast-forwards the worktree onto the strictly-ahead bare head R.
-// This is the ONLY worktree-mutating path — the one where sync.sh's HEAD-sampled
-// reset --hard poisoned the bare repo (issue #86) — so it is the guarded one:
-// dirty-guard, re-verify the checked-out branch is still B, reset, then
-// post-verify that the reset moved only refs/heads/B and roll back anything else.
-// It never pushes and never pokes; success is reported via res.Integrated and
-// the caller's poke rule fires. heal_index_if_corrupt already ran early in Tick.
-func (t *Ticker) integrate(ctx context.Context, B, L, R string, snap map[string]string, res TickResult) (TickResult, error) {
-	// Dirty classification. diff --quiet exits 0 clean / 1 changes / >1 index
-	// error (issue #4).
-	unstaged, err := t.diffQuietCode(ctx, "diff", "--quiet")
-	if err != nil {
-		return res, fmt.Errorf("classify worktree (unstaged): %w", err)
-	}
-	staged, err := t.diffQuietCode(ctx, "diff", "--cached", "--quiet")
-	if err != nil {
-		return res, fmt.Errorf("classify worktree (staged): %w", err)
-	}
-	if unstaged > 1 || staged > 1 {
-		// Index unreadable this round — skip integrate; the next tick's heal
-		// rebuilds it. Not a stall, just a retry (issue #4).
-		t.logf("integrate %s: worktree index unreadable (git diff errored); skipping this tick", B)
-		return res, nil
-	}
-	if unstaged != 0 || staged != 0 {
-		// DATA-LOSS GUARD: reset --hard would silently discard the uncommitted
-		// work. Skip the integrate AND everything downstream — were we to fall
-		// through and push, --force-with-lease=B:R would rewind the bare repo
-		// (at R) back over R's commits to L. Once the developer commits, the
-		// worktree has a local commit ahead and the next tick integrates via the
-		// dirty-safe divergence rebase instead. sync.sh parity (its `continue`).
-		t.logf("integrate %s: bare advanced to %s but worktree (at %s) has uncommitted changes; NOT hard-resetting (commit to integrate)", B, short(R), short(L))
-		return res, nil
-	}
-
-	// Re-verify the checked-out branch is STILL B immediately before mutating.
-	// A checkout that landed between the snapshot and here is caught now → no
-	// reset, so the wrong branch is never touched (design step 5c).
-	if cur, err := t.symbolicRef(ctx); err != nil || cur != B {
-		t.logf("integrate %s: worktree switched to %q before reset; skipping integrate", B, cur)
-		return res, nil
-	}
-
-	t.hook("pre-reset")
-
-	// Fast-forward the worktree onto the bare head.
-	if err := t.run(ctx, "reset", "--hard", R); err != nil {
-		return res, fmt.Errorf("reset --hard %s: %w", short(R), err)
-	}
-
-	t.hook("post-reset")
-
-	// POST-VERIFY that the reset moved only refs/heads/B; roll back and abort if
-	// a checkout raced it (the issue-#86 guard, shared with the divergence path).
-	aborted, rolled, err := t.postVerify(ctx, B, snap)
-	if err != nil {
-		return res, err
-	}
-	if aborted {
-		res.RolledBack = rolled > 0
-		return res, nil
-	}
-
-	// The bare advanced without us pushing (a teammate/CI push straight to bare):
-	// the fast-forward integrated cleanly.
-	res.Integrated = true
-	return res, nil
-}
-
-// postVerify re-checks, immediately after a worktree-mutating op (reset --hard
-// or rebase), that ONLY refs/heads/B moved from the step-1 snapshot. reset and
-// rebase move whatever branch HEAD points at; if a checkout won the microsecond
-// window after the pre-mutation re-verify, they moved the WRONG branch. Any ref
-// other than B that moved — and still exists, since a vanished ref is an
-// unrelated external delete we must not fight — is restored from the snapshot
-// via update-ref. It reports aborted when a checkout raced (HEAD no longer on B)
-// or any ref was rolled back, in which case the caller MUST skip the push and
-// the poke. This is the guard that makes the issue-#86 bare poison impossible,
-// so a rollback logs loudly; both worktree-mutating paths share it.
-func (t *Ticker) postVerify(ctx context.Context, B string, snap map[string]string) (aborted bool, rolled int, err error) {
-	cur, curErr := t.symbolicRef(ctx)
-	after, serr := t.snapshotHeads(ctx)
-	if serr != nil {
-		return false, 0, fmt.Errorf("post-verify snapshot: %w", serr)
-	}
-	for name, before := range snap {
-		if name == B {
-			continue // the one ref allowed to have moved (to R)
-		}
-		if now, ok := after[name]; ok && now != before {
-			if uerr := t.run(ctx, "update-ref", "refs/heads/"+name, before); uerr != nil {
-				t.logf("post-verify: WARNING failed to roll back refs/heads/%s %s->%s: %v", name, short(now), short(before), uerr)
-			} else {
-				t.logf("post-verify: WARNING refs/heads/%s moved to %s during a worktree-mutating op (checkout race); rolled back to %s", name, short(now), short(before))
-			}
-			rolled++
-		}
-	}
-	if curErr != nil || cur != B || rolled > 0 {
-		// A checkout raced the mutation. The caller aborts: no push, no poke.
-		// The next tick re-runs cleanly on whatever branch is now checked out.
-		t.logf("post-verify: aborting tick — checkout raced (HEAD now on %q); no push/poke", cur)
-		return true, rolled, nil
-	}
-	return false, 0, nil
 }
 
 // pushExplicit pushes the explicit sha (NOT a ref name) to the bare repo's
@@ -364,86 +228,12 @@ func (t *Ticker) pushExplicit(ctx context.Context, branch, sha, expect string) e
 	return t.run(ctx, "push", t.BareURL, dst)
 }
 
-// rebaseDivergence handles genuine divergence (neither L nor R is an ancestor of
-// the other): replay the worktree's unique commits on top of R. This is a
-// worktree-mutating path — `git rebase` moves whatever branch HEAD points at — so
-// it is guarded exactly like integrate: re-verify HEAD == B, then post-verify
-// (after the rebase) that only refs/heads/B moved, rolling back and aborting
-// otherwise. Without the post-verify a `git checkout` landing between the
-// re-verify and the rebase exec would fast-forward the wrong branch (an ancestor
-// of R) onto R, and the push below would then read the still-unchanged B and
-// force-push it with a lease that MATCHES — rewinding the bare repo over the
-// out-of-band commits (issue #86 through the rebase path; bare repos keep no
-// reflog). A conflict means the developer touched the same lines an out-of-band
-// bare update did: abort, log the resolve-manually instructions, and mark the
-// tick stalled (the reconciler requeues on the long interval; sync.sh's 30s
-// sleep). On success push the rebased head — a fast-forward from R, leased
-// against R. Never pokes — the caller's poke rule fires on res.Pushed.
-func (t *Ticker) rebaseDivergence(ctx context.Context, B string, snap map[string]string, R string, res TickResult) (TickResult, error) {
-	// A checkout landing between the compare and here would make `git rebase`
-	// replay onto the wrong branch; re-verify first, and the post-verify below
-	// closes the residual window (a checkout after this check but before the
-	// rebase exec; once the rebase starts, git itself refuses a checkout).
-	if cur, err := t.symbolicRef(ctx); err != nil || cur != B {
-		t.logf("divergence %s: worktree switched to %q before rebase; skipping", B, cur)
-		return res, nil
-	}
-
-	t.hook("pre-rebase")
-
-	t.logf("rebasing %s on %s", B, short(R))
-	if err := t.run(ctx, "rebase", R); err != nil {
-		_ = t.run(ctx, "rebase", "--abort")
-		t.logf("REBASE CONFLICT: %s and the bare repo diverge.", B)
-		t.logf("  Resolve manually: cd %s && git pull --rebase %s %s", t.Dir, t.BareURL, B)
-		// The abort restored pre-rebase state, so post-verify should pass; run it
-		// anyway for uniformity — it also catches a checkout that raced the abort.
-		aborted, rolled, verr := t.postVerify(ctx, B, snap)
-		if verr != nil {
-			return res, verr
-		}
-		if aborted {
-			res.RolledBack = rolled > 0
-			return res, nil
-		}
-		res.Stalled = true
-		return res, nil
-	}
-
-	// The rebase mutated the worktree — post-verify BEFORE reading refs/heads/B or
-	// pushing, exactly like integrate. If a checkout raced the rebase, the wrong
-	// branch moved; roll it back and abort with no push, no poke.
-	aborted, rolled, err := t.postVerify(ctx, B, snap)
-	if err != nil {
-		return res, err
-	}
-	if aborted {
-		res.RolledBack = rolled > 0
-		return res, nil
-	}
-
-	// The rebase advanced refs/heads/B to a new head; read the NAMED ref (never
-	// HEAD) and push that explicit sha — a fast-forward from R.
-	head, err := t.revParse(ctx, "refs/heads/"+B)
-	if err != nil {
-		return res, fmt.Errorf("resolve %s after rebase: %w", B, err)
-	}
-	if err := t.pushExplicit(ctx, B, head, R); err != nil {
-		t.logf("push %s after rebase: %v", B, err) // warn-and-continue, sync.sh parity
-		return res, nil
-	}
-	res.Pushed = true
-	return res, nil
-}
-
 // finish applies the poke rule and returns the tick result. Flux is poked
-// exactly when the bare repo's head for B changed this tick — our push, or a
-// fast-forward we integrated — and never on an idle, dirty-skip,
-// re-verify-skip, rollback-abort or stall tick (design step 6). Genuine errors
-// from earlier steps return directly and bypass this, so a failed tick never
-// pokes.
+// exactly when this tick pushed, and never on an idle or skip tick (design
+// step 6). Genuine errors from earlier steps return directly and bypass this,
+// so a failed tick never pokes.
 func (t *Ticker) finish(ctx context.Context, res TickResult) (TickResult, error) {
-	if res.Pushed || res.Integrated {
+	if res.Pushed {
 		t.poke(ctx, &res)
 	}
 	return res, nil
@@ -478,7 +268,7 @@ func (t *Ticker) run(ctx context.Context, args ...string) error {
 // t.ExecTimeout (default defaultExecTimeout). Every invocation neutralizes the
 // developer's git hooks (`-c core.hooksPath=/dev/null`): the worktree's .git is
 // host-owned and this process runs as root in the container, so a hook firing
-// here (pre-rebase/post-rewrite on the divergence path, pre-push on pushes)
+// here (pre-push on pushes)
 // would execute host-authored code as root. sync.sh disabled hooks globally
 // (`git config --global core.hooksPath /dev/null`); this is the same guarantee,
 // applied per-exec.
@@ -499,10 +289,8 @@ func (t *Ticker) logf(format string, args ...any) {
 }
 
 // hook invokes the test-only injection point (nil in production) at the named
-// stage. Race tests use it to land a `git checkout` at the exact window each of
-// the tick's guards defends: "post-snapshot" (snapshot taken, no decision yet),
-// "pre-reset" and "pre-rebase" (re-verify passed, about to mutate the worktree),
-// "post-reset" (mutated, about to post-verify).
+// stage. Race tests use it to land a `git checkout` at "post-snapshot"
+// (snapshot taken, no decision yet).
 func (t *Ticker) hook(stage string) {
 	if t.testHook != nil {
 		t.testHook(stage)
@@ -524,8 +312,7 @@ func (t *Ticker) symbolicRef(ctx context.Context) (string, error) {
 
 // snapshotHeads returns every refs/heads/* as name->sha. The tick decides
 // against this snapshot, so a checkout that moves HEAD mid-tick can neither
-// redirect a decision nor hide a ref the post-verify must protect (design
-// step 1 / step 5e).
+// redirect a decision (design step 1).
 func (t *Ticker) snapshotHeads(ctx context.Context) (map[string]string, error) {
 	out, err := t.output(ctx, "for-each-ref", "--format=%(refname:short) %(objectname)", "refs/heads/")
 	if err != nil {
@@ -556,70 +343,6 @@ func (t *Ticker) revParse(ctx context.Context, rev string) (string, error) {
 // `if git merge-base --is-ancestor ...`.
 func (t *Ticker) isAncestor(ctx context.Context, a, b string) bool {
 	return t.run(ctx, "merge-base", "--is-ancestor", a, b) == nil
-}
-
-// healIndexIfCorrupt rebuilds a corrupt/unreadable .git/index from HEAD, port
-// of sync.sh's heal_index_if_corrupt (issue #4). The worktree's .git is a host
-// bind-mount written by both this container (root) and the developer; a
-// concurrent or interrupted index write can truncate/garble .git/index, and git
-// then aborts every index-reading op with "index file corrupt". Left unhealed
-// that wedges the loop (the dirty guard misreads the error as uncommitted work).
-// Rebuilding only rewrites .git/index from the committed tree — working-tree
-// file *contents* are untouched. Best-effort: it never errors, so the tick
-// continues and retries. Returns whether a rebuild was attempted.
-func (t *Ticker) healIndexIfCorrupt(ctx context.Context) bool {
-	// ls-files reads the index and nothing else; a clean index (nil err)
-	// short-circuits. Only the specific corruption messages trigger a rebuild —
-	// any other failure (e.g. the worktree isn't mounted yet) is left for the
-	// tick's normal retry paths, exactly as sync.sh's case default.
-	if _, err := t.output(ctx, "ls-files"); err == nil || !isIndexCorrupt(err) {
-		return false
-	}
-	// Resolve the real index path (`--git-path` is correct even for linked
-	// worktrees, where .git is a file) and delete it, then rebuild from HEAD.
-	// --git-path prints relative to the git invocation's cwd (t.Dir), so anchor
-	// it there — os.Remove runs in the process cwd, not t.Dir.
-	if idx, err := t.output(ctx, "rev-parse", "--git-path", "index"); err == nil {
-		p := strings.TrimSpace(idx)
-		if !filepath.IsAbs(p) {
-			p = filepath.Join(t.Dir, p)
-		}
-		_ = os.Remove(p)
-	}
-	if err := t.run(ctx, "reset", "-q"); err != nil {
-		t.logf("heal index: rebuild failed (no commits yet?); will retry next tick: %v", err)
-	} else {
-		t.logf("heal index: .git/index was corrupt; rebuilt from HEAD (working-tree files preserved)")
-	}
-	return true
-}
-
-// isIndexCorrupt matches the exact git error strings sync.sh keyed on, so a
-// corrupt index is healed but an unrelated ls-files failure is not.
-func isIndexCorrupt(err error) bool {
-	m := err.Error()
-	return strings.Contains(m, "index file corrupt") ||
-		strings.Contains(m, "index file smaller than expected") ||
-		strings.Contains(m, "bad index file") ||
-		strings.Contains(m, "unknown index")
-}
-
-// diffQuietCode runs a `git diff [--cached] --quiet` and returns its exit code:
-// 0 (clean), 1 (real changes), or >1 (git error, e.g. an index too corrupt for
-// this round's heal to have rebuilt). Preserving the >1 distinction is the
-// issue-#4 fix: the old `! git diff --quiet` collapsed >1 into "dirty" and
-// stalled forever on a transient corruption. A non-exit failure (context
-// cancelled, git not runnable) is returned as an error for the caller to surface.
-func (t *Ticker) diffQuietCode(ctx context.Context, args ...string) (int, error) {
-	_, err := t.output(ctx, args...)
-	if err == nil {
-		return 0, nil
-	}
-	var ee *exec.ExitError
-	if errors.As(err, &ee) {
-		return ee.ExitCode(), nil
-	}
-	return 0, err
 }
 
 func short(sha string) string {

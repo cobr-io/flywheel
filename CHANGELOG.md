@@ -17,6 +17,13 @@ During the v0.x phase no compat promise is made between minor versions
 
 ### Fixed
 
+- git-auto-sync no longer undoes history rewrites in an app worktree. A
+  `git reset`, rebase or amend made the bare repo look ahead of the worktree,
+  so the next tick ran `reset --hard` or `rebase` and silently put the
+  dropped commits back. App sync now runs one way, from worktree to bare repo.
+  A rewrite is force-pushed with a lease and logged as
+  `<branch> rewritten locally (<old> → <new>); bare updated`. The worktree is
+  never modified. (#161)
 - A spinner line longer than the terminal is wide no longer prints a new copy
   on every frame. The redraw moves the cursor up only one row, so the label is
   now cut with `…` to fit the terminal width (80 columns when the width is
