@@ -29,11 +29,6 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller"
 )
 
-// defaultStallInterval is the requeue after a TickResult.Stalled tick (a
-// rebase conflict) — parity with sync.sh's 30s sleep on the same condition
-// (design step 7 / plan Q4).
-const defaultStallInterval = 30 * time.Second
-
 // legacyDeploymentPrefix names the per-app git-auto-sync sidecar Deployment
 // this controller replaces: `git-auto-sync-<gr.Name>` in BuilderNamespace
 // (manifests/per-app-template/git-auto-sync.yaml.tmpl — deleted for new apps
@@ -63,11 +58,8 @@ type Reconciler struct {
 	// BuilderNamespace is where per-app GitRepositories AND the legacy
 	// git-auto-sync-<app> sidecar Deployments (the interlock check) live.
 	BuilderNamespace string
-	// PollInterval is the requeue after any tick that did not stall.
+	// PollInterval is the requeue after every tick.
 	PollInterval time.Duration
-	// StallInterval is the requeue after TickResult.Stalled; zero uses
-	// defaultStallInterval.
-	StallInterval time.Duration
 	// MaxConcurrentReconciles bounds cross-app reconcile parallelism (each
 	// app is already serialized against itself by the workqueue).
 	MaxConcurrentReconciles int
@@ -155,15 +147,11 @@ func (r *Reconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Resu
 	// special case to write here: the branch below already maps that skip
 	// onto a normal PollInterval requeue, which self-heals as soon as the
 	// worktree appears, with no crash loop and no error in the interim.
-	res, err := t.Tick(ctx, trackedBranch(&gr))
-	if err != nil {
+	if _, err := t.Tick(ctx, trackedBranch(&gr)); err != nil {
 		log.Error(err, "sync tick failed; backing off this app only", "dir", dir)
 		return ctrl.Result{}, err
 	}
 
-	if res.Stalled {
-		return ctrl.Result{RequeueAfter: r.stallInterval()}, nil
-	}
 	return ctrl.Result{RequeueAfter: r.PollInterval}, nil
 }
 
@@ -218,13 +206,6 @@ func (r *Reconciler) markWarnedOnce(key types.NamespacedName) bool {
 	}
 	r.warned[key] = true
 	return true
-}
-
-func (r *Reconciler) stallInterval() time.Duration {
-	if r.StallInterval > 0 {
-		return r.StallInterval
-	}
-	return defaultStallInterval
 }
 
 // trackedBranch reads the GR's live spec.ref.branch, or "" when unset — an

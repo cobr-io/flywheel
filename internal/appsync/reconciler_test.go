@@ -24,7 +24,7 @@ import (
 // fake client (the build-controller's *_test.go idiom) carrying real
 // sourcev1.GitRepository / appsv1.Deployment objects, and — for the tests
 // where a tick actually has to run — real on-disk git fixtures (the
-// appsync_test.go style: bareRepo/writeFile/advanceBare, reused directly
+// appsync_test.go style: bareRepo/writeFile, reused directly
 // since this file lives in the same package).
 //
 // A tick's BareURL is gr.Spec.URL verbatim (production: the in-cluster
@@ -230,27 +230,6 @@ func TestReconcile_GRNotFound_NoRequeueNoError(t *testing.T) {
 	}
 	if res != (ctrl.Result{}) {
 		t.Errorf("expected a bare no-op Result, got %+v", res)
-	}
-}
-
-// (e) A genuine divergence that conflicts (the same fixture shape as
-// TestTick_ConflictStall) stalls the tick; Reconcile must requeue at the
-// long stall interval (30s, design Q4), not PollInterval.
-func TestReconcile_Stall_RequeuesAtStallInterval(t *testing.T) {
-	bareURL, serverRoot, mount, wt := realAppFixture(t, "sample-app", "shared\n")
-	writeFile(t, wt, "app.txt", "dev\n")
-	testgit.Git(t, wt, "commit", "-q", "-am", "dev edits shared line")
-	advanceBare(t, bareURL, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
-
-	gr := testGR("sample-app", testBuilderNS, bareURL, "main")
-	r := newTestReconciler(t, mount, serverRoot, gr)
-
-	res, err := r.Reconcile(context.Background(), reqFor("sample-app"))
-	if err != nil {
-		t.Fatalf("Reconcile: %v", err)
-	}
-	if res.RequeueAfter != defaultStallInterval {
-		t.Errorf("RequeueAfter = %v, want the stall interval %v", res.RequeueAfter, defaultStallInterval)
 	}
 }
 

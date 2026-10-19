@@ -13,6 +13,10 @@ branch in the worktree and git-auto-sync repoints that app's `GitRepository` to
 it, so you see the branch deploy. This is cheap and safe — an app repo carries
 only its own workload.
 
+App sync runs one way, from your worktree to the bare repo. Your worktree is
+the source of truth: a `git reset`, rebase or amend is pushed to the bare repo
+on the next tick, and git-auto-sync never changes your checkout.
+
 ## The gitops/self repo: opt-in follow
 
 The repo that holds your `infra/`, `apps/`, and `builders/` is different.

@@ -2,11 +2,11 @@ package appsync
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"reflect"
 	"strings"
-	"syscall"
 	"testing"
 	"time"
 
@@ -74,23 +74,6 @@ func readFile(t *testing.T, dir, name string) string {
 		t.Fatal(err)
 	}
 	return string(b)
-}
-
-// advanceBare pushes a new commit to bare's <branch> via a throwaway clone,
-// simulating a teammate or CI pushing straight to the bare repo. Returns the
-// new sha.
-func advanceBare(t *testing.T, bare, branch string, edit func(dir string)) string {
-	t.Helper()
-	c := filepath.Join(t.TempDir(), "adv")
-	testgit.Git(t, filepath.Dir(c), "clone", "-q", bare, c)
-	testgit.Git(t, c, "config", "user.email", "ci@ci")
-	testgit.Git(t, c, "config", "user.name", "ci")
-	testgit.Git(t, c, "checkout", "-q", "-B", branch, "origin/"+branch)
-	edit(c)
-	testgit.Git(t, c, "add", "-A") // stage new files too (the modes test adds one)
-	testgit.Git(t, c, "commit", "-q", "-m", "ci change")
-	testgit.Git(t, c, "push", "-q", "origin", branch+":refs/heads/"+branch)
-	return testgit.Out(t, c, "rev-parse", "HEAD")
 }
 
 func bareRef(t *testing.T, bare, branch string) string {
@@ -184,7 +167,7 @@ func TestTick_IdleNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	if res.Pushed || res.Integrated || res.Poked || res.Followed {
+	if res.Pushed || res.Poked || res.Followed {
 		t.Errorf("idle tick should be a pure no-op, got %+v", res)
 	}
 	if flux.pokes != 0 {
@@ -216,32 +199,81 @@ func TestTick_WorktreeAheadPush(t *testing.T) {
 	}
 }
 
-// A bare repo strictly ahead fast-forwards the worktree (reset --hard R): the
-// worktree branch and files move to R, Flux is poked, and the tick does NOT push.
-func TestTick_BareAheadFastForward(t *testing.T) {
+// syncedCommits makes n empty commits on the worktree's current branch and
+// ticks once so the bare repo holds them all, the state every rewrite test
+// starts from. Returns the shas oldest first.
+func syncedCommits(t *testing.T, bare, wt string, n int) []string {
+	t.Helper()
+	var shas []string
+	for i := range n {
+		testgit.Git(t, wt, "commit", "-q", "--allow-empty", "-m", fmt.Sprintf("c%d", i))
+		shas = append(shas, testgit.Out(t, wt, "rev-parse", "HEAD"))
+	}
+	if _, err := newTicker(t, bare, wt, &fakeFlux{}).Tick(context.Background(), "main"); err != nil {
+		t.Fatalf("seed Tick: %v", err)
+	}
+	if got := bareRef(t, bare, "main"); got != shas[n-1] {
+		t.Fatalf("seed tick did not sync: bare main = %s, want %s", got, shas[n-1])
+	}
+	return shas
+}
+
+// A local `git reset` drops a commit the bare repo already has (L is an
+// ancestor of R). The tick must push the rewrite and leave the worktree
+// alone. It used to `reset --hard R`, putting the dropped commit back: an
+// untracked file alone didn't trip its dirty guard (issue #161).
+func TestTick_LocalResetPushesRewrite(t *testing.T) {
 	bare := bareRepo(t, "v0\n")
 	wt := cloneWorktree(t, bare)
-	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
+	shas := syncedCommits(t, bare, wt, 2)
+	testgit.Git(t, wt, "reset", "-q", "--mixed", "HEAD~1")
+	writeFile(t, wt, "untracked.txt", "new\n")
 
 	flux := &fakeFlux{}
 	res, err := newTicker(t, bare, wt, flux).Tick(context.Background(), "main")
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	if !res.Integrated || res.Pushed {
-		t.Fatalf("expected integrate (no push), got %+v", res)
+	if !res.Pushed || !res.Rewrote || !res.Poked || flux.pokes != 1 {
+		t.Fatalf("expected a rewrite push + poke, got %+v pokes=%d", res, flux.pokes)
 	}
-	if !res.Poked || flux.pokes != 1 {
-		t.Errorf("expected one poke, got %+v pokes=%d", res, flux.pokes)
+	if got := localRef(t, wt, "main"); got != shas[0] {
+		t.Errorf("worktree main = %s, want the reset target %s (the dropped commit came back)", got, shas[0])
 	}
-	if got := localRef(t, wt, "main"); got != R {
-		t.Errorf("worktree main = %s, want fast-forwarded to R %s", got, R)
+	if got := bareRef(t, bare, "main"); got != shas[0] {
+		t.Errorf("bare main = %s, want the rewritten worktree sha %s", got, shas[0])
 	}
-	if got := readFile(t, wt, "app.txt"); got != "ci\n" {
-		t.Errorf("worktree file not updated to R content: %q", got)
+	if got := readFile(t, wt, "untracked.txt"); got != "new\n" {
+		t.Errorf("untracked file was clobbered: %q", got)
 	}
-	if got := bareRef(t, bare, "main"); got != R {
-		t.Errorf("integrate must not move bare main (was R %s, now %s)", R, got)
+}
+
+// A local rebase that drops a middle commit diverges from the bare repo
+// (neither L nor R is an ancestor of the other). The tick must force the bare
+// repo to L. It used to `git rebase R`, which replayed nothing new and put the
+// branch back on its old tip (issue #161).
+func TestTick_LocalRebaseDropPushesRewrite(t *testing.T) {
+	bare := bareRepo(t, "v0\n")
+	wt := cloneWorktree(t, bare)
+	shas := syncedCommits(t, bare, wt, 3)
+	testgit.Git(t, wt, "rebase", "-q", "--onto", shas[0], shas[1], "main")
+	L := localRef(t, wt, "main")
+	if L == shas[2] {
+		t.Fatal("fixture: rebase did not rewrite main")
+	}
+
+	res, err := newTicker(t, bare, wt, &fakeFlux{}).Tick(context.Background(), "main")
+	if err != nil {
+		t.Fatalf("Tick: %v", err)
+	}
+	if !res.Pushed || !res.Rewrote {
+		t.Fatalf("expected a rewrite push, got %+v", res)
+	}
+	if got := localRef(t, wt, "main"); got != L {
+		t.Errorf("worktree main = %s, want the rebased %s (the rewrite was undone)", got, L)
+	}
+	if got := bareRef(t, bare, "main"); got != L {
+		t.Errorf("bare main = %s, want the rebased worktree sha %s", got, L)
 	}
 }
 
@@ -257,137 +289,55 @@ func TestTick_LeavesDeveloperFetchHeadAlone(t *testing.T) {
 	testgit.Git(t, wt, "fetch", "-q", "origin")
 	gitDir := filepath.Join(wt, ".git")
 	before := readFile(t, gitDir, "FETCH_HEAD")
-	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
+	writeFile(t, wt, "app.txt", "v1\n")
+	testgit.Git(t, wt, "commit", "-q", "-am", "dev change")
 
 	res, err := newTicker(t, bare, wt, &fakeFlux{}).Tick(context.Background(), "main")
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	if !res.Integrated || localRef(t, wt, "main") != R {
-		t.Fatalf("expected fast-forward to R %s, got %+v", R, res)
+	if !res.Pushed || res.Rewrote {
+		t.Fatalf("expected a fast-forward push, got %+v", res)
 	}
 	if after := readFile(t, gitDir, "FETCH_HEAD"); after != before {
 		t.Errorf("tick rewrote the developer's FETCH_HEAD:\nbefore: %q\nafter:  %q", before, after)
 	}
 }
 
-// Genuine divergence (both sides moved, non-conflicting) rebases then pushes.
-// The two edits are 8 lines apart so they land in separate diff hunks (a clean
-// rebase) rather than the same 3-line context window.
-func TestTick_DivergenceRebase(t *testing.T) {
-	const base = "top\na\nb\nc\nd\ne\nf\ng\nbottom\n"
-	bare := bareRepo(t, base)
-	wt := cloneWorktree(t, bare)
-	writeFile(t, wt, "app.txt", strings.Replace(base, "top\n", "dev-top\n", 1))
-	testgit.Git(t, wt, "commit", "-q", "-am", "dev edits top")
-	advanceBare(t, bare, "main", func(dir string) {
-		writeFile(t, dir, "app.txt", strings.Replace(base, "bottom\n", "ci-bottom\n", 1))
-	})
-
-	flux := &fakeFlux{}
-	res, err := newTicker(t, bare, wt, flux).Tick(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if !res.Pushed || !res.Poked || res.Stalled {
-		t.Fatalf("expected rebase push (no stall), got %+v", res)
-	}
-	if got, want := bareRef(t, bare, "main"), localRef(t, wt, "main"); got != want {
-		t.Errorf("bare main %s != worktree main %s after rebase-push", got, want)
-	}
-	got := readFile(t, wt, "app.txt")
-	if !strings.Contains(got, "dev-top") || !strings.Contains(got, "ci-bottom") {
-		t.Errorf("rebased content should carry both edits, got %q", got)
-	}
-}
-
-// Divergence where both sides touched the same line conflicts: the rebase is
-// aborted, the tick stalls, and the worktree is left pristine — no push/poke.
-func TestTick_ConflictStall(t *testing.T) {
-	bare := bareRepo(t, "shared\n")
-	wt := cloneWorktree(t, bare)
-	writeFile(t, wt, "app.txt", "dev\n")
-	testgit.Git(t, wt, "commit", "-q", "-am", "dev edits shared line")
-	local := localRef(t, wt, "main")
-	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
-
-	flux := &fakeFlux{}
-	res, err := newTicker(t, bare, wt, flux).Tick(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if !res.Stalled || res.Pushed || res.Poked {
-		t.Fatalf("expected stall (no push/poke), got %+v", res)
-	}
-	if got := localRef(t, wt, "main"); got != local {
-		t.Errorf("worktree main moved on stall: %s -> %s", local, got)
-	}
-	if got := readFile(t, wt, "app.txt"); got != "dev\n" {
-		t.Errorf("worktree content changed on stall: %q", got)
-	}
-	if got := bareRef(t, bare, "main"); got != R {
-		t.Errorf("bare main moved on stall: want %s got %s", R, got)
-	}
-	if _, err := os.Stat(filepath.Join(wt, ".git", "rebase-merge")); !os.IsNotExist(err) {
-		t.Errorf("rebase state left behind (rebase --abort should have cleaned it up)")
-	}
-}
-
-// A corrupt .git/index self-heals before the branch-compare block: the tick
-// rebuilds the index and proceeds (here to an idle no-op) instead of wedging.
-func TestTick_CorruptIndexHeal(t *testing.T) {
+// The developer's git hooks must never run inside the container: the worktree's
+// .git is host-owned and the process runs as root, so a pre-push hook firing
+// here would execute host-authored code as root. sync.sh disabled hooks
+// globally; the port neutralizes them on every exec via output().
+func TestTick_DeveloperHooksDoNotRun(t *testing.T) {
 	bare := bareRepo(t, "v0\n")
 	wt := cloneWorktree(t, bare)
-	// Truncate the valid index below its header so git reports it corrupt.
-	if err := os.Truncate(filepath.Join(wt, ".git", "index"), 8); err != nil {
+	writeFile(t, wt, "app.txt", "v1\n")
+	testgit.Git(t, wt, "commit", "-q", "-am", "dev change")
+
+	// A host-authored pre-push hook that would both leave a marker and FAIL
+	// the push if executed.
+	marker := filepath.Join(t.TempDir(), "hook-ran")
+	hook := filepath.Join(wt, ".git", "hooks", "pre-push")
+	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch "+marker+"\nexit 1\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 
-	flux := &fakeFlux{}
-	res, err := newTicker(t, bare, wt, flux).Tick(context.Background(), "main")
+	res, err := newTicker(t, bare, wt, &fakeFlux{}).Tick(context.Background(), "main")
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	if !res.Healed {
-		t.Fatalf("expected the corrupt index to be healed, got %+v", res)
+	if !res.Pushed {
+		t.Fatalf("push should have succeeded despite the failing hook, got %+v", res)
 	}
-	// The rebuilt index is usable again — a status read would fail if not.
-	testgit.Git(t, wt, "status", "--porcelain")
-}
-
-// A bare advance with an uncommitted local edit refuses to hard-reset (would
-// lose work) AND skips the push (would rewind bare over R): nothing moves.
-func TestTick_DirtyGuardRefusal(t *testing.T) {
-	bare := bareRepo(t, "v0\n")
-	wt := cloneWorktree(t, bare)
-	local := localRef(t, wt, "main")
-	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
-	writeFile(t, wt, "app.txt", "dirty-local\n") // uncommitted
-
-	flux := &fakeFlux{}
-	res, err := newTicker(t, bare, wt, flux).Tick(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if res.Integrated || res.Pushed || res.Poked {
-		t.Fatalf("dirty-guard must skip integrate AND push, got %+v", res)
-	}
-	if got := localRef(t, wt, "main"); got != local {
-		t.Errorf("worktree main was reset despite the dirty guard: %s -> %s", local, got)
-	}
-	if got := readFile(t, wt, "app.txt"); got != "dirty-local\n" {
-		t.Errorf("uncommitted edit was clobbered: %q", got)
-	}
-	if got := bareRef(t, bare, "main"); got != R {
-		t.Errorf("bare main changed under the dirty guard: want %s got %s", R, got)
+	if _, err := os.Stat(marker); !os.IsNotExist(err) {
+		t.Errorf("pre-push hook RAN in the container (marker %s exists)", marker)
 	}
 }
 
 // --- race-injection tests ----------------------------------------------------
 //
-// The testHook lands a `git checkout` at one of the tick's guard points,
-// deterministically simulating the developer racing the sync loop. These are
-// the acceptance core: they prove the issue-#86 bare-repo poison is impossible.
+// The testHook lands a `git checkout` after the snapshot, deterministically
+// simulating the developer racing the sync loop.
 
 // addOtherBranch creates a second branch `other` at a distinct commit and
 // leaves the worktree back on main. Returns other's sha.
@@ -423,7 +373,7 @@ func TestTick_RaceCheckoutAtSnapshotNoOp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Tick: %v", err)
 	}
-	if res.Pushed || res.Integrated || res.Poked {
+	if res.Pushed || res.Poked {
 		t.Fatalf("race no-op tick mutated something, got %+v", res)
 	}
 	if flux.pokes != 0 {
@@ -434,240 +384,5 @@ func TestTick_RaceCheckoutAtSnapshotNoOp(t *testing.T) {
 	}
 	if got := bareRef(t, bare, "main"); got != beforeBare {
 		t.Errorf("bare main moved: %s -> %s", beforeBare, got)
-	}
-}
-
-// (b) In a bare-ahead setup, a checkout at post-snapshot flips HEAD to `other`
-// before the integrate re-verify (step 5c) runs; the re-verify sees HEAD != B
-// and skips the reset entirely. No ref moves, the bare is untouched.
-func TestTick_RaceCheckoutBeforeResetReverifySkips(t *testing.T) {
-	bare := bareRepo(t, "v0\n")
-	wt := cloneWorktree(t, bare)
-	addOtherBranch(t, wt)
-	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
-	beforeRefs := localRefs(t, wt)
-
-	flux := &fakeFlux{}
-	tk := newTicker(t, bare, wt, flux)
-	tk.testHook = func(stage string) {
-		if stage == "post-snapshot" {
-			testgit.Git(t, wt, "checkout", "-q", "other")
-		}
-	}
-	res, err := tk.Tick(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if res.Integrated || res.Pushed || res.Poked {
-		t.Fatalf("re-verify should have skipped integrate, got %+v", res)
-	}
-	if flux.pokes != 0 {
-		t.Errorf("skipped tick poked Flux (%d)", flux.pokes)
-	}
-	if after := localRefs(t, wt); !reflect.DeepEqual(beforeRefs, after) {
-		t.Errorf("no local ref may move: %v -> %v", beforeRefs, after)
-	}
-	if got := bareRef(t, bare, "main"); got != R {
-		t.Errorf("bare main moved: want %s got %s", R, got)
-	}
-}
-
-// (c) THE issue-#86 test. The checkout lands at pre-reset — AFTER the re-verify
-// passed — so reset --hard R fires while HEAD is on `other`, moving the WRONG
-// branch's ref to R. Post-verify detects that refs/heads/other moved, rolls it
-// back to its pre-tick sha, and aborts the tick: no push, bare untouched. Absent
-// the rollback, `other` would point at main's content and the next push would
-// poison the bare repo.
-func TestTick_RaceCheckoutAtPreResetRollsBack(t *testing.T) {
-	bare := bareRepo(t, "v0\n")
-	wt := cloneWorktree(t, bare)
-	other := addOtherBranch(t, wt)
-	mainSHA := localRef(t, wt, "main")
-	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
-
-	flux := &fakeFlux{}
-	tk := newTicker(t, bare, wt, flux)
-	tk.testHook = func(stage string) {
-		if stage == "pre-reset" {
-			testgit.Git(t, wt, "checkout", "-q", "other")
-		}
-	}
-	res, err := tk.Tick(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if !res.RolledBack || res.Integrated || res.Pushed || res.Poked {
-		t.Fatalf("expected post-verify rollback + abort, got %+v", res)
-	}
-	if flux.pokes != 0 {
-		t.Errorf("poisoned tick poked Flux (%d)", flux.pokes)
-	}
-	if got := localRef(t, wt, "other"); got != other {
-		t.Errorf("the wrong branch was NOT rolled back: other = %s, want its pre-tick sha %s", got, other)
-	}
-	if got := localRef(t, wt, "main"); got != mainSHA {
-		t.Errorf("refs/heads/main moved unexpectedly: %s -> %s", mainSHA, got)
-	}
-	if got := bareRef(t, bare, "main"); got != R {
-		t.Errorf("bare main was poisoned: %s (want untouched %s)", got, R)
-	}
-}
-
-// (e) The rebase path's analogue of (c). Divergence sends the tick into
-// rebaseDivergence; a checkout to `other` (positioned at the pre-divergence base
-// commit, an ancestor of R) lands at pre-rebase, so `git rebase R` fast-forwards
-// the WRONG branch (other) onto R. Post-verify detects it, rolls other back, and
-// aborts. Absent the guard the push would read the unchanged refs/heads/main and
-// force-push it over R with a matching lease — rewinding the bare repo (#86).
-func TestTick_RaceCheckoutAtPreRebaseRollsBack(t *testing.T) {
-	const base = "top\na\nb\nc\nd\ne\nf\ng\nbottom\n"
-	bare := bareRepo(t, base)
-	wt := cloneWorktree(t, bare)
-	testgit.Git(t, wt, "branch", "other") // at the base commit, an ancestor of R
-	writeFile(t, wt, "app.txt", strings.Replace(base, "top\n", "dev-top\n", 1))
-	testgit.Git(t, wt, "commit", "-q", "-am", "dev edits top")
-	R := advanceBare(t, bare, "main", func(dir string) {
-		writeFile(t, dir, "app.txt", strings.Replace(base, "bottom\n", "ci-bottom\n", 1))
-	})
-	otherSHA := localRef(t, wt, "other")
-	mainSHA := localRef(t, wt, "main")
-
-	flux := &fakeFlux{}
-	tk := newTicker(t, bare, wt, flux)
-	tk.testHook = func(stage string) {
-		if stage == "pre-rebase" {
-			testgit.Git(t, wt, "checkout", "-q", "other")
-		}
-	}
-	res, err := tk.Tick(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if !res.RolledBack || res.Pushed || res.Poked || res.Stalled {
-		t.Fatalf("expected post-verify rollback + abort on the rebase path, got %+v", res)
-	}
-	if flux.pokes != 0 {
-		t.Errorf("poisoned rebase tick poked Flux (%d)", flux.pokes)
-	}
-	if got := localRef(t, wt, "other"); got != otherSHA {
-		t.Errorf("the wrong branch was NOT rolled back: other = %s, want its pre-tick sha %s", got, otherSHA)
-	}
-	if got := localRef(t, wt, "main"); got != mainSHA {
-		t.Errorf("refs/heads/main moved unexpectedly: %s -> %s", mainSHA, got)
-	}
-	if got := bareRef(t, bare, "main"); got != R {
-		t.Errorf("bare main was poisoned via the rebase path: %s (want untouched %s)", got, R)
-	}
-	if _, err := os.Stat(filepath.Join(wt, ".git", "rebase-merge")); !os.IsNotExist(err) {
-		t.Errorf("rebase state left behind after the aborted rebase tick")
-	}
-}
-
-// (d) Root-written files stay host-writable. Under umask 0 (what cmd main sets,
-// applied here around the tick since the test binary doesn't run that main), an
-// integrate's reset --hard recreates a file group+other-writable (0666), so the
-// host user can edit and commit it afterward — the EACCES class this controller
-// exists to fix.
-func TestTick_IntegrateModesRootWritable(t *testing.T) {
-	bare := bareRepo(t, "v0\n")
-	wt := cloneWorktree(t, bare)
-	advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "newfile.txt", "created-by-integrate\n") })
-
-	flux := &fakeFlux{}
-	old := syscall.Umask(0)
-	res, err := newTicker(t, bare, wt, flux).Tick(context.Background(), "main")
-	syscall.Umask(old)
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if !res.Integrated {
-		t.Fatalf("expected integrate, got %+v", res)
-	}
-	info, err := os.Stat(filepath.Join(wt, "newfile.txt"))
-	if err != nil {
-		t.Fatalf("reset --hard did not create the file: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm&0o022 != 0o022 {
-		t.Errorf("integrate-recreated file mode = %o, want group+other writable (0666 under umask 0)", perm)
-	}
-}
-
-// The developer's git hooks must never run inside the container: the worktree's
-// .git is host-owned and the process runs as root, so a pre-rebase (or pre-push)
-// hook firing here would execute host-authored code as root. sync.sh disabled
-// hooks globally; the port neutralizes them on every exec via output(). The
-// divergence rebase is the op that would otherwise fire pre-rebase — prove it
-// doesn't, and that the rebase still completes.
-func TestTick_DeveloperHooksDoNotRun(t *testing.T) {
-	const base = "top\na\nb\nc\nd\ne\nf\ng\nbottom\n"
-	bare := bareRepo(t, base)
-	wt := cloneWorktree(t, bare)
-	writeFile(t, wt, "app.txt", strings.Replace(base, "top\n", "dev-top\n", 1))
-	testgit.Git(t, wt, "commit", "-q", "-am", "dev edits top")
-	advanceBare(t, bare, "main", func(dir string) {
-		writeFile(t, dir, "app.txt", strings.Replace(base, "bottom\n", "ci-bottom\n", 1))
-	})
-
-	// A host-authored pre-rebase hook that would both leave a marker and FAIL
-	// the rebase if executed. exit 1 makes hook execution unmissable: the
-	// divergence rebase would abort into a stall instead of pushing.
-	marker := filepath.Join(t.TempDir(), "hook-ran")
-	hookDir := filepath.Join(wt, ".git", "hooks")
-	hook := filepath.Join(hookDir, "pre-rebase")
-	if err := os.WriteFile(hook, []byte("#!/bin/sh\ntouch "+marker+"\nexit 1\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	flux := &fakeFlux{}
-	res, err := newTicker(t, bare, wt, flux).Tick(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if !res.Pushed || res.Stalled {
-		t.Fatalf("rebase should have completed and pushed despite the failing hook, got %+v", res)
-	}
-	if _, err := os.Stat(marker); !os.IsNotExist(err) {
-		t.Errorf("pre-rebase hook RAN in the container (marker %s exists)", marker)
-	}
-}
-
-// A checkout landing at post-reset — after a LEGITIMATE integrate's reset
-// already moved refs/heads/B to R — must abort the tick (no Integrated, no
-// poke) without rolling anything back: the checkout moved only HEAD, no ref
-// was wrongly moved, and B's move to R was the integrate doing its job. The
-// pure cur != B abort path of postVerify.
-func TestTick_RaceCheckoutAtPostResetAbortsWithoutRollback(t *testing.T) {
-	bare := bareRepo(t, "v0\n")
-	wt := cloneWorktree(t, bare)
-	other := addOtherBranch(t, wt)
-	R := advanceBare(t, bare, "main", func(dir string) { writeFile(t, dir, "app.txt", "ci\n") })
-
-	flux := &fakeFlux{}
-	tk := newTicker(t, bare, wt, flux)
-	tk.testHook = func(stage string) {
-		if stage == "post-reset" {
-			testgit.Git(t, wt, "checkout", "-q", "other")
-		}
-	}
-	res, err := tk.Tick(context.Background(), "main")
-	if err != nil {
-		t.Fatalf("Tick: %v", err)
-	}
-	if res.Integrated || res.RolledBack || res.Pushed || res.Poked {
-		t.Fatalf("expected a pure abort (no rollback, no integrate), got %+v", res)
-	}
-	if flux.pokes != 0 {
-		t.Errorf("aborted tick poked Flux (%d)", flux.pokes)
-	}
-	// The reset legitimately fast-forwarded main to R before the checkout
-	// raced in; the abort must not undo that, and other must be untouched.
-	if got := localRef(t, wt, "main"); got != R {
-		t.Errorf("refs/heads/main = %s, want the integrated R %s", got, R)
-	}
-	if got := localRef(t, wt, "other"); got != other {
-		t.Errorf("refs/heads/other moved: %s -> %s", other, got)
-	}
-	if got := bareRef(t, bare, "main"); got != R {
-		t.Errorf("bare main moved: want %s got %s", R, got)
 	}
 }

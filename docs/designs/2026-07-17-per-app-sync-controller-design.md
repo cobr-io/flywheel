@@ -1,6 +1,9 @@
 # Design: per-app sync controller (git-auto-sync Go port)
 
-**Status:** accepted
+**Status:** accepted; partly superseded by #161. Sync is now one-way
+(worktree → bare): the integrate (step 4) and divergence-rebase (step 7)
+paths are gone, because a bare head the worktree lacks means a local rewrite,
+which is pushed with a lease.
 **Author:** Matthijs van der Kroon (with Claude)
 **Date:** 2026-07-17
 
