@@ -20,7 +20,9 @@ log "scenario 8: down → up --clone"
 cluster="${KCTX#k3d-}"
 remote="$WORKSPACES_ROOT/.remotes/$APP.git"
 rm -rf "$remote"
-git init -q --bare "$remote"
+# HEAD must name the branch we push (main): a bare repo defaulting to master
+# would clone "successfully" with nothing checked out.
+git init -q --bare --initial-branch=main "$remote"
 
 # --- 1. a remote-backed app that serves ------------------------------------------
 switch_gitops_branch main 2>/dev/null || true
