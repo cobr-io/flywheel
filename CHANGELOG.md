@@ -11,6 +11,34 @@ During the v0.x phase no compat promise is made between minor versions
 
 Nothing yet.
 
+## [0.5.4] - 2026-10-20
+
+### Fixed
+
+- `flywheel clean` no longer deletes the live `buildkit-cache` and
+  `git-server-data` PVCs. It deleted every PVC in `flywheel-system` labelled
+  `app.kubernetes.io/managed-by=flywheel`, and the dev loop labels its own
+  PVCs that way, so running it on a healthy cluster lost the build cache and
+  the in-cluster git mirror. An orphan is now a labelled PVC the current
+  Flywheel manifests no longer declare; declared PVCs are listed as kept. If
+  `clean` can't work out the declared set, it refuses to run. If you ran
+  `clean` on an earlier version, run `flywheel down` and `flywheel up` to
+  restore the dev loop. (#172)
+- `flywheel up` no longer reports a failure on a cold start because
+  `flywheel-infra` is still red. Every Kustomization that decrypts with the
+  `sops-age` Secret was applied before the Secret existed, and
+  `flywheel-infra` only retried its failed build after 5 minutes, past `up`'s
+  3-minute wait. The Secret is now created first, and `flywheel-infra` and
+  `flywheel-dev-loop` retry a failed reconcile after 10s. (#128)
+- Builds started right after `flywheel up` no longer fail while `buildkitd`
+  is starting. Each failed attempt used to stay behind as a red `Error` pod in
+  `flywheel-system` for 24 hours, even though the build then succeeded. The
+  build pod now waits up to 5 minutes for `buildkitd` before building. (#170)
+- On macOS, `flywheel up` and `flywheel doctor` now see a configured port as
+  taken when another process listens on it at a specific address such as
+  `127.0.0.1`. A bind to `0.0.0.0` succeeds alongside such a listener on
+  macOS, so the port was reported free. (#106)
+
 ## [0.5.3] - 2026-10-20
 
 ### Changed
