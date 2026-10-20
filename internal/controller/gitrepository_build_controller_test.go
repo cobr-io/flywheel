@@ -513,10 +513,11 @@ func TestRenderJob_BuildKitWiring(t *testing.T) {
 	if strings.Contains(joined, "executor") || strings.Contains(joined, "--destination") {
 		t.Errorf("rendered args still reference kaniko: %s", joined)
 	}
-	// The fetch-source apparatus must be gone: no initContainer, no local
-	// workspace volume/mount, no `--local`. buildkitd fetches the context.
-	if len(spec.InitContainers) != 0 {
-		t.Errorf("expected no initContainers (git context is daemon-side); got %+v", spec.InitContainers)
+	// The fetch-source apparatus must be gone: no fetch initContainer (only the
+	// buildkitd readiness wait), no local workspace volume/mount, no `--local`.
+	// buildkitd fetches the context.
+	if len(spec.InitContainers) != 1 || spec.InitContainers[0].Name != "wait-buildkitd" {
+		t.Errorf("expected only the wait-buildkitd initContainer (git context is daemon-side); got %+v", spec.InitContainers)
 	}
 	if len(spec.Volumes) != 0 || len(cs[0].VolumeMounts) != 0 {
 		t.Errorf("expected no workspace volume/mounts; volumes=%+v mounts=%+v", spec.Volumes, cs[0].VolumeMounts)

@@ -9,12 +9,13 @@ metadata:
     image: {{ .Image }}
     commit: "{{ .ShortSHA }}"
 spec:
-  # Retry on failure so builds recover from TRANSIENT errors (e.g. buildkitd
-  # not yet reachable during cluster startup — "dial tcp ...:1234: connection
-  # refused"). Kubernetes re-runs the Job with exponential backoff (~10s, 20s,
-  # 40s); retries are cheap because the build is a thin buildctl client and the
-  # warm buildkitd layer cache is reused. Deterministic failures (bad Dockerfile)
-  # still give up after these few attempts.
+  # Retry on failure so builds recover from TRANSIENT errors. Kubernetes re-runs
+  # the Job with exponential backoff (~10s, 20s, 40s); retries are cheap because
+  # the build is a thin buildctl client and the warm buildkitd layer cache is
+  # reused. Deterministic failures (bad Dockerfile) still give up after these
+  # few attempts. buildkitd still starting up is NOT left to these retries — see
+  # the wait-buildkitd initContainer — because every failed attempt lingers as
+  # a red Error pod until the Job's TTL expires (issue #170).
   backoffLimit: 3
   ttlSecondsAfterFinished: 86400
   template:
@@ -33,6 +34,37 @@ spec:
       securityContext:
         runAsUser: 1000
         runAsGroup: 1000
+      initContainers:
+        # Wait for buildkitd to answer before building (issue #170). Right
+        # after `flywheel up` the first builds race the daemon's startup; a
+        # build that dials it too early fails with "connection refused", and
+        # each failed attempt lingers as an Error pod. The check is the one
+        # buildkitd's own readinessProbe uses. Bounded at ~5m so a genuinely
+        # down daemon still fails the Job (and its retries) as before.
+        - name: wait-buildkitd
+          image: {{ .BuildKitClientImage }}
+          env:
+            - name: BUILDKIT_HOST
+              value: {{ .BuildKitAddr }}
+          command:
+            - sh
+            - -c
+            - |
+              i=0
+              while [ "$i" -lt 150 ]; do
+                buildctl debug workers >/dev/null 2>&1 && exit 0
+                i=$((i + 1))
+                sleep 2
+              done
+              echo "buildkitd at $BUILDKIT_HOST not reachable after 5m" >&2
+              exit 1
+          resources:
+            requests:
+              cpu: 10m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
       containers:
         # The image-scan controller pokes the registry scan off THIS
         # container's exit-0 (see buildjob_imagescan_controller.go), so its
