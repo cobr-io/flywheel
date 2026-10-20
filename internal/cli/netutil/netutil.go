@@ -34,8 +34,27 @@ func PortIsBindable(port int) bool {
 // non-loopback interface fails this probe (as it would fail k3d's bind)
 // but slips past the loopback-only PortIsBindable. The TOCTOU caveat still
 // applies — the result is only valid at the instant of the probe.
+//
+// A bind alone is blind on macOS/BSD (issue #106): a wildcard bind there
+// coexists with a listener on a specific address such as 127.0.0.1:<port>,
+// yet that listener still steals the loopback traffic k3d's port should
+// get. So a port also counts as taken when something accepts connections on
+// it over loopback.
 func PortIsBindableWildcard(port int) bool {
-	return bindable(fmt.Sprintf("0.0.0.0:%d", port))
+	return !accepting(port) && bindable(fmt.Sprintf("0.0.0.0:%d", port))
+}
+
+// accepting reports whether a TCP connect to <port> on IPv4 or IPv6 loopback
+// succeeds — i.e. some listener holds it, whatever its socket flags.
+func accepting(port int) bool {
+	for _, host := range []string{"127.0.0.1", "::1"} {
+		c, err := net.DialTimeout("tcp", net.JoinHostPort(host, fmt.Sprint(port)), 250*time.Millisecond)
+		if err == nil {
+			_ = c.Close()
+			return true
+		}
+	}
+	return false
 }
 
 func bindable(addr string) bool {
