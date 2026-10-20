@@ -210,6 +210,12 @@ func newCleanCmd() *cobra.Command {
 			if err != nil {
 				return err
 			}
+			// Fail closed: without the declared set, every labeled PVC would
+			// look orphaned, including the live ones (issue #172).
+			declared, err := converge.DeclaredDevLoopPVCs(flywheel.Assets)
+			if err != nil {
+				return fmt.Errorf("determine declared PVCs: %w", err)
+			}
 			a, err := applier.New("", k3d.KubeContext(cfg.Cluster.Name))
 			if err != nil {
 				return err
@@ -219,6 +225,7 @@ func newCleanCmd() *cobra.Command {
 				// read from cfg — the schema knob is deprecated (task T14).
 				FlywheelNamespace: naming.FlywheelNamespace,
 				Orphaned:          orphaned,
+				Declared:          declared,
 			}, os.Stdout)
 		},
 	}

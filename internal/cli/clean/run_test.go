@@ -3,6 +3,7 @@ package clean
 import (
 	"bytes"
 	"context"
+	"sort"
 	"strings"
 	"testing"
 
@@ -62,22 +63,32 @@ func pvc(name, ns string, labeled bool) *unstructured.Unstructured {
 	}}
 }
 
-// TestCleanOrphanedPVCs_OnlyDeletesLabeled is the regression test for the
-// bug where cleanOrphanedPVCs listed PVCs with a bare, unscoped list (no
-// label selector) and deleted every PVC in the namespace — including ones
-// an app or Flux created, not just the ones flywheel itself applied. It
-// must delete only the PVC carrying naming.ManagedBySelector and leave
-// the unlabeled one (standing in for an app-owned PVC) untouched.
-func TestCleanOrphanedPVCs_OnlyDeletesLabeled(t *testing.T) {
+// TestRun_DeletesOnlyUndeclaredLabeledPVCs locks both PVC-safety fixes:
+//   - an unlabeled PVC (standing in for one an app or Flux created) is never
+//     touched — the original unscoped-list bug;
+//   - a labeled PVC the current manifests still declare (git-server-data) is
+//     live state and is kept — issue #172, where `clean` deleted the in-cluster
+//     git mirror and build cache on a healthy cluster.
+//
+// Only the labeled, no-longer-declared PVC (left by an older version) goes.
+func TestRun_DeletesOnlyUndeclaredLabeledPVCs(t *testing.T) {
 	const ns = "flywheel-system"
-	labeled := pvc("git-server-data", ns, true)
-	unlabeled := pvc("app-data", ns, false)
-
-	a := newTestApplier(labeled, unlabeled)
+	a := newTestApplier(
+		pvc("git-server-data", ns, true),
+		pvc("old-kaniko-cache", ns, true),
+		pvc("app-data", ns, false),
+	)
 
 	var out bytes.Buffer
-	if err := cleanOrphanedPVCs(context.Background(), a, ns, &out); err != nil {
-		t.Fatalf("cleanOrphanedPVCs: %v", err)
+	err := Run(context.Background(), a, Options{
+		FlywheelNamespace: ns,
+		Orphaned:          true,
+		Declared: []applier.ResourceRef{
+			{Kind: "PersistentVolumeClaim", Namespace: ns, Name: "git-server-data"},
+		},
+	}, &out)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
 
 	gvr := schema.GroupVersionResource{Version: "v1", Resource: "persistentvolumeclaims"}
@@ -85,7 +96,15 @@ func TestCleanOrphanedPVCs_OnlyDeletesLabeled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListUnstructured: %v", err)
 	}
-	if len(remaining) != 1 || remaining[0].GetName() != "app-data" {
-		t.Fatalf("remaining PVCs = %v, want only the unlabeled app-data PVC to survive", remaining)
+	var names []string
+	for _, r := range remaining {
+		names = append(names, r.GetName())
+	}
+	sort.Strings(names)
+	if got := strings.Join(names, ","); got != "app-data,git-server-data" {
+		t.Fatalf("remaining PVCs = %s, want app-data,git-server-data (only old-kaniko-cache is orphaned)\n%s", got, out.String())
+	}
+	if !strings.Contains(out.String(), "cleaned 1 PVC(s) in flywheel-system") {
+		t.Errorf("summary missing or wrong:\n%s", out.String())
 	}
 }
