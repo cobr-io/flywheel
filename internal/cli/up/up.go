@@ -198,9 +198,9 @@ func upSteps() []step {
 		{name: "dev-loop", critical: true, run: (*upState).devLoop},
 		{name: "wait-git-server", critical: true, run: (*upState).waitGitServer},
 		{name: "push-mirror", run: (*upState).pushMirror},
+		{name: "create-secrets", critical: true, run: (*upState).createSecrets},
 		{name: "apply-flux-system", critical: true, run: (*upState).applyFluxSystem},
 		{name: "prune-machinery", skip: skipPrune, run: (*upState).pruneMachinery},
-		{name: "create-secrets", critical: true, run: (*upState).createSecrets},
 		{name: "wait-flux-kustomizations", skip: skipWait, run: (*upState).waitFluxKustomizations},
 		{name: "success", critical: true, run: (*upState).printSuccess},
 	}
@@ -657,7 +657,10 @@ func (s *upState) pruneMachinery() error {
 }
 
 // createSecrets creates the age-key Secret + (mkcert) local-cert + mkcert-ca
-// Secrets.
+// Secrets. Runs BEFORE apply-flux-system (issue #128): every Kustomization
+// that decrypts with sops-age otherwise builds once against a missing Secret,
+// and flywheel-infra's retry of that failure could land past the Ready-wait.
+// The Secrets' namespaces (flux-system, kube-system) already exist by now.
 func (s *upState) createSecrets() error {
 	if err := style.Spin(s.out, "creating SOPS age Secret", func() error {
 		return createAgeSecret(s.ctx, s.a, s.ageKeyContent, s.out)
