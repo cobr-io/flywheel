@@ -11,7 +11,9 @@
 # SOPS-encrypted state permanently unrecoverable.
 #
 # Environment overrides (mirroring install.sh):
-#   INSTALL_DIR=DIR  where the binary lives   (default: /usr/local/bin)
+#   INSTALL_DIR=DIR  where the binary lives   (default: the dir of the
+#                                              flywheel on PATH, else
+#                                              /usr/local/bin)
 #   USE_SUDO=false   never use sudo           (default: auto — sudo only if
 #                                              INSTALL_DIR isn't writable)
 #
@@ -24,7 +26,7 @@
 set -euo pipefail
 
 BINARY="flywheel"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${INSTALL_DIR:-}"
 USE_SUDO="${USE_SUDO:-auto}"
 PURGE_CACHE=false
 PURGE_CONFIG=false
@@ -51,7 +53,7 @@ Removes the flywheel binary and shell completions by default. Caches and config
 are left alone unless you ask for them.
 
 Environment:
-  INSTALL_DIR=DIR   where the binary lives   (default: /usr/local/bin)
+  INSTALL_DIR=DIR   where the binary lives   (default: the flywheel on PATH)
   USE_SUDO=false    never use sudo           (default: auto)
 
 Flags:
@@ -73,6 +75,16 @@ while [ $# -gt 0 ]; do
   esac
   shift
 done
+
+# ---- resolve the install dir ----------------------------------------------
+# Mirrors install.sh: with no INSTALL_DIR, target the flywheel actually on PATH.
+if [ -z "$INSTALL_DIR" ]; then
+  existing="$(command -v "$BINARY" 2>/dev/null || true)"
+  case "$existing" in
+    /*) INSTALL_DIR="$(dirname "$existing")" ;;
+    *)  INSTALL_DIR="/usr/local/bin" ;;
+  esac
+fi
 
 # ---- remove (sudo only when needed) ---------------------------------------
 # Mirrors install.sh's run(): elevate only if INSTALL_DIR isn't writable.
@@ -96,11 +108,11 @@ if [ -e "$DEST" ] || [ -L "$DEST" ]; then
   info "${GREEN}removed${RESET} ${DEST}"
 else
   info "no binary at ${DEST} — skipping"
-  if command -v "$BINARY" >/dev/null 2>&1; then
-    other="$(command -v "$BINARY")"
-    warn "another '${BINARY}' is still on your PATH at ${other}"
-    warn "  re-run with INSTALL_DIR=\"$(dirname "$other")\" to remove it"
-  fi
+fi
+hash -r
+if other="$(command -v "$BINARY" 2>/dev/null)"; then
+  warn "another '${BINARY}' is still on your PATH at ${other}"
+  warn "  re-run with INSTALL_DIR=\"$(dirname "$other")\" to remove it"
 fi
 
 # ---- shell completions ----------------------------------------------------

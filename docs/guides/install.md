@@ -1,7 +1,7 @@
 # Installing & uninstalling
 
 The one-liner is in the [README](../../README.md#installation). This guide
-covers pinning a version, sudo-less installs, building from source, and
+covers pinning a version, where the binary goes, building from source, and
 uninstalling.
 
 ## Install script
@@ -30,8 +30,8 @@ Options are environment variables on the `bash` side of the pipe, not the
 | Variable | Default | Effect |
 |---|---|---|
 | `TAG` | latest | Install a specific release, e.g. `TAG=v1.2.3`. |
-| `INSTALL_DIR` | `/usr/local/bin` | Where to put the binary. |
-| `USE_SUDO` | auto | `sudo` is used only when `INSTALL_DIR` isn't writable; set `false` to never elevate (pair with a writable `INSTALL_DIR`). |
+| `INSTALL_DIR` | [see below](#install-location--sudo) | Where to put the binary. |
+| `USE_SUDO` | auto | `sudo` is used only when the install dir isn't writable; set `false` to never elevate (pair with a writable `INSTALL_DIR`). |
 | `FORCE` | `false` | Reinstall even when the target version is already present. |
 | `SKIP_COMPLETIONS` | `false` | Set `true` to skip installing shell tab-completions. |
 
@@ -39,9 +39,32 @@ Options are environment variables on the `bash` side of the pipe, not the
 # pin a specific version
 curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/install.sh | TAG=v1.2.3 bash
 
-# user-local install, no sudo
+# install somewhere specific
 curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/install.sh \
   | INSTALL_DIR="$HOME/.local/bin" USE_SUDO=false bash
+```
+
+### Install location & sudo
+
+Without `INSTALL_DIR`, the script picks the first match:
+
+1. **The dir of the `flywheel` already on your `$PATH`.** Upgrades happen in
+   place, so a re-run never leaves a second, stale binary behind or lets an
+   old one shadow the new one.
+2. **`~/.local/bin`, then `~/bin`**, if it is already on your `$PATH` and
+   writable. No sudo, no shell-rc edit.
+3. **`/usr/local/bin`**, with sudo if it isn't writable.
+
+It prints which dir it chose, and warns if a different `flywheel` comes first
+on your `$PATH` after installing.
+
+Installs made before this default existed live in `/usr/local/bin`, and
+upgrades keep them there (with sudo). To switch to a sudo-less install, remove
+the old binary once and re-run the installer:
+
+```sh
+sudo rm /usr/local/bin/flywheel
+curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/install.sh | bash
 ```
 
 There is no native Windows build; run inside WSL2
@@ -70,7 +93,8 @@ config are left alone, because `~/.config/flywheel` holds age private keys
 that are recovery-critical (see the caution below).
 
 ```sh
-# undo an install-script install (same INSTALL_DIR / USE_SUDO overrides apply)
+# undo an install-script install: removes the flywheel on your $PATH
+# (same INSTALL_DIR / USE_SUDO overrides apply)
 curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/uninstall.sh | bash
 
 # undo a `make install` (removes $(go env GOBIN)/flywheel + completions)
@@ -87,11 +111,11 @@ Two opt-in cleanup flags:
 ```sh
 # binary + completions + embed cache, but keep age keys/config
 curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/uninstall.sh | bash -s -- --purge
-
-# a user-local install lives elsewhere — point INSTALL_DIR at it
-curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/uninstall.sh \
-  | INSTALL_DIR="$HOME/.local/bin" USE_SUDO=false bash
 ```
+
+The uninstaller finds the binary on your `$PATH`, and warns if another
+`flywheel` is still there afterwards. Point `INSTALL_DIR` at it to remove that
+one too.
 
 > **Caution: `--purge-config` deletes your age keys.**
 > `~/.config/flywheel/<name>/age.key` is the private key that decrypts your

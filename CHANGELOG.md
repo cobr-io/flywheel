@@ -9,7 +9,18 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- `install.sh` no longer needs sudo on most machines. A new install goes to
+  `~/.local/bin` (or `~/bin`) when that dir is on your `$PATH` and writable,
+  and falls back to `/usr/local/bin` otherwise. An existing install is
+  upgraded in place, so a re-run never leaves a stale binary behind or lets an
+  old one shadow the new one. To move an existing `/usr/local/bin` install,
+  `sudo rm /usr/local/bin/flywheel` and re-run the installer. `install.sh`
+  warns when a different `flywheel` comes first on your `$PATH`. (#69)
+- `uninstall.sh` removes the `flywheel` on your `$PATH` without an
+  `INSTALL_DIR` override, and warns if another one is still there afterwards.
+  (#69)
 
 ## [0.5.2] - 2026-10-20
 

@@ -12,11 +12,17 @@
 #
 # Environment overrides:
 #   TAG=vX.Y.Z       install a specific release      (default: latest)
-#   INSTALL_DIR=DIR  install location                (default: /usr/local/bin)
+#   INSTALL_DIR=DIR  install location                (default: see below)
 #   USE_SUDO=false   never use sudo                  (default: auto — sudo only
 #                                                     if INSTALL_DIR isn't writable)
 #   FORCE=true       reinstall even when the target version is already present
 #   SKIP_COMPLETIONS=true  don't install shell tab-completions (default: false)
+#
+# Install location, when INSTALL_DIR is unset (first match wins):
+#   1. the dir of the flywheel already on PATH — upgrades stay in place, so a
+#      re-run never leaves a second, stale binary behind or shadowed
+#   2. ~/.local/bin, then ~/bin — if already on PATH and writable (no sudo)
+#   3. /usr/local/bin — sudo if it isn't writable
 #
 # Alongside the binary it installs shell tab-completions for your login shell
 # ($SHELL), best-effort — it warns and continues if the completion dir isn't
@@ -26,7 +32,7 @@ set -euo pipefail
 
 REPO="cobr-io/flywheel"
 BINARY="flywheel"
-INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+INSTALL_DIR="${INSTALL_DIR:-}"
 USE_SUDO="${USE_SUDO:-auto}"
 FORCE="${FORCE:-false}"
 TAG="${TAG:-}"
@@ -92,6 +98,40 @@ if [ -z "$TAG" ]; then
 fi
 case "$TAG" in v*) ;; *) TAG="v${TAG}" ;; esac  # release dir keeps the leading v
 VER="${TAG#v}"                                   # asset filename strips it
+
+# ---- resolve the install dir ----------------------------------------------
+on_path()  { case ":${PATH}:" in *":$1:"*) return 0 ;; esac; return 1; }
+# writable DIR: DIR, or its nearest existing ancestor (mkdir -p creates the rest)
+writable() {
+  local d="$1"
+  while [ ! -e "$d" ]; do d="$(dirname "$d")"; done
+  [ -d "$d" ] && [ -w "$d" ]
+}
+
+if [ -z "$INSTALL_DIR" ]; then
+  existing="$(command -v "$BINARY" 2>/dev/null || true)"
+  case "$existing" in
+    /*)
+      INSTALL_DIR="$(dirname "$existing")"
+      info "upgrading in place in ${INSTALL_DIR} (where ${BINARY} is on your PATH)"
+      if ! writable "$INSTALL_DIR" && [ "$USE_SUDO" != "false" ]; then
+        info "${DIM}${INSTALL_DIR} needs sudo. To switch to a sudo-less install:${RESET}"
+        info "${DIM}  sudo rm ${existing}, then re-run the installer${RESET}"
+      fi
+      ;;
+    *)
+      for dir in "${HOME}/.local/bin" "${HOME}/bin"; do
+        if on_path "$dir" && writable "$dir"; then
+          INSTALL_DIR="$dir"
+          info "installing to ${INSTALL_DIR} (on your PATH, no sudo)"
+          break
+        fi
+      done
+      INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
+      ;;
+  esac
+fi
+[ "$INSTALL_DIR" = "/" ] || INSTALL_DIR="${INSTALL_DIR%/}"  # DEST must match PATH lookups
 
 # ---- idempotency: is the target already installed? ------------------------
 installed_version() {
@@ -162,7 +202,7 @@ chmod +x "${TMP}/${BINARY}"
 run() {
   if [ "$USE_SUDO" = "false" ]; then
     "$@"
-  elif [ -w "$INSTALL_DIR" ] || { [ ! -e "$INSTALL_DIR" ] && [ -w "$(dirname "$INSTALL_DIR")" ]; }; then
+  elif writable "$INSTALL_DIR"; then
     "$@"
   else
     command -v sudo >/dev/null 2>&1 || die \
@@ -183,6 +223,15 @@ case ":${PATH}:" in
   *":${INSTALL_DIR}:"*) ;;
   *) warn "${INSTALL_DIR} is not on your PATH — add it:  export PATH=\"${INSTALL_DIR}:\$PATH\"" ;;
 esac
+
+# A different flywheel earlier on PATH would shadow the one just installed.
+# hash -r: installed_version may have cached the old lookup.
+hash -r
+winner="$(command -v "$BINARY" 2>/dev/null || true)"
+if [ -n "$winner" ] && [ "$winner" != "$DEST" ]; then
+  warn "another ${BINARY} at ${winner} comes first on your PATH and shadows ${DEST}"
+  warn "  remove it (it may need sudo):  rm ${winner}"
+fi
 
 # ---- shell completions (best-effort, non-fatal) ---------------------------
 # The `make install` path runs scripts/install-completions.sh; install.sh is
