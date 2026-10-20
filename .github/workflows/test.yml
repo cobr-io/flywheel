@@ -147,7 +147,7 @@ jobs:
     # the required-check context after merge.
     uses: ./.github/workflows/e2e-recipe.yml
     with:
-      scenarios: "1 5"
+      scenarios: "1 7 5"
       timeout-minutes: 25
       # 2× keeps the largest scaled wait (scenario-1's 480s → 16m) under the
       # 25m budget, so a failing wait times out and dumps diagnostics instead

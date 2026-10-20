@@ -7,14 +7,15 @@
 #
 # Usage:
 #   run.sh all       # every scenario, in order, via run-all.sh (nightly)
-#   run.sh "1 5"     # a space-separated subset (the per-PR CI gate)
+#   run.sh "1 7 5"   # a space-separated subset (the per-PR CI gate)
 #
 # The scenarios are ORDER-COUPLED by design (see the header of run-all.sh):
 # scenario-2 asserts scenario-1's leftover state and scenario-5 hard-exits
 # without a build Job that an earlier scenario produced. A subset therefore
 # has to remain a valid chain — the two shapes in use are "all" (nightly) and
-# "1 5" (per-PR: baseline + orphan-Job reaper; 5 only needs 1's prior build
-# Job, not 2-4). Do NOT invent arbitrary subsets without checking the chain.
+# "1 7 5" (per-PR: baseline + status/clean + orphan-Job reaper; 7 only needs
+# 1's app and 5 only 1's prior build Job, not 2-4). Do NOT invent arbitrary
+# subsets without checking the chain.
 #
 # Required env (see lib.sh): KCTX, CLIENT_REPO, WORKSPACES_ROOT, CLIENT_NAME.
 # TIMEOUT_SCALE (optional, default 1) scales every wait ceiling — CI exports 3.
