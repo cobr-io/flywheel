@@ -11,7 +11,7 @@
 # plus k3d, docker, and mkcert. The client repo lives under a host path the
 # Docker VM bind-mounts (default ~/.flywheel-e2e; override with E2E_ROOT). Uses a
 # distinct client name (default `acme`) so it never collides with your dogfood
-# cluster. Override the scenario selection with E2E_SCENARIOS (default "1 5";
+# cluster. Override the scenario selection with E2E_SCENARIOS (default "1 7 5";
 # use "all" for the full nightly set — see run.sh / run-all.sh).
 set -euo pipefail
 
@@ -20,7 +20,7 @@ E2E_ROOT="${E2E_ROOT:-$HOME/.flywheel-e2e}"
 CLIENT_NAME="${CLIENT_NAME:-acme}"
 TAG="${E2E_IMAGE_TAG:-ci}"
 CLIENT_REPO="$E2E_ROOT/$CLIENT_NAME"
-E2E_SCENARIOS="${E2E_SCENARIOS:-1 5}"
+E2E_SCENARIOS="${E2E_SCENARIOS:-1 7 5}"
 
 command -v flywheel >/dev/null || { echo "flywheel not on PATH — run 'make build' first." >&2; exit 1; }
 
@@ -60,6 +60,10 @@ trap cleanup EXIT
 (
 	cd "$CLIENT_REPO"
 	flywheel init --org=cobr-io
+	# Cluster-free CLI coverage (invalid config, local-only guard, publish-app)
+	# on throwaway copies of the fresh repo — before the expensive `up`, as in
+	# the recipe.
+	CLIENT_REPO="$CLIENT_REPO" bash "$REPO_ROOT/testdata/scenarios/scenario-cli.sh"
 	cat >>flywheel.yaml.local <<EOF
 flywheel:
   images:

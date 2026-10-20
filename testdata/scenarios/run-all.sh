@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs the six dev-loop validation scenarios in sequence against an
+# Runs the eight dev-loop validation scenarios in sequence against an
 # already-up cluster (flywheel init + flywheel up done). Invoked via run.sh
 # ("all") from the reusable CI recipe (nightly) and local scripts/e2e.sh.
 #
@@ -15,18 +15,23 @@
 #   6 branch-stress — rapid-fire branch-flip race guard for issue #86; needs
 #                     the app present on main (scenario-1) and MUST run
 #                     BEFORE scenario-5, which deletes the app entirely.
+#   7 status-clean  — `status` + `clean` (keeps live PVCs, reaps a planted
+#                     orphan), then commits on main: needs 1's app on main.
 #   5 orphan reaper — hard-exits unless a prior build Job exists (needs 1);
-#                     DESTRUCTIVE + TERMINAL: removes the app's builder and
-#                     workload, so nothing may run against this app after it.
-# NUMBERING NOTE: scenario-6's file is named for the order it was added
-# (after 1-5 existed), not the order it runs — it executes as the 5th step,
-# right before the (renumbered-in-position-only) scenario-5. Do NOT reorder
-# this loop to "1 2 3 4 5 6"; that would run the destructive scenario-5
-# before scenario-6 has an app left to stress.
+#                     DESTRUCTIVE + TERMINAL for sample-app: removes its builder
+#                     and workload, so nothing may run against that app after it.
+#   8 down-up-clone — `down` → delete a worktree → `up --clone`, with its own
+#                     app. TERMINAL for the cluster: it recreates it, so it
+#                     always runs last.
+# NUMBERING NOTE: scenarios 6 and 7 are named for the order they were added
+# (after 1-5 existed), not the order they run — both execute before the
+# (renumbered-in-position-only) scenario-5. Do NOT reorder this loop
+# numerically; that would run the destructive scenario-5 before 6 and 7 have
+# an app left to work with.
 #
-# A subset run (run.sh "1 5") must therefore stay a valid chain: 5 depends
-# only on 1's build Job, so "1 5" is safe (scenario-6 is skipped in that
-# subset, matching per-PR CI — see e2e-recipe.yml); "2" alone is not.
+# A subset run (run.sh "1 7 5") must therefore stay a valid chain: 7 needs only
+# 1's app and 5 only 1's build Job, so "1 7 5" is safe (the per-PR CI subset —
+# see test.yml); "2" alone is not.
 #
 # Required env (see lib.sh): KCTX, CLIENT_REPO, WORKSPACES_ROOT, CLIENT_NAME.
 set -euo pipefail
@@ -34,7 +39,8 @@ cd "$(dirname "${BASH_SOURCE[0]}")"
 
 for s in scenario-1-baseline scenario-2-app-branch \
          scenario-3-gitops-branch scenario-4-both-branches \
-         scenario-6-branch-stress scenario-5-orphan-job-reaper; do
+         scenario-6-branch-stress scenario-7-status-clean \
+         scenario-5-orphan-job-reaper scenario-8-down-up-clone; do
   echo "==================== $s ===================="
   bash "./$s.sh"
 done

@@ -9,7 +9,7 @@ name: e2e-full
 # (run-all.sh, 1-5) — but it no longer copies the per-PR setup. Both callers
 # now delegate to the SAME reusable recipe (e2e-recipe.yml), so the two can
 # never drift; the only differences are the scenario selection ("all" here vs
-# "1 5" per-PR) and a roomier timeout. It fires nightly and on manual dispatch.
+# "1 7 5" per-PR) and a roomier timeout. It fires nightly and on manual dispatch.
 #
 # A red nightly used to page no one, so the `alert` job below opens (or
 # comments on) a stably-titled GitHub issue on failure.
@@ -41,9 +41,11 @@ jobs:
   alert:
     # Page someone when the nightly goes red. Opens a stably-titled issue, or
     # comments on the existing open one instead of spamming a fresh issue each
-    # night. Runs only on failure of the e2e job (a cancel is not a failure).
+    # night. Runs only on failure of the e2e job (a cancel is not a failure),
+    # and only for the scheduled nightly: a manual dispatch (e.g. trying new
+    # scenarios on a branch) is watched by whoever started it.
     needs: k3d-e2e-full
-    if: failure()
+    if: failure() && github.event_name == 'schedule'
     runs-on: ubuntu-latest
     permissions:
       contents: read

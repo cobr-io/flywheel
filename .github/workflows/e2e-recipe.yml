@@ -13,7 +13,7 @@ name: e2e-recipe
 #
 # Inputs:
 #   scenarios       "all" (run-all.sh, scenarios 1-5) or a space-separated
-#                   subset like "1 5" (per-PR gate). Passed to run.sh.
+#                   subset like "1 7 5" (per-PR gate). Passed to run.sh.
 #   timeout-minutes job wall-clock budget (per-PR is tight; nightly is roomy).
 #
 # NOTE: a reusable workflow's status check appears as "<caller job> / <this
@@ -24,7 +24,7 @@ on:
   workflow_call:
     inputs:
       scenarios:
-        description: 'Scenario selection: "all" (run-all.sh) or a space-separated subset like "1 5".'
+        description: 'Scenario selection: "all" (run-all.sh) or a space-separated subset like "1 7 5".'
         required: true
         type: string
       timeout-minutes:
@@ -111,6 +111,10 @@ jobs:
           set -euo pipefail
           mkdir -p "$HOME/e2e/acme" && cd "$HOME/e2e/acme"
           flywheel init --org=cobr-io
+          # Issue #38: cluster-free CLI coverage (invalid config fails fast
+          # with no cluster, the local-only guard, publish-app) on throwaway
+          # copies of the fresh repo — seconds, before the expensive `up`.
+          CLIENT_REPO="$PWD" bash "$GITHUB_WORKSPACE/testdata/scenarios/scenario-cli.sh"
           # Dogfood-mode override: point at the locally-built images.
           cat >> flywheel.yaml.local <<'EOF'
           flywheel:
@@ -164,7 +168,7 @@ jobs:
             done
           done
           cd "$GITHUB_WORKSPACE"
-          # Which scenarios run is the caller's `scenarios` input (per-PR "1 5",
+          # Which scenarios run is the caller's `scenarios` input (per-PR "1 7 5",
           # nightly "all"). TIMEOUT_SCALE comes from the caller too, so the
           # wait ceilings — tuned on a dev box — stretch for slow 2-core
           # runners WITHOUT outlasting the job budget (see the timeout-scale
