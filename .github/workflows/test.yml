@@ -53,6 +53,11 @@ jobs:
         # `make images` exited 0 and the e2e job died later in `flywheel up`
         # with a misleading "image not found". Stubs docker to fail.
         run: bash scripts/check-make-images-fails-fast.sh
+      - name: install.sh picks the right install dir (#69)
+        # Fresh installs go sudo-less to ~/.local/bin; an existing install is
+        # upgraded in place so a re-run never leaves a stale or shadowing
+        # binary behind. Stubs curl/sudo/install and runs the real scripts.
+        run: bash scripts/check-install-dir-resolution.sh
       # Portability guards. The native runner is linux/amd64, but Flywheel
       # is developed on macOS and run on Linux/WSL (incl. arm64). These
       # catch the regressions that *are* code-level — formatting drift, CRLF

@@ -127,9 +127,10 @@ curl -sSL https://raw.githubusercontent.com/cobr-io/flywheel/main/install.sh | b
 ```
 
 Installs a checksum-verified prebuilt binary (darwin/linux × amd64/arm64) and
-shell completions; re-running it upgrades. Pin a release with `TAG=v1.2.3`, or
-install without sudo with `INSTALL_DIR="$HOME/.local/bin" USE_SUDO=false`
-(env vars go on the `bash` side of the pipe). From a checkout, `make install`
+shell completions; re-running it upgrades in place. New installs go to
+`~/.local/bin` (or `~/bin`) without sudo when that dir is on your `$PATH`. Pin a
+release with `TAG=v1.2.3`, or pick the location with `INSTALL_DIR=…` (env vars
+go on the `bash` side of the pipe). From a checkout, `make install`
 builds from source. No native Windows build — use WSL2.
 
 All options, from-source details, and uninstalling:
