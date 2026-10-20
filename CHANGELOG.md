@@ -9,11 +9,16 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.2] - 2026-10-20
+
 ### Security
 
 - Built with Go 1.26.9 and `golang.org/x/net` v0.60.0, which fix nine
   reachable `net/http`, HTTP/2, `crypto/tls` and MIME-header vulnerabilities
   (GO-2026-6603, -6605, -6607, -6608, -6610, -6611, -6612, -6613, -6617).
+  (#162)
 
 ### Fixed
 
