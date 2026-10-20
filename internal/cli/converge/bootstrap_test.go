@@ -7,6 +7,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"gopkg.in/yaml.v3"
 
@@ -369,6 +370,72 @@ func TestRenderBootstrap_EveryResourceLabeledManagedBy(t *testing.T) {
 		if !kinds[want] {
 			t.Errorf("expected the bootstrap build to include a %s (got kinds %v)", want, kinds)
 		}
+	}
+}
+
+// TestRenderBootstrap_KustomizationsRetryWithinUpWait locks issue #128: a
+// failed reconcile retries on spec.retryInterval, falling back to
+// spec.interval. Every bootstrap Kustomization must retry well inside `up`'s
+// 3m Ready-wait, or a transient first-build failure (e.g. a Secret landing a
+// moment late) surfaces as a hard `up` failure — flywheel-infra's deliberate
+// 5m interval did exactly that before it gained a retryInterval.
+func TestRenderBootstrap_KustomizationsRetryWithinUpWait(t *testing.T) {
+	cfg := &flywheelSchema.File{}
+	cfg.Client.Name = "acme"
+	cfg.Cluster.Name = "acme-local"
+	cfg.Cluster.Registry = "acme-local-registry"
+	cfg.Cluster.RegistryPort = 50001
+	cfg.Flux.IntervalLocal = "10s"
+	cfg.Local.Domain = "localdev.me"
+	cfg.Namespaces.Apps = "apps" // loader-defaulted in production; set explicitly here
+
+	refs := map[string]string{
+		"git-server":               "ghcr.io/cobr-io/git-server:v0.1.0",
+		"git-auto-sync":            "ghcr.io/cobr-io/git-auto-sync:v0.1.0",
+		"image-builder-controller": "ghcr.io/cobr-io/image-builder-controller:v0.1.0",
+		"git-deploy-controller":    "ghcr.io/cobr-io/git-deploy-controller:v0.1.0",
+	}
+	dir, err := RenderBootstrap(cfg, refs, "abc", "acme-gitops", "")
+	if err != nil {
+		t.Fatalf("RenderBootstrap: %v", err)
+	}
+	defer os.RemoveAll(dir)
+
+	const maxRetry = time.Minute
+	checked := 0
+	for _, doc := range strings.Split(buildKustomizeForTest(t, dir), "\n---\n") {
+		var obj struct {
+			Kind     string `yaml:"kind"`
+			Metadata struct {
+				Name string `yaml:"name"`
+			} `yaml:"metadata"`
+			Spec struct {
+				Interval      string `yaml:"interval"`
+				RetryInterval string `yaml:"retryInterval"`
+			} `yaml:"spec"`
+		}
+		if err := yaml.Unmarshal([]byte(doc), &obj); err != nil {
+			t.Fatalf("parse rendered doc: %v\n%s", err, doc)
+		}
+		if obj.Kind != "Kustomization" {
+			continue
+		}
+		checked++
+		retry := obj.Spec.RetryInterval
+		if retry == "" {
+			retry = obj.Spec.Interval
+		}
+		d, err := time.ParseDuration(retry)
+		if err != nil {
+			t.Fatalf("Kustomization %s: parse retry interval %q: %v", obj.Metadata.Name, retry, err)
+		}
+		if d > maxRetry {
+			t.Errorf("Kustomization %s retries a failed reconcile every %s (want <= %s): set spec.retryInterval",
+				obj.Metadata.Name, d, maxRetry)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("bootstrap build produced no Kustomizations")
 	}
 }
 

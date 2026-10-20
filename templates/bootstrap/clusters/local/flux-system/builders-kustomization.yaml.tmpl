@@ -12,6 +12,10 @@ spec:
   # eats a --requeue-dependency penalty. At 5m the blink is ~0.09% of the
   # time instead of ~2.6%, which is what removes the commit-to-pod outlier.
   interval: 5m
+  # A failed reconcile retries on retryInterval, which otherwise defaults to
+  # interval — a 5m retry outlasts `up`'s 3m Ready-wait (issue #128). The 5m
+  # above only paces SUCCESSFUL reconciles, which is all the blink fix needs.
+  retryInterval: 10s
   prune: true
   sourceRef:
     kind: GitRepository

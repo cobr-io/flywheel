@@ -21,6 +21,10 @@ spec:
   # coincidence rare; --requeue-dependency=500ms caps the cost if it still hits
   # (measured: at the 30s default a caught blink is a ~40s outlier, at 500ms ~0.5s).
   interval: 5m
+  # A failed reconcile retries on retryInterval, which otherwise defaults to
+  # interval — a 5m retry outlasts `up`'s 3m Ready-wait (issue #128). The 5m
+  # above only paces SUCCESSFUL reconciles, which is all the blink fix needs.
+  retryInterval: 10s
   prune: true
   sourceRef:
     kind: GitRepository

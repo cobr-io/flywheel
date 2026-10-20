@@ -167,6 +167,25 @@ func TestUpSteps_ApplyFluxSystemIsCritical(t *testing.T) {
 	t.Fatal("apply-flux-system step not found in upSteps()")
 }
 
+// TestUpSteps_SecretsBeforeFluxSystem locks issue #128's fix: the sops-age
+// Secret must exist before the Kustomizations that decrypt with it are
+// applied, or each one's first build fails with `secrets "sops-age" not
+// found` and flywheel-infra's retry can outlast the Ready-wait.
+func TestUpSteps_SecretsBeforeFluxSystem(t *testing.T) {
+	idx := map[string]int{}
+	for i, st := range upSteps() {
+		idx[st.name] = i
+	}
+	secrets, ok1 := idx["create-secrets"]
+	apply, ok2 := idx["apply-flux-system"]
+	if !ok1 || !ok2 {
+		t.Fatalf("create-secrets / apply-flux-system missing from upSteps() (found %v)", idx)
+	}
+	if secrets > apply {
+		t.Fatal("create-secrets must run before apply-flux-system: Kustomizations referencing sops-age would build before the Secret exists")
+	}
+}
+
 // TestStepSkipPredicates locks the skip functions the table wires in: the two
 // Options-driven seams (SkipFluxInstall, --wait) and the state-driven prune gate.
 func TestStepSkipPredicates(t *testing.T) {
