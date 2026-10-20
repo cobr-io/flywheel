@@ -9,6 +9,10 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.3] - 2026-10-20
+
 ### Changed
 
 - `install.sh` no longer needs sudo on most machines. A new install goes to
