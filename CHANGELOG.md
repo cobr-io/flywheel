@@ -9,7 +9,12 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Changed
+
+- Building Flywheel from source now requires Go 1.27.3 or later (was 1.26).
+  Newer fluxcd API modules need Go 1.27, and 1.27.3 is the first release
+  without the standard-library vulnerabilities govulncheck reports in
+  1.27.0–1.27.2.
 
 ## [0.5.4] - 2026-10-20
 
