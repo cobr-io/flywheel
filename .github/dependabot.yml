@@ -21,6 +21,13 @@ updates:
       go-modules:
         patterns: ["*"]
         update-types: ["minor", "patch"]
+    # kustomize >= 0.21.3 pulls in a kube-openapi built on
+    # structured-merge-diff/v7, which k8s.io/apimachinery 0.37.x (v6) can't
+    # compile against. Drop this once k8s.io/* 0.38 and a controller-runtime
+    # supporting it are released, and bump all three together.
+    ignore:
+      - dependency-name: "sigs.k8s.io/kustomize/*"
+        versions: [">= 0.21.3"]
 
   # GitHub Actions pinned in .github/workflows/*. Supply-chain hygiene: keeps
   # checkout / setup-go / goreleaser-action et al. current.
