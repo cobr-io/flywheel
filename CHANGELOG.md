@@ -9,12 +9,23 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.5.5] - 2026-11-02
+
+### Security
+
+- Built with Go 1.27.3, which fixes a reachable `crypto/x509` vulnerability
+  (GO-2026-6809). (#176, #177)
+
 ### Changed
 
 - Building Flywheel from source now requires Go 1.27.3 or later (was 1.26).
   Newer fluxcd API modules need Go 1.27, and 1.27.3 is the first release
   without the standard-library vulnerabilities govulncheck reports in
-  1.27.0–1.27.2.
+  1.27.0–1.27.2. (#177)
+- Dependency updates: fluxcd `pkg/apis/meta` 1.38.0, `source-controller/api`
+  1.10.1, `k8s.io/*` 0.37.2, kustomize 0.21.2. (#177)
 
 ## [0.5.4] - 2026-10-20
 
