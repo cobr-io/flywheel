@@ -65,11 +65,20 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Install k3d + mkcert
+        # Versions are pinned and downloads retried so a GitHub hiccup while
+        # resolving "latest" can't fail the run before any scenario starts
+        # (issue #179). TAG makes the k3d installer skip its latest-release
+        # lookup.
+        env:
+          K3D_VERSION: v5.9.0
+          MKCERT_VERSION: v1.4.4
         run: |
-          curl -s https://raw.githubusercontent.com/k3d-io/k3d/main/install.sh | bash
+          curl -fsSL --retry 5 --retry-all-errors -o "$RUNNER_TEMP/k3d-install.sh" \
+            "https://raw.githubusercontent.com/k3d-io/k3d/${K3D_VERSION}/install.sh"
+          TAG="${K3D_VERSION}" bash "$RUNNER_TEMP/k3d-install.sh"
           sudo apt-get update && sudo apt-get install -y libnss3-tools
-          curl -fsSL -o /usr/local/bin/mkcert \
-            "https://dl.filippo.io/mkcert/latest?for=linux/amd64"
+          curl -fsSL --retry 5 --retry-all-errors -o /usr/local/bin/mkcert \
+            "https://dl.filippo.io/mkcert/${MKCERT_VERSION}?for=linux/amd64"
           sudo chmod +x /usr/local/bin/mkcert
       - name: Build flywheel binary
         run: go build -o /usr/local/bin/flywheel ./cmd/flywheel
