@@ -9,7 +9,16 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
-Nothing yet.
+### Security
+
+- Built with Go 1.27.4, which fixes a reachable `net/http` vulnerability
+  (GO-2026-6859).
+- `github.com/klauspost/compress` 1.20.2, which fixes a reachable
+  vulnerability in its `fse` and `huff0` packages (GO-2026-6865).
+
+### Changed
+
+- Building Flywheel from source now requires Go 1.27.4 or later (was 1.27.3).
 
 ## [0.5.5] - 2026-11-02
 
