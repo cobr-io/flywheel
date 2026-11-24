@@ -4,8 +4,8 @@ go 1.27.4
 
 require (
 	filippo.io/age v1.3.2
-	github.com/fluxcd/pkg/apis/meta v1.38.0
-	github.com/fluxcd/source-controller/api v1.10.1
+	github.com/fluxcd/pkg/apis/meta v1.39.0
+	github.com/fluxcd/source-controller/api v1.10.2
 	github.com/go-git/go-git/v5 v5.19.3
 	github.com/go-logr/logr v1.4.4
 	github.com/google/go-containerregistry v0.22.1
@@ -19,7 +19,7 @@ require (
 	k8s.io/apimachinery v0.37.2
 	k8s.io/client-go v0.37.2
 	k8s.io/klog/v2 v2.140.0
-	sigs.k8s.io/controller-runtime v0.25.2
+	sigs.k8s.io/controller-runtime v0.25.3
 	sigs.k8s.io/kustomize/api v0.21.2
 	sigs.k8s.io/kustomize/kyaml v0.21.2
 	sigs.k8s.io/yaml v1.6.0
