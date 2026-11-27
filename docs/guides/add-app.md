@@ -197,6 +197,11 @@ kubectl get jobs -n flywheel-system  # build jobs: build-<name>-<ts>-<sha>
   covers roughly ten; past that, raise `git_auto_sync.memory_limit` in
   `flywheel.yaml` and run `flywheel up` to apply the new limit through both
   Flywheel reconciliation paths.
+* **A build Job runs far longer than usual and never finishes** — buildkitd,
+  which runs every build, may be at its memory limit: it thrashes instead of
+  being OOMKilled. `kubectl top pod -n flywheel-system` shows `buildkitd` at
+  its limit. Raise `build.memory_limit` in `flywheel.yaml` (default `4Gi`; a
+  large Next.js monorepo build needs about `12Gi`) and run `flywheel up`.
 
 ## Off-the-shelf: no builder
 

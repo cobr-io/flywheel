@@ -169,6 +169,29 @@ func TestGitAutoSyncMemoryLimit_Default(t *testing.T) {
 	}
 }
 
+func TestBuildMemoryLimit_Default(t *testing.T) {
+	f, err := Parse([]byte(validYAML)) // no build block
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.BuildMemoryLimit(); got != DefaultBuildMemoryLimit {
+		t.Errorf("BuildMemoryLimit() = %q, want %q (default)", got, DefaultBuildMemoryLimit)
+	}
+}
+
+func TestBuildMemoryLimit_Configured(t *testing.T) {
+	f, err := Parse([]byte(validYAML + "build:\n  memory_limit: 12Gi\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := f.BuildMemoryLimit(); got != "12Gi" {
+		t.Errorf("BuildMemoryLimit() = %q, want 12Gi", got)
+	}
+	if err := Validate(f); err != nil {
+		t.Errorf("a valid build memory_limit should pass Validate: %v", err)
+	}
+}
+
 func TestGitAutoSyncMemoryLimit_Configured(t *testing.T) {
 	f, err := Parse([]byte(validYAML + "git_auto_sync:\n  memory_limit: 512Mi\n"))
 	if err != nil {
@@ -185,7 +208,7 @@ func TestGitAutoSyncMemoryLimit_Configured(t *testing.T) {
 // A present but implausible memory quantity is rejected before it reaches the
 // Deployment apply, where it would fail with a less obvious error.
 func TestValidate_RejectsBadMemoryLimit(t *testing.T) {
-	for _, field := range []string{"git_server", "git_auto_sync"} {
+	for _, field := range []string{"git_server", "git_auto_sync", "build"} {
 		for _, bad := range []string{"512", "512 Mi", "lots", "512MiB"} {
 			f, err := Parse([]byte(validYAML + field + ":\n  memory_limit: \"" + bad + "\"\n"))
 			if err != nil {
@@ -201,7 +224,7 @@ func TestValidate_RejectsBadMemoryLimit(t *testing.T) {
 }
 
 func TestValidate_AcceptsGoodMemoryLimits(t *testing.T) {
-	for _, field := range []string{"git_server", "git_auto_sync"} {
+	for _, field := range []string{"git_server", "git_auto_sync", "build"} {
 		for _, ok := range []string{"128Mi", "512Mi", "1Gi", "256M", "2G"} {
 			f, err := Parse([]byte(validYAML + field + ":\n  memory_limit: " + ok + "\n"))
 			if err != nil {

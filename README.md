@@ -196,7 +196,7 @@ sops:
 ```
 
 Every field, including the optional blocks (`git.integration_branch`,
-`git_server.memory_limit`, `git_auto_sync.memory_limit`, `workspace:`), is documented in the
+`git_server.memory_limit`, `git_auto_sync.memory_limit`, `build.memory_limit`, `workspace:`), is documented in the
 [annotated template](templates/client-skeleton/flywheel.yaml.tmpl).
 Per-developer overrides go in a gitignored `flywheel.yaml.local`.
 
@@ -221,6 +221,10 @@ Per-developer overrides go in a gitignored `flywheel.yaml.local`.
 - **Large repos can OOM the in-cluster git-server**, failing builds and leaving
   app pods `Pending`. Raise `git_server.memory_limit` in `flywheel.yaml` (e.g.
   `512Mi`); the default is `128Mi`.
+- **A large build can stall at the buildkitd memory limit.** It isn't
+  OOMKilled; it thrashes and its build Job looks stuck. Raise
+  `build.memory_limit` in `flywheel.yaml` (e.g. `12Gi` for a large Next.js
+  monorepo); the default is `4Gi`.
 - **Secret scanners flag `clusters/local/age.key`.** It's committed on purpose
   and only decrypts local dev secrets — allowlist it
   ([Onboarding](docs/guides/onboarding.md)).

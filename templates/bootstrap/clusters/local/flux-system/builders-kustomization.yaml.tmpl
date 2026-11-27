@@ -88,3 +88,20 @@ spec:
                   resources:
                     limits:
                       memory: {{ .DevLoopLimits.GitAutoSyncMemory }}
+    # buildkitd (cfg.build.memory_limit, default 4Gi). Every image build runs
+    # inside this one daemon, so the largest single build sets the floor; a
+    # build that needs more does not fail, it thrashes at the limit and stalls.
+    - patch: |-
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: buildkitd
+          namespace: {{ .FlywheelNamespace }}
+        spec:
+          template:
+            spec:
+              containers:
+                - name: buildkitd
+                  resources:
+                    limits:
+                      memory: {{ .DevLoopLimits.BuildMemory }}

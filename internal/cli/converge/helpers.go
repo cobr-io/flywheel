@@ -37,15 +37,20 @@ type DevLoopLimits struct {
 	// controller forks Git subprocesses for every declared worktree into a
 	// single cgroup.
 	GitAutoSyncMemory string
+	// BuildMemory patches the buildkitd Deployment's `buildkitd` container.
+	// Every image build runs inside that one daemon, so the largest single
+	// build sets the floor.
+	BuildMemory string
 }
 
-// DevLoopLimitsFor reads both dev-loop memory limits off cfg, with the schema
+// DevLoopLimitsFor reads the dev-loop memory limits off cfg, with the schema
 // defaults applied. Every caller on either apply path MUST go through this so
 // there is exactly one place the config is read.
 func DevLoopLimitsFor(cfg *flywheelSchema.File) DevLoopLimits {
 	return DevLoopLimits{
 		GitServerMemory:   cfg.GitServerMemoryLimit(),
 		GitAutoSyncMemory: cfg.GitAutoSyncMemoryLimit(),
+		BuildMemory:       cfg.BuildMemoryLimit(),
 	}
 }
 
@@ -54,7 +59,7 @@ func DevLoopLimitsFor(cfg *flywheelSchema.File) DevLoopLimits {
 // from imagepin.Resolve. Each `ghcr.io/cobr-io/<name>` slot in the base
 // is rewritten to the resolved ref — same as what's already imported
 // into the cluster's containerd in up's mirror-images step. limits patches the
-// git-server and git-auto-sync container memory limits; they MUST match the
+// git-server, git-auto-sync and buildkitd container memory limits; they MUST match the
 // limits the flywheel-dev-loop Flux Kustomization applies
 // (builders-kustomization.yaml.tmpl), or the two reconcile paths would fight —
 // hence the shared DevLoopLimitsFor producer.
@@ -95,7 +100,7 @@ func ApplyDevLoop(ctx context.Context, a *applier.Applier, overlayDir string, re
 // builders-kustomization.yaml.tmpl — pointed at the exact same tree, so
 // anything the overlay adds later isn't silently dropped here). It then
 // rewrites each base ghcr.io image ref to the resolved ref, and patches the
-// git-server and git-auto-sync container memory limits. Pure (no I/O) so it
+// git-server, git-auto-sync and buildkitd container memory limits. Pure (no I/O) so it
 // can be unit-tested.
 func renderDevLoopKustomization(refs map[string]string, limits DevLoopLimits) string {
 	var images strings.Builder
@@ -116,7 +121,7 @@ images:
 }
 
 // devLoopMemoryPatches returns kustomize strategic-merge patches that set the
-// git-server and git-auto-sync container memory limits. Shared shape with the
+// git-server, git-auto-sync and buildkitd container memory limits. Shared shape with the
 // flywheel-dev-loop Flux Kustomization (builders-kustomization.yaml.tmpl) so
 // the direct-apply path and the Flux reconcile path converge on one value —
 // TestBuildersKustomization_PatchesBuildThroughKustomize builds THAT template's
@@ -152,7 +157,21 @@ func devLoopMemoryPatches(limits DevLoopLimits) string {
                 resources:
                   limits:
                     memory: %s
-`, naming.FlywheelNamespace, limits.GitServerMemory, naming.FlywheelNamespace, limits.GitAutoSyncMemory)
+  - patch: |-
+      apiVersion: apps/v1
+      kind: Deployment
+      metadata:
+        name: buildkitd
+        namespace: %s
+      spec:
+        template:
+          spec:
+            containers:
+              - name: buildkitd
+                resources:
+                  limits:
+                    memory: %s
+`, naming.FlywheelNamespace, limits.GitServerMemory, naming.FlywheelNamespace, limits.GitAutoSyncMemory, naming.FlywheelNamespace, limits.BuildMemory)
 }
 
 // splitImageRef splits an image reference into newName + newTag. If the
