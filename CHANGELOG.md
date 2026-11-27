@@ -9,6 +9,14 @@ During the v0.x phase no compat promise is made between minor versions
 
 ## [Unreleased]
 
+### Added
+
+- `build.memory_limit` makes the buildkitd memory limit configurable (default
+  `4Gi`, unchanged). It is applied through both Flywheel reconciliation paths,
+  like `git_auto_sync.memory_limit`. A build that needs more than the limit is
+  not OOMKilled but stalls, so large builds such as a Next.js monorepo (about
+  8Gi peak) need it raised.
+
 ### Security
 
 - Built with Go 1.27.4, which fixes a reachable `net/http` vulnerability

@@ -83,6 +83,9 @@ spec:
               # flywheel.yaml `build.cpu_limit` is a documented follow-up (no
               # such knob exists yet — this value is the only ceiling).
               cpu: "4"
+              # Both apply paths patch this from flywheel.yaml
+              # `build.memory_limit` (default schema.DefaultBuildMemoryLimit),
+              # so this is only the unpatched base value.
               memory: 4Gi
           volumeMounts:
             - name: cache

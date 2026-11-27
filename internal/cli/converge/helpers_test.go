@@ -60,6 +60,28 @@ spec:
               memory: 128Mi
 `
 
+// baseBuildkitdManifest is the third target: the buildkitd Deployment with its
+// baked-in 4Gi limit and a distinct request, so the test proves the patch
+// changes only the memory limit.
+const baseBuildkitdManifest = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: buildkitd
+  namespace: flywheel-system
+spec:
+  template:
+    spec:
+      containers:
+        - name: buildkitd
+          image: moby/buildkit:v0.16.0-rootless
+          resources:
+            requests:
+              memory: 640Mi
+            limits:
+              cpu: "4"
+              memory: 4Gi
+`
+
 // buildKustomize mirrors applier.buildKustomize: a krusty build with the
 // load-restriction relaxed so the transient kustomization's
 // `../overlays/local` (and, transitively, its `../../base`) references
@@ -262,6 +284,7 @@ func TestRenderDevLoopKustomization_PatchesMemoryLimits(t *testing.T) {
 	transient := devLoopFixture(t, map[string]string{
 		"git-server.yaml":    baseGitServerManifest,
 		"git-auto-sync.yaml": baseGitAutoSyncManifest,
+		"buildkitd.yaml":     baseBuildkitdManifest,
 	}, nil)
 
 	refs := map[string]string{
@@ -269,7 +292,7 @@ func TestRenderDevLoopKustomization_PatchesMemoryLimits(t *testing.T) {
 		"git-auto-sync":            "k3d-reg:5000/git-auto-sync:dogfood-abc",
 		"image-builder-controller": "k3d-reg:5000/image-builder-controller:dogfood-abc",
 	}
-	k := renderDevLoopKustomization(refs, DevLoopLimits{GitServerMemory: "512Mi", GitAutoSyncMemory: "384Mi"})
+	k := renderDevLoopKustomization(refs, DevLoopLimits{GitServerMemory: "512Mi", GitAutoSyncMemory: "384Mi", BuildMemory: "6Gi"})
 	if err := os.WriteFile(filepath.Join(transient, "kustomization.yaml"), []byte(k), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -280,6 +303,7 @@ func TestRenderDevLoopKustomization_PatchesMemoryLimits(t *testing.T) {
 	// visible once each value is tied back to the container it landed on.
 	assertContainerMemoryLimit(t, out, "git-server", "git-server", "512Mi")
 	assertContainerMemoryLimit(t, out, "git-auto-sync", "controller", "384Mi")
+	assertContainerMemoryLimit(t, out, "buildkitd", "buildkitd", "6Gi")
 	if strings.Contains(out, "memory: 128Mi") {
 		t.Errorf("base 128Mi limit should have been overridden:\n%s", out)
 	}
@@ -293,6 +317,9 @@ func TestRenderDevLoopKustomization_PatchesMemoryLimits(t *testing.T) {
 	}
 	if !strings.Contains(out, "memory: 24Mi") {
 		t.Errorf("git-auto-sync request floor should be preserved:\n%s", out)
+	}
+	if !strings.Contains(out, "memory: 640Mi") || !strings.Contains(out, `cpu: "4"`) {
+		t.Errorf("buildkitd request and CPU limit should be preserved:\n%s", out)
 	}
 }
 
@@ -308,6 +335,7 @@ func TestRenderDevLoopKustomization_DefaultLimits(t *testing.T) {
 	transient := devLoopFixture(t, map[string]string{
 		"git-server.yaml":    baseGitServerManifest,
 		"git-auto-sync.yaml": baseGitAutoSyncManifest,
+		"buildkitd.yaml":     baseBuildkitdManifest,
 	}, nil)
 	k := renderDevLoopKustomization(refs, DevLoopLimitsFor(&flywheelSchema.File{}))
 	if err := os.WriteFile(filepath.Join(transient, "kustomization.yaml"), []byte(k), 0o644); err != nil {
@@ -317,6 +345,7 @@ func TestRenderDevLoopKustomization_DefaultLimits(t *testing.T) {
 	out := buildKustomizeForTest(t, transient)
 	assertContainerMemoryLimit(t, out, "git-server", "git-server", flywheelSchema.DefaultGitServerMemoryLimit)
 	assertContainerMemoryLimit(t, out, "git-auto-sync", "controller", flywheelSchema.DefaultGitAutoSyncMemoryLimit)
+	assertContainerMemoryLimit(t, out, "buildkitd", "buildkitd", flywheelSchema.DefaultBuildMemoryLimit)
 }
 
 // T16: the transient kustomization must reference the overlay
@@ -348,6 +377,7 @@ data:
 		"marker.yaml":        baseMarker,
 		"git-server.yaml":    baseGitServerManifest, // targets for the memory-limit patches below
 		"git-auto-sync.yaml": baseGitAutoSyncManifest,
+		"buildkitd.yaml":     baseBuildkitdManifest,
 	}, map[string]string{
 		"marker.yaml": overlayMarker,
 	})

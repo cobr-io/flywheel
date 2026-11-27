@@ -83,8 +83,8 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 	if regexp.MustCompile(`(?m)^\s*images:`).MatchString(cbk) {
 		t.Errorf("client-builders-kustomization.yaml renders a bare images: key (YAML null; Flux CRD rejects it):\n%s", cbk)
 	}
-	// The flywheel-dev-loop Kustomization patches both dev-loop memory limits so
-	// Flux's reconcile agrees with the step-11a direct apply. cfg leaves both
+	// The flywheel-dev-loop Kustomization patches the dev-loop memory limits so
+	// Flux's reconcile agrees with the step-11a direct apply. cfg leaves all
 	// limits unset here, so each target must render with its own schema default
 	// (they are different numbers — see DefaultGitAutoSyncMemoryLimit).
 	for _, want := range []string{
@@ -93,6 +93,8 @@ func TestRenderBootstrap_ResolvesImageRefs(t *testing.T) {
 		"name: git-auto-sync",
 		"memory: " + flywheelSchema.DefaultGitServerMemoryLimit,
 		"memory: " + flywheelSchema.DefaultGitAutoSyncMemoryLimit,
+		"name: buildkitd",
+		"memory: " + flywheelSchema.DefaultBuildMemoryLimit,
 	} {
 		if !strings.Contains(bk, want) {
 			t.Errorf("builders-kustomization.yaml missing dev-loop memory patch %q:\n%s", want, bk)
@@ -196,6 +198,7 @@ func TestBuildersKustomization_PatchesBuildThroughKustomize(t *testing.T) {
 	// pair nor a limit silently falling back to its default can pass.
 	cfg.GitServer.MemoryLimit = "512Mi"
 	cfg.GitAutoSync.MemoryLimit = "384Mi"
+	cfg.Build.MemoryLimit = "6Gi"
 
 	refs := map[string]string{
 		"git-server":               "ghcr.io/cobr-io/git-server:v0.1.0",
@@ -213,6 +216,7 @@ func TestBuildersKustomization_PatchesBuildThroughKustomize(t *testing.T) {
 	out := buildKustomizeForTest(t, devLoopTreeWithPatches(t, fluxKustomizationPatches(t, bk)))
 	assertContainerMemoryLimit(t, out, "git-server", "git-server", "512Mi")
 	assertContainerMemoryLimit(t, out, "git-auto-sync", "controller", "384Mi")
+	assertContainerMemoryLimit(t, out, "buildkitd", "buildkitd", "6Gi")
 	// #144: the Flux path must render the same PID-1 reaper backstop as the
 	// step-11a direct apply (TestApplyDevLoop_RealManifests_RewriteByName) —
 	// both resource the same base tree, so a drift here would mean the base

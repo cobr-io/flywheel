@@ -40,6 +40,10 @@ type File struct {
 	// (flywheel-system).
 	GitAutoSync GitAutoSync `json:"git_auto_sync,omitempty"`
 
+	// Optional. Tunables for the in-cluster buildkitd daemon that runs every
+	// image build (flywheel-system).
+	Build Build `json:"build,omitempty"`
+
 	// Optional. Declares the sibling app repos this cluster's dev loop needs,
 	// one entry per worktree under paths.workspaces_root. The single source of
 	// truth for `up`-clone and the local-only guard (see the 2026-06-17
@@ -166,6 +170,33 @@ func (f *File) GitAutoSyncMemoryLimit() string {
 		return l
 	}
 	return DefaultGitAutoSyncMemoryLimit
+}
+
+// Build holds tunables for the in-cluster buildkitd daemon. Every build Job is
+// a thin client; the daemon does the work, so its limits are the build limits.
+type Build struct {
+	// MemoryLimit is the buildkitd container memory limit. One daemon runs all
+	// builds, so the largest single build sets the floor. A large Next.js
+	// monorepo build peaks around 8Gi of process memory; at the 4Gi default it
+	// is not OOMKilled but thrashes at the limit and stalls instead of failing.
+	// Optional; defaults to
+	// DefaultBuildMemoryLimit via File.BuildMemoryLimit(). A Kubernetes memory
+	// quantity (4Gi, 12Gi…).
+	MemoryLimit string `json:"memory_limit,omitempty"`
+}
+
+// DefaultBuildMemoryLimit is the buildkitd memory limit when build.memory_limit
+// is unset — the historical baked-in value, kept so existing repos behave
+// identically.
+const DefaultBuildMemoryLimit = "4Gi"
+
+// BuildMemoryLimit returns the configured buildkitd memory limit, or the
+// default ("4Gi") when unset.
+func (f *File) BuildMemoryLimit() string {
+	if l := strings.TrimSpace(f.Build.MemoryLimit); l != "" {
+		return l
+	}
+	return DefaultBuildMemoryLimit
 }
 
 // Workspace declares the sibling app repos this cluster depends on, keyed by
@@ -400,6 +431,10 @@ func Validate(f *File) error {
 	// git-server limit; reject typos before rendering a Deployment patch.
 	if l := strings.TrimSpace(f.GitAutoSync.MemoryLimit); l != "" && !memoryQuantityRe.MatchString(l) {
 		es = append(es, ValidateError{"git_auto_sync.memory_limit", fmt.Sprintf("%q is not a valid memory quantity (e.g. 128Mi, 512Mi, 1Gi)", l)})
+	}
+	// build.memory_limit: same quantity contract, for the buildkitd patch.
+	if l := strings.TrimSpace(f.Build.MemoryLimit); l != "" && !memoryQuantityRe.MatchString(l) {
+		es = append(es, ValidateError{"build.memory_limit", fmt.Sprintf("%q is not a valid memory quantity (e.g. 4Gi, 8Gi, 12Gi)", l)})
 	}
 
 	// workspace.repos: each entry needs a dir-safe name, exactly one of

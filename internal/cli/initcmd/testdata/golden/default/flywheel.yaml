@@ -55,6 +55,15 @@ git_auto_sync:
   # restarts. Applied to the running cluster on the next `flywheel up`.
   memory_limit: 256Mi
 
+build:
+  # Memory limit for buildkitd, the one in-cluster daemon that runs every image
+  # build. The largest single build sets the floor: a build that needs more is
+  # not OOMKilled, it thrashes at the limit and stalls, so its build Job looks
+  # stuck. 4Gi suits most services; a large Next.js monorepo build peaks around
+  # 8Gi, so raise this (e.g. 12Gi) for such builds. It is a ceiling, not a
+  # reservation. Applied to the running cluster on the next `flywheel up`.
+  memory_limit: 4Gi
+
 # workspace:
 #   # Sibling app repos this cluster's dev loop needs, one entry per worktree
 #   # under paths.workspaces_root. `flywheel up` clones any that are missing;
